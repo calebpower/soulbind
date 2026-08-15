@@ -130,3 +130,57 @@ price.
 
 This is exactly what §2's mutation-check rule exists to catch, and it caught it
 on the first guard where it could have mattered.
+
+---
+
+## Phase 1
+
+### 1.1 — Link-code normalisation rejects, never repairs
+
+The alphabet excludes `0`/`O` and `1`/`I`/`L` precisely because people misread
+them. It is therefore tempting to *map* a typed `O` onto some alphabet
+character, since the user has clearly misread something.
+
+**Rejected.** Which character they misread is unknowable, and a wrong guess does
+not fail — it silently produces a *different well-formed code*, which may belong
+to somebody else. Rejection asks the user to retype; repair risks redeeming the
+wrong link.
+
+An earlier draft had both `Q` in the alphabet and a rule mapping `Q` onto `D`,
+which would have corrupted every code containing `Q`. Removing the repair layer
+removed the bug with it.
+
+### 1.2 — A tautological test, caught by mutation-checking
+
+`LinkCodeTest` had a test asserting that under a Turkish default locale,
+`"bcdfi345"` is rejected. It passed. It also passed when normalisation was
+deliberately made locale-*sensitive*.
+
+The reason: Turkish maps `i` to `İ` rather than `I`, and **both are outside the
+alphabet**, so a locale-sensitive implementation rejects exactly the same inputs
+as a correct one. The test could not distinguish the bug from its absence — a
+tautology wearing a locale costume, which is the failure mode the methodology
+names explicitly ("matching the test's own fixture").
+
+Replaced with a test that asserts what it can actually observe — every alphabet
+character survives uppercasing under `tr-TR`, `az-AZ` and `lt-LT` — and that
+**names what it does not prove**, pointing at why. The locale-independent
+uppercase stays in `LinkCode` as correct defensive practice; it is simply not
+claimed by a test that cannot see it.
+
+*Verified after rewriting:* a real mutation (dropping a character from the
+alphabet) is caught.
+
+### 1.3 — Signing separator is a newline, and fields are validated against it
+
+`RequestSigner` joins `(timestamp, nonce, body)` with `\n`. Concatenating
+without a separator would let `("12", "3…")` and `("123", "…")` produce
+identical signed bytes — a canonicalisation collision, which is signature
+forgery in disguise.
+
+The nonce is rejected if it contains the separator; the body is not, because it
+is last and no boundary can be shifted by its content.
+
+Comparison uses `MessageDigest.isEqual`, not `String.equals`: string comparison
+returns early at the first differing character, and that timing difference is
+enough to recover a signature byte by byte.

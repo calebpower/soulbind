@@ -1,0 +1,55 @@
+# Dependency catalogue.
+#
+# One place versions are decided, so a bump is one diff and the licence guard
+# has one list to read. Every entry carries its licence, because §16 makes
+# packaging a design decision rather than an afterthought:
+#
+#   - Apache-2.0 / MIT / BSD  : normal use, may be shaded
+#   - EPL dual-licensed       : taken under Apache-2.0
+#   - LGPL                    : NEVER shaded; ships beside the fat jar so the
+#                               operator can replace it, which is what satisfies
+#                               the relink requirement in practice
+
+[versions]
+javalin = "6.4.0"
+jackson = "2.18.2"
+hikari = "6.2.1"
+flyway = "11.1.0"
+sqlite = "3.47.2.0"
+mariadb = "3.5.1"
+slf4j = "2.0.16"
+logback = "1.5.15"
+junit = "5.11.4"
+toml = "0.7.2"
+
+[libraries]
+# --- HTTP + WebSocket (Apache-2.0; Jetty beneath it is EPL-2.0/Apache-2.0
+#     dual, taken under Apache-2.0) ---
+javalin = { module = "io.javalin:javalin", version.ref = "javalin" }
+
+# --- JSON (Apache-2.0) ---
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+
+# --- Persistence ---
+# HikariCP: Apache-2.0
+hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
+# Flyway community: Apache-2.0
+flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-mysql = { module = "org.flywaydb:flyway-mysql", version.ref = "flyway" }
+# xerial sqlite-jdbc: Apache-2.0
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
+# MariaDB Connector/J: LGPL-2.1. NEVER SHADED. Declared runtimeOnly and shipped
+# in lib/ beside the fat jar, replaceable by the operator.
+mariadb-jdbc = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb" }
+
+# --- Config (Apache-2.0) ---
+toml = { module = "org.tomlj:tomlj", version.ref = "toml" }
+
+# --- Logging ---
+# slf4j: MIT. logback: EPL-1.0/LGPL-2.1 dual, unmodified and unbundled.
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+
+[bundles]
+jackson = ["jackson-databind", "jackson-jsr310"]
