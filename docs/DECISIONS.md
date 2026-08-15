@@ -524,3 +524,115 @@ failed. A green result is evidence only if the thing ran; so is a red one.
 The three findings together — Phase 0's UP-TO-DATE task, 1.18's aborted build,
 and these — are all the same error: trusting an absence of failure without
 establishing that anything looked.
+
+### 1.26 — One dispatcher, two transports
+
+Two transports ship because connectors come in two shapes: a daemon holds a
+socket open and authenticates once; a connector that exists only while serving a
+request cannot hold anything open, so each of its requests stands alone and is
+signed.
+
+`Dispatcher` knows about neither. It takes a schema version, an operation name,
+a credential and a payload, and returns a `WireResponse`. That is what lets both
+transports share one authorization path instead of growing two that diverge —
+and it is what makes authorization testable without standing up a server.
+
+The order inside it is fixed and deliberate: **schema, then credential, then
+operation, then capability.** An unknown operation is reported only to a caller
+that already authenticated; handed to an anonymous caller it is a free oracle
+for probing which operations a build supports.
+
+### 1.27 — Refusals are HTTP 200 with the reason in the envelope
+
+A protocol refusal is not a transport failure. Mapping refusals onto status
+codes gives every intermediary — proxy, CDN, corporate filter — an opinion about
+them, and the first time one acts on that opinion the failure looks like
+soulbind's.
+
+`unknown-credential` covers absent, blank and unrecognised credentials alike.
+Distinguishing them tells an attacker whether a token they guessed exists; the
+operator-facing detail belongs in the audit log, not in a reply to whoever
+asked.
+
+### 1.28 — Replay protection is two halves, and the window is symmetric
+
+The timestamp window bounds how long a captured request is useful; the nonce
+store makes it useful only once inside that window. Neither alone is enough.
+
+The window rejects timestamps far in the **future** as well as the past. A
+one-sided check would let a captured request be given a distant timestamp and
+stay replayable indefinitely — the window with its lid off.
+
+Freshness and single-use are checked **before** the signature, because the
+signature is a keyed hash over the whole body and verifying it first would let
+anyone force unbounded HMAC work with no credential at all. The cost is that a
+caller learns "stale" before "bad signature", which is not worth defending: the
+timestamp is a value they supplied and the clock is not a secret.
+
+`NonceStore.recordIfNew` is `putIfAbsent`, not check-then-act. Two requests
+carrying the same nonce can arrive on different threads at the same moment, and
+a check-then-act lets both through — which is the replay it exists to stop, and
+only under load, which is when somebody is most likely to be trying.
+
+**Stated narrowing:** at its ceiling the store refuses rather than evicting. A
+sustained flood of unique nonces therefore degrades into refusing legitimate
+signed requests. That is the correct trade for an authentication control — the
+alternative, evicting live entries, is a replay window an attacker can open on
+demand — and it is named here rather than discovered.
+
+### 1.29 — `hello` answers with the intersection, not the claim
+
+A connector declares what it claims; core answers with what the credential was
+actually granted. Claiming a capability does not grant it, and the connector
+learns the truth at handshake rather than one refusal at a time.
+
+**Caught by mutation-checking, and the round-trip test could not see it.** The
+test's connector claimed exactly what it held, so "the claim" and "the
+intersection" were the same list, and removing `retainAll` passed unnoticed. A
+second test now claims strictly more than it holds — and asserts not only that
+the extra capability is absent from the answer but that it genuinely does not
+work, which is the property the answer is describing.
+
+Unrecognised claimed names come back in `ignored` rather than being dropped. A
+connector built against a newer protocol should be able to see that.
+
+### 1.30 — A nonce with a newline cannot be tested over HTTP
+
+`RequestSigner` refuses a nonce containing the field separator, because escaping
+it would let two different `(nonce, body)` pairs canonicalise identically — a
+signature forgery wearing a helpful hat.
+
+That refusal **cannot be reached over HTTP**: `java.net.http` refuses to build a
+request with a newline in a header value, and so does every conformant stack,
+because header injection is the reason. The test was moved to
+`SignedRequestVerifierTest`, where it is reachable, and its absence from the
+HTTP suite is named there so it reads as a decision rather than an oversight.
+The defence is not theoretical — the socket transport and the PHP client both
+build the canonical form themselves.
+
+### 1.31 — `StorageBackends.any()`, so a test need not name a backend
+
+The storage seam guard fired on the transport tests, which named `Backend.SQLITE`
+directly. The catch was correct and the fix was not an exemption: those tests
+genuinely do not care which backend they get — signing and replay are
+backend-independent — so naming one gave them compile-time knowledge of which
+database is in use for no reason.
+
+`any()` says what is actually meant. Parameterising them over both backends
+instead would multiply runtime to re-prove what the storage tests already cover.
+
+### 1.32 — The transport seam guard
+
+No HTTP or WebSocket type outside `core/transport` or `sdk/transport`. The
+failure it prevents is specific: authorization or replay logic that can only be
+exercised by standing up a server. Such logic still works — it just cannot be
+tested cheaply, so it is tested less, so it is where the bugs go.
+
+Exempted on the **package** path, so each transport's own tests are covered by
+the same exemption, for the reason established in 1.7. Comments are stripped
+before matching, the same stated narrowing as 1.8.
+
+*Mutation-checked* along with the rest of the transport layer: one-sided
+timestamp window, replay check removed, signature never checked, nonce store
+back to check-then-act, authorization result ignored, schema accepted blindly,
+and an unauthenticated socket left open. All caught.

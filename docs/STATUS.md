@@ -26,10 +26,10 @@ Last updated: 2026-08-15, Phase 1 in progress.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 383 tests, green.
+ordinary one and `charsetHostilityTest` — across 416 tests, green.
 
-Real behaviour exists now, but nothing links anything yet: there is no transport,
-so no connector can say `hello`. What runs is the storage seam against SQLite
+Real behaviour exists now, though nothing links anything yet — that is Phase 2.
+A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite
 (MariaDB skips without `SOULBIND_TEST_MARIADB_URL`), link-code normalisation,
 HMAC request signing, credential minting, the authorization matrix, and the
 shared TOML configuration loader with core's schema on top of it.
@@ -116,7 +116,7 @@ registered connector can hello + heartbeat over both transports.*
 |---|---|
 | Matrix green | **Met.** 220 rows: every operation × every capability, plus none, all, suspended, and no credential |
 | Fuzz clean on both backends | Not started — T7 harness outstanding |
-| hello + heartbeat over both transports | Not started — no transport exists yet |
+| hello + heartbeat over both transports | **Met.** Asserted end-to-end against a running server on every available backend, over the socket and the signed request transport |
 
 Outstanding Phase 1 deliverables: WebSocket and webhook/poll transports, `hello`/heartbeat, audit query API, `soulbind-admin`
 bootstrap, `soulbind doctor`, T2 DTO wire conformance, the audit-immutability
@@ -130,6 +130,7 @@ guard, T6 migration idempotence on both backends, and the T7 fuzz harness.
 | Release level | Declared convention *and* emitted bytecode, per module |
 | Dependency graph | No YAML parser; no copyleft artifact shaded |
 | Storage seam | No SQL, JDBC type or backend-conditional branch outside `core/storage` |
+| Transport seam | No HTTP or WebSocket type outside the transport packages |
 | TOML entry point | Exactly one module declares a TOML parser |
 | Release-level coverage | Every module in `settings.gradle.kts` has a declared release level |
 | Protocol doc sync | `docs/protocol.md`'s operation and capability tables match the code, both directions |

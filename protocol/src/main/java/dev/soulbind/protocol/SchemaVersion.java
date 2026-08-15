@@ -17,10 +17,33 @@
 package dev.soulbind.protocol;
 
 /**
- * Placeholder for the protocol schema version constant (specification §7). Phase 1 gives it content.
+ * The protocol schema version carried on every message.
+ *
+ * <p>A peer that receives a major version it does not know <b>refuses with a
+ * reason</b>. It never negotiates downward and never guesses: a silent
+ * downgrade lets two peers disagree about what a message means while both
+ * appear to be working, and the disagreement surfaces as corrupted state much
+ * later, somewhere else.
  */
 public final class SchemaVersion {
+
+    /** The version this build speaks. */
+    public static final int CURRENT = 1;
+
     private SchemaVersion() {
         throw new AssertionError("no instances");
+    }
+
+    /**
+     * Whether a received version can be handled.
+     *
+     * <p>Exact equality, deliberately, for as long as there is one version.
+     * "Accept anything less than or equal to CURRENT" is a compatibility policy,
+     * and adopting one before there is a second version to be compatible with
+     * means adopting it untested — the first real version bump would be the
+     * first time the branch ever ran.
+     */
+    public static boolean isSupported(int schema) {
+        return schema == CURRENT;
     }
 }

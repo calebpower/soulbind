@@ -40,18 +40,21 @@ import org.junit.jupiter.params.provider.Arguments;
  * this: MariaDB coverage on a workstation with no MariaDB. It does not excuse
  * a failure on either backend, and the full-stack battery runs both.
  */
-final class StorageBackends {
+// Public so the transport tests can drive the same backends. A second copy of
+// this logic would be a second definition of "which backends run", and the two
+// would answer differently the first time one was updated.
+public final class StorageBackends {
 
     private StorageBackends() {
         throw new AssertionError("no instances");
     }
 
-    static String mariadbUrl() {
+    public static String mariadbUrl() {
         String url = System.getenv("SOULBIND_TEST_MARIADB_URL");
         return (url == null || url.isBlank()) ? null : url;
     }
 
-    static boolean mariadbAvailable() {
+    public static boolean mariadbAvailable() {
         return mariadbUrl() != null;
     }
 
@@ -60,7 +63,7 @@ final class StorageBackends {
      *
      * @param tempDir a per-test directory, so SQLite files never leak between tests
      */
-    static Storage open(Backend backend, Path tempDir) {
+    public static Storage open(Backend backend, Path tempDir) {
         return switch (backend) {
             case SQLITE -> Storage.open(
                     Backend.SQLITE,
@@ -75,8 +78,24 @@ final class StorageBackends {
         };
     }
 
+    /**
+     * Any one backend, for a test that needs storage but does not depend on
+     * which.
+     *
+     * <p>Exists so such a test does not have to NAME a backend. The transport
+     * tests are the case: signing and replay machinery is backend-independent,
+     * so parameterising them over both would multiply runtime to re-prove
+     * something the storage tests already cover — but naming one would give a
+     * test compile-time knowledge of which database is in use, which is exactly
+     * what the storage seam guard exists to prevent. Asking for "any" says what
+     * is actually meant.
+     */
+    public static Backend any() {
+        return (Backend) available().findFirst().orElseThrow().get()[0];
+    }
+
     /** The backends available in this environment. Always at least SQLite. */
-    static Stream<Arguments> available() {
+    public static Stream<Arguments> available() {
         return mariadbAvailable()
                 ? Stream.of(Arguments.of(Backend.SQLITE), Arguments.of(Backend.MARIADB))
                 : Stream.of(Arguments.of(Backend.SQLITE));

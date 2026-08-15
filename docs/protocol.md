@@ -130,6 +130,120 @@ same capability model. **One capability table, one authorization matrix, no
 second code path** — that is what keeps the rule from existing in two copies
 that drift.
 
+## Transports
+
+Two ship, because connectors come in two shapes. Both carry the same protocol
+and are served by **one dispatcher** — nothing about authorization, operation
+resolution or refusal wording lives in either transport, which is what stops
+them developing different ideas about who may do what.
+
+| | Socket | Signed request |
+|---|---|---|
+| Path | `/v1/socket` | `/v1/rpc` |
+| For | Daemons that stay running | Connectors that exist only while serving a request |
+| Authenticates | Once, at connect | Every request, independently |
+| Credential | `Authorization: Bearer <token>` header | Same header, plus a signature |
+
+A socket that cannot present a valid credential is **closed**, not left open in
+an unauthenticated state: an open socket is a resource, and one that can never
+do anything is a resource an unauthenticated peer is holding.
+
+### Message shape
+
+Request:
+
+```json
+{"schema": 1, "op": "hello", "id": "<uuid>", "payload": { }}
+```
+
+Response:
+
+```json
+{"schema": 1, "id": "<uuid>", "ok": true,  "payload": { }}
+{"schema": 1, "id": "<uuid>", "ok": false, "error": {"code": "missing-capability",
+                                                     "message": "...",
+                                                     "capability": "code-entry"}}
+```
+
+`id` is chosen by the caller and echoed unchanged, so a response can be matched
+to its request on a multiplexed connection. It is never interpreted by the
+server — in particular it is **not** the idempotency key and **not** the replay
+nonce, which are separate things meaning separate things.
+
+An absent `payload` is equivalent to an empty one. A caller should not have to
+send `"payload": {}` to say nothing.
+
+### Refusals
+
+Every refusal carries a machine-readable `code`. A refusal without one forces
+the other side to match on prose, which breaks the first time the prose is
+improved.
+
+| Code | Meaning |
+|---|---|
+| `unknown-credential` | No credential, or one matching no registered connector |
+| `suspended` | Registered, but suspended |
+| `missing-capability` | Active, but lacking the capability; names it in `capability` |
+| `unknown-operation` | No such operation at this schema version |
+| `schema-mismatch` | A schema version this peer does not speak |
+| `malformed` | Unparseable, or a required field absent |
+| `bad-signature` | The signature did not match the body |
+| `stale-timestamp` | The signed timestamp fell outside the freshness window |
+| `replayed-nonce` | The nonce has been seen before inside the window |
+| `invalid-request` | Well-formed and permitted, but the content was rejected |
+| `internal` | A failure the caller did not cause. Deliberately opaque |
+
+**Every refusal is HTTP 200 with the reason in the envelope.** A protocol
+refusal is not a transport failure, and mapping refusals onto status codes gives
+every intermediary — proxy, CDN, corporate filter — an opinion about them.
+
+`unknown-credential` covers absent, blank and unrecognised credentials alike.
+Distinguishing them would tell an attacker whether a token they guessed exists.
+
+An `unknown-operation` refusal is only ever returned to a caller that already
+authenticated. Handed to an anonymous caller it would be a free oracle for
+probing which operations a build supports.
+
+### Replay protection
+
+Two halves, and both are required. The **timestamp window** bounds how long a
+captured request is useful; the **nonce store** makes it useful only once inside
+that window. A window without a nonce store lets a captured request be replayed
+freely until it expires; a nonce store without a window has to grow forever.
+
+The window is symmetric: a timestamp far in the *future* is refused too, or a
+captured request given a distant timestamp stays replayable indefinitely — the
+window with its lid off.
+
+Freshness and single-use are checked **before** the signature. The signature is
+a keyed hash over the whole body, so verifying it first would let anyone force
+unbounded work by posting large bodies with no credential at all. This does mean
+a caller learns "stale" before "bad signature"; that is not a disclosure worth
+defending, since the timestamp is a value the caller supplied and the clock is
+not a secret.
+
+When the nonce store reaches its ceiling it **refuses**. Fail closed: if it
+cannot prove a nonce is new, accepting on that basis would silently turn replay
+protection off exactly when something abnormal is happening.
+
+### `hello`
+
+A connector declares its name, the capabilities it claims, the platform kinds it
+speaks for, and the gates it enforces. That is the whole of what core learns —
+there is no registry of known integrations anywhere in the dispatcher, which is
+what lets a new one arrive without a dispatcher change.
+
+Core answers with the **intersection** of what was claimed and what the
+credential was granted at registration. Claiming a capability does not grant it;
+the connector learns what it actually holds at handshake rather than one refusal
+at a time. Claimed names core does not recognise come back in `ignored` rather
+than vanishing — a connector built against a newer protocol should be able to
+see that, and an operator reading a log should not have to guess why something
+is inert.
+
+Both `hello` and `heartbeat` return core's clock, so a connector can spot skew
+before that skew starts having its signed requests refused as stale.
+
 ## Linking
 
 Symmetric by construction. A `code-display` connector requests a code for an
