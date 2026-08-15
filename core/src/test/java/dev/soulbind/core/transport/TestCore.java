@@ -73,7 +73,9 @@ final class TestCore implements AutoCloseable {
 
         this.dispatcher = new Dispatcher(
                 authenticator,
-                CoreHandlers.build(storage.connectors(), codec, clock, (int) window.toSeconds()));
+                CoreHandlers.build(
+                        storage.connectors(), storage.audit(), codec, clock,
+                        (int) window.toSeconds()));
 
         this.server = new TransportServer(
                 dispatcher, codec, authenticator, window, new NonceStore(window), clock);

@@ -184,6 +184,27 @@ public final class StorageBackends {
         return (Backend) available().findFirst().orElseThrow().get()[0];
     }
 
+    /**
+     * A connection URL for a backend, without the caller having to name one.
+     *
+     * <p>Exists for the same reason as {@link #any()}: a test that needs a
+     * working config file needs a URL, and writing one by hand would put a
+     * backend name -- and a driver's URL scheme -- in a test whose subject is
+     * something else entirely. The storage seam guard fired on exactly that.
+     */
+    public static String jdbcUrlFor(Backend backend, Path tempDir) {
+        return switch (backend) {
+            case SQLITE -> "jdbc:sqlite:"
+                    + tempDir.resolve("soulbind-test.db").toString().replace('\\', '/');
+            case MARIADB -> mariadbUrl();
+        };
+    }
+
+    /** The name to write into a config file's {@code storage.backend}. */
+    public static String configNameFor(Backend backend) {
+        return backend.configName();
+    }
+
     /** The backends available in this environment. Always at least SQLite. */
     public static Stream<Arguments> available() {
         return mariadbAvailable()

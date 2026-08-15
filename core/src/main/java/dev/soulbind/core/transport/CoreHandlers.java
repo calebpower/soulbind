@@ -17,7 +17,13 @@
 package dev.soulbind.core.transport;
 
 import dev.soulbind.core.registry.Authorizer.Operation;
+import dev.soulbind.core.audit.AuditEntry;
+import dev.soulbind.core.audit.AuditQuery;
+import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
+import dev.soulbind.protocol.AuditEntryView;
+import dev.soulbind.protocol.AuditPushRequest;
+import dev.soulbind.protocol.AuditQueryRequest;
 import dev.soulbind.protocol.Capability;
 import dev.soulbind.protocol.ErrorCode;
 import dev.soulbind.protocol.HelloRequest;
@@ -25,6 +31,7 @@ import dev.soulbind.protocol.HelloResponse;
 import dev.soulbind.protocol.HeartbeatResponse;
 import dev.soulbind.protocol.SchemaVersion;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +53,11 @@ public final class CoreHandlers {
      * as unknown — the distinction matters to whoever is debugging it.
      */
     public static Map<Operation, Dispatcher.Handler> build(
-            ConnectorRepository connectors, Codec codec, Clock clock, int signatureWindowSeconds) {
+            ConnectorRepository connectors,
+            AuditRepository audit,
+            Codec codec,
+            Clock clock,
+            int signatureWindowSeconds) {
 
         Map<Operation, Dispatcher.Handler> handlers = new LinkedHashMap<>();
 
@@ -105,11 +116,81 @@ public final class CoreHandlers {
                         })
                         .toList())));
 
+        handlers.put(Operation.AUDIT_PUSH, (connector, payload) -> {
+            var request = codec.bind(payload, AuditPushRequest.class);
+            if (request.isEmpty() || request.get().action() == null
+                    || request.get().action().isBlank()) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "an audit entry must name an action");
+            }
+
+            // The actor is the CONNECTOR, decided here, never taken from the
+            // payload -- which is why AuditPushRequest has no actor field at
+            // all. A connector able to name its own actor could attribute its
+            // actions to another connector, or to a person, and an audit log
+            // whose attribution the subject controls is not evidence.
+            AuditEntry appended = audit.append(new AuditEntry(
+                    0L,
+                    clock.instant(),
+                    "connector:" + connector.id(),
+                    request.get().action(),
+                    request.get().subjectId(),
+                    request.get().identityRef(),
+                    request.get().gate(),
+                    request.get().detail()));
+
+            return WireResponse.ok(Map.of("sequence", appended.sequence()));
+        });
+
+        handlers.put(Operation.AUDIT_QUERY, (connector, payload) -> {
+            var request = codec.bind(payload, AuditQueryRequest.class);
+            if (request.isEmpty()) {
+                return WireResponse.error(
+                        ErrorCode.MALFORMED, "audit query could not be read");
+            }
+            AuditQueryRequest q = request.get();
+
+            // The limit is bounded by AuditQuery whatever arrives here, and the
+            // bounding is deliberately NOT done in this handler: putting it in
+            // the query type means every caller of the repository gets it,
+            // including ones written later that forget to ask.
+            List<AuditEntry> entries = audit.query(new AuditQuery(
+                    q.fromEpochSeconds() == null
+                            ? null : Instant.ofEpochSecond(q.fromEpochSeconds()),
+                    q.toEpochSeconds() == null
+                            ? null : Instant.ofEpochSecond(q.toEpochSeconds()),
+                    q.actor(),
+                    q.subjectId(),
+                    q.action(),
+                    q.limit() == null ? AuditQuery.DEFAULT_LIMIT : q.limit()));
+
+            return WireResponse.ok(Map.of(
+                    "entries",
+                    entries.stream().map(CoreHandlers::toView).toList()));
+        });
+
         return Map.copyOf(handlers);
+    }
+
+    private static AuditEntryView toView(AuditEntry entry) {
+        return new AuditEntryView(
+                entry.sequence(),
+                entry.at().getEpochSecond(),
+                entry.actor(),
+                entry.action(),
+                entry.subjectId(),
+                entry.identityRef(),
+                entry.gate(),
+                entry.detail());
     }
 
     /** The operations this build implements, for the doctor and for tests. */
     public static List<Operation> implemented() {
-        return List.of(Operation.HELLO, Operation.HEARTBEAT, Operation.CONNECTOR_LIST);
+        return List.of(
+                Operation.HELLO,
+                Operation.HEARTBEAT,
+                Operation.CONNECTOR_LIST,
+                Operation.AUDIT_PUSH,
+                Operation.AUDIT_QUERY);
     }
 }

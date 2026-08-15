@@ -254,6 +254,29 @@ audit, and emits events.
 
 Either side can be display or entry. **Core never knows the pairing.**
 
+## Audit
+
+`audit.push` appends a connector-sourced event; `audit.query` reads the log.
+They require **different** capabilities — `audit-source` and `config-management`
+respectively — because a connector that can write audit events should not
+thereby get a window onto everything else.
+
+**The actor is decided by core, never by the caller.** The push payload has no
+actor field at all: not "ignored if present", absent from the schema, so a
+payload naming one is refused rather than silently accepted. A connector able to
+name its own actor could attribute its actions to another connector, or to a
+person, and an audit log whose attribution the subject controls is not evidence
+of anything.
+
+Audit is **append-only in fact rather than in policy**: the storage interface
+exposes no update and no delete, so the capability to alter a recorded event
+does not exist for a caller to acquire. A guard asserts that no code path grows
+one, and that no migration mutates the table.
+
+Query limits are bounded server-side whatever is asked for. An unbounded audit
+query against a long-lived deployment is a way to exhaust memory from an
+authenticated endpoint, and "the caller asked nicely" is not a defence.
+
 ## Events
 
 At-least-once, idempotency-keyed, with per-connector cursors so a connector that

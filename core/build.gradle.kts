@@ -1,4 +1,14 @@
-plugins { id("soulbind.java-25") }
+plugins {
+    id("soulbind.java-25")
+    application
+}
+
+application {
+    // One entry point. doctor, register and serve are verbs on it rather than
+    // three scripts, so an operator has one thing to find and one --config flag
+    // to learn.
+    mainClass.set("dev.soulbind.core.cli.Main")
+}
 
 dependencies {
     // `api`, not `implementation`: core's own public signatures return protocol

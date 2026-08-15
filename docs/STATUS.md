@@ -26,7 +26,7 @@ Last updated: 2026-08-15, Phase 1 in progress.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 419 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
+ordinary one and `charsetHostilityTest` — across 449 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
 
 Real behaviour exists now, though nothing links anything yet — that is Phase 2.
 A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite
@@ -134,6 +134,7 @@ guard, T6 migration idempotence on both backends, and the T7 fuzz harness.
 | TOML entry point | Exactly one module declares a TOML parser |
 | Release-level coverage | Every module in `settings.gradle.kts` has a declared release level |
 | Protocol doc sync | `docs/protocol.md`'s operation and capability tables match the code, both directions |
+| Audit immutability | Nothing in production source or any migration mutates the audit table, and the repository declares no mutating method |
 
 Every one is paired with a deliberately-broken fixture and has been
 mutation-checked against the real tree, not only the fixture.

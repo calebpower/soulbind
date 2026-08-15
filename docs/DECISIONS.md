@@ -763,3 +763,105 @@ directory`.
 
 Flarum, Paper and Velocity are still Phase 8. The departure covers the run
 stage's arrival, not its scope.
+
+### 1.39 — Audit attribution is decided by core, and the DTO has no actor field
+
+`AuditPushRequest` carries no actor. Not "ignored if present" — absent from the
+schema, so a payload naming one is rejected by the codec's unknown-field
+handling rather than silently dropped. A connector that thought it had set the
+actor and had not would be worse off than one told no.
+
+The actor is `connector:<id>`, from the credential core authenticated. A
+connector able to name its own actor could attribute its actions to another
+connector, or to a person, and **an audit log whose attribution the subject
+controls is not evidence of anything.**
+
+*Mutation-checked, and the first attempt missed it.* Making the actor depend on
+`subjectId` passed, because the attribution test pushed a minimal entry with no
+subject. Both shapes are now asserted — a defect that forged the actor only when
+some other field was present would otherwise show up on neither.
+
+`audit.push` requires `audit-source`; `audit.query` requires
+`config-management`. Deliberately different: a connector that can *write* audit
+events should not thereby get a window onto everything else.
+
+### 1.40 — The audit-immutability guard, and the one thing it exempts
+
+No `UPDATE audit`, `DELETE FROM audit`, `TRUNCATE audit` or `DROP TABLE audit`
+in production source or in any migration, and no method on `AuditRepository`
+whose name suggests mutation. Both directions, because an interface can grow a
+method and an implementation can write SQL without one.
+
+**Exempted: `audit_seq`.** It holds one integer — the next sequence to hand out
+— and updating it is how a sequence is allocated. It records nothing that
+happened. The exemption covers exactly that table, and a test asserts both
+halves: that allocating does not read as rewriting, and that a real
+`DELETE FROM audit` still does. Stated as a test rather than a comment because
+a later reader would otherwise take the exemption for an oversight and "fix" it,
+breaking every append.
+
+**Narrowed to `src/main`, with the reason.** The guard fired on
+`AuditRepositoryTest`, which holds `"'; DROP TABLE audit; --"` — a hostile value
+in the test that proves the repository resists injection. A guard that fires on
+the test proving the defence works gets suppressed rather than obeyed. What this
+does not cover: a test deleting audit rows to mask a failure. The interface
+offers no way to, and reaching past it means raw JDBC in a test, which is
+visible in review in a way a quiet `delete()` would not be.
+
+### 1.41 — Three verbs, and everything else is an operation
+
+`soulbind doctor`, `register`, `serve`. Everything else an operator might want
+is an *operation* reachable through an admin credential under the same
+authorization table — not a second management surface with rules that drift from
+the first. That is the same reasoning that put the admin API under one
+capability table.
+
+`serve` runs the configuration checks before binding. A configuration that would
+fail `doctor` should not silently start: the failure it names would otherwise
+surface as a runtime symptom somewhere unrelated.
+
+`Main.run` takes its streams and returns an exit code rather than calling
+`System.exit`, so the tests assert outcomes instead of scraping a terminal. A
+command whose only interface is a terminal is a command nobody tests.
+
+### 1.42 — The doctor reports what to DO, and a check that cannot run is not a pass
+
+Every finding carries an action, not only a problem — a finding the reader has
+to research before they can act is a finding that gets ignored. Asserted: no
+finding may have a blank detail.
+
+A wildcard bind WARNS rather than fails: it is a legitimate deployment behind a
+reverse proxy, and the doctor's job is to make sure it was *chosen* rather than
+inherited. A password written into the config file also warns — "it will be
+committed by somebody eventually" — and the warning does not print the password
+it is warning about, which a test asserts.
+
+*Mutation-checked:* missing config treated as fine, doctor always exiting 0,
+the wildcard warning removed, duplicate connector names permitted, unrecognised
+capabilities silently dropped, and — the worst one — the credential **plaintext**
+stored where its hash belongs. All caught.
+
+### 1.43 — Two more tests that passed for the wrong reason
+
+Both found while writing them, both the same shape as 1.15.
+
+The unknown-key test appended a second `[server]` table, which makes the file
+invalid TOML — so it failed the config on a syntax error and would have kept
+passing with unknown-key detection deleted entirely. The typo now goes inside an
+existing table and the assertion names the expected message.
+
+The audit-wire helper signed with the wall clock while the server ran on a fixed
+one, putting every timestamp decades outside the freshness window. It failed
+loudly rather than passing, so it cost minutes rather than trust — but it is the
+same class: a test whose setup does not match the thing under test.
+
+### 1.44 — Test logging turned down so the fuzz seed is visible
+
+`fuzzTest` sets `showStandardStreams` for one reason: the seed line. At the
+pool's default DEBUG level that line arrives under two hundred lines of
+configuration dump, which defeats the point.
+
+`logback-test.xml` sets third-party libraries to WARN. **This silences nothing
+that matters:** warnings and errors still print, and a test failure is reported
+by the framework regardless of log level. soulbind's own logger stays at INFO —
+if core says something during a test, that is worth seeing.
