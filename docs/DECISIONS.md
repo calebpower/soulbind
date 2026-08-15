@@ -252,3 +252,173 @@ its own explanation would be routed around.
 So comments are stripped before matching. **This is a real narrowing:** a
 violation hidden inside a comment is not caught. It is also not a violation,
 because a comment does not execute. The reason covers exactly that.
+
+### 1.9 — Credentials are hashed with SHA-256, not bcrypt or argon2
+
+A credential is 32 bytes from `SecureRandom`, so it is not a passphrase and is
+not derived from one.
+
+Password-hashing functions exist to make *guessing* expensive for low-entropy
+human secrets. Against a uniformly random 256-bit token, guessing is not the
+threat — an attacker who can enumerate that space has already won elsewhere —
+and the work factor would be paid on every legitimate authenticated request, on
+every heartbeat, forever.
+
+What SHA-256 does buy is the property that matters here: a database disclosure
+yields nothing presentable.
+
+*Mutation-checked:* algorithm swapped to SHA-1, token shortened to 64 bits,
+padded non-URL-safe Base64, empty-credential check removed, and `hashesMatch`
+made to accept two nulls. All caught.
+
+### 1.10 — The authorization matrix restates the table by hand
+
+`AuthorizationMatrixTest` writes out all eighteen operation→capability rows
+independently rather than reading `Authorizer.table()`.
+
+Deriving the expectation from the thing under test would assert only that the
+code agrees with itself: a capability changed in error would be agreed with,
+not caught. The duplication is the point. Changing an operation's capability now
+requires editing the test too, which is the moment somebody decides rather than
+drifts.
+
+220 rows: every operation against every capability held singly, plus none, plus
+all, plus suspended, plus no credential at all.
+
+*Mutation-checked:* `code.redeem` pointed at the wrong capability,
+`identity.unlink` made unprivileged, the suspension check removed, and the
+refusal stopped naming the missing capability. All caught (9, 10, 18 and 90 row
+failures respectively).
+
+### 1.11 — `effector` is declared inert rather than left inert
+
+No operation requires the `effector` capability: an effector *receives* events
+and acknowledges them, and the specification's capability table lists it with no
+request operation of its own.
+
+Left implicit, an inert capability is indistinguishable from one somebody forgot
+to wire — an operator could grant it and get nothing, with no way to tell which
+it was. So the test names it in an `INTENTIONALLY_UNGATING` set and fails if any
+*other* capability grants nothing, and also fails if `effector` later starts
+granting something while still listed as inert. The set shrinks by a deliberate
+edit when the event-acknowledgement operation lands in Phase 4.
+
+### 1.12 — `audit.query` is mapped to `config-management`
+
+The specification adds audit query/export to the admin API without naming a
+capability for it (§7: "the same operation set exposed to admin credentials
+... plus audit query/export").
+
+There is no audit-read capability in the enum, and inventing one would be a
+protocol change made in passing. `config-management` is the capability an admin
+credential holds, so `audit.query` sits under it. Recorded here because it is an
+inference from the specification rather than something it states.
+
+### 1.13 — A charset-hostility test run, because UTF-8 tests cannot fail here
+
+**Found by mutation-checking, and the most valuable finding of Phase 1.**
+Replacing `getBytes(StandardCharsets.UTF_8)` with `getBytes()` in `Credentials`
+produced a **GREEN** run. So did the same mutation in `RequestSigner`.
+
+The cause: since JEP 400 this JVM's default charset *is* UTF-8, so the two
+spellings emit identical bytes and no assertion on this machine can tell them
+apart. The claim the tests were making — "encoded UTF-8, never platform-default"
+— was unobservable, which is to say untested, in exactly the way that reads as
+covered.
+
+The fix is a second Gradle task, `charsetHostilityTest`, which re-runs the tests
+tagged `charset` under `-Dfile.encoding=ISO-8859-1`. Under that JVM the two
+spellings diverge and the pinned vectors fail.
+
+**The narrowing, stated:** the tag selects only tests whose claim is about byte
+encoding. Running the whole suite under a hostile charset would be testing the
+JDK, not this code. Nothing else is excluded.
+
+The tagged tests also assert that the hostile charset *took effect* — if a
+future JDK ignores `file.encoding`, the task would silently become a duplicate
+of the ordinary run, and nothing would say so.
+
+This matters beyond tidiness: a digest taken over default-charset bytes differs
+between hosts, so a credential minted on one machine would fail to authenticate
+on another — but only for tokens containing non-ASCII, and only after both were
+in production.
+
+### 1.14 — `RequestSigner` shipped untested; T1 closes that
+
+The class landed in the protocol commit with no test class at all, while its own
+javadoc promised golden vectors "run twice, once under a hostile default
+charset". Phase 1's T1 covers "config/HMAC/canonicalization", so the tests belong
+now; the generated `vectors/` corpus remains Phase 2.
+
+Digests are pinned against three oracles outside this JVM — `openssl dgst`,
+PHP's `hash_hmac`, and Python's `hmac` — which agree with each other and with
+the Java implementation. The PHP one is the one that matters: it is the function
+the other implementation of this class will call.
+
+*Mutation-checked:* separator changed to `:`, canonical bytes taken over the
+platform default charset, hex uppercased, the nonce separator check removed, an
+absent body canonicalised as the literal `"null"`, and `verify` made to accept a
+truncated signature. All caught.
+
+### 1.15 — An empty-key test that passed for the wrong reason
+
+`assertThrows(IllegalArgumentException.class, () -> sign(new byte[0], ...))`
+passed with the precondition deleted, because `SecretKeySpec` also rejects an
+empty key. The test proved the JCE works, not that soulbind checks anything.
+
+Now the message is asserted, so the failure has to come from soulbind's own
+precondition. **What it still does not prove:** that a short-but-nonempty key is
+rejected. It is not — key length is a deployment concern, and `soulbind doctor`
+is where that check belongs. Said so in the test.
+
+### 1.16 — `protocol` became an `api` dependency of core
+
+`core` declared `implementation(project(":protocol"))` while returning protocol
+types from its own public signatures: `Authorizer.Operation.required()` is an
+`Optional<Capability>` and `ConnectorRecord.capabilities()` is a
+`Set<Capability>`.
+
+That understates the API surface — every consumer would have to re-declare
+protocol to use methods core already hands them. Corrected to `api`, which is
+also why the convention plugin picked `java-library` in Phase 0.
+
+Surfaced by the doc-sync guard needing to reflect over both, but the declaration
+was wrong independently of that.
+
+### 1.17 — The doc-sync guard reflects over the enum, not the source text
+
+`ProtocolDocSyncGuardTest` compares `docs/protocol.md`'s operations table
+against `Authorizer.Operation` **reflected**, not re-parsed from Java source. A
+source-text reading could agree with the document while both disagreed with the
+compiled behaviour.
+
+It is section-scoped rather than whole-file, because the capability table and
+the operations table share a row shape: a whole-file scan would pass on a
+document where each had been pasted over the other. And it asserts the parser
+read the expected number of rows, so a regex that silently matched nothing
+cannot make the comparison vacuous.
+
+**What it does not prove:** that the prose around the tables is accurate. No
+guard can. It proves the tables — the part a connector author codes against —
+cannot silently diverge.
+
+*Mutation-checked:* an operation added in code with no row, a row attributing
+`decide` to the wrong capability, the `attest` row deleted, `audit.push` made
+unprivileged in code only, and a capability added to the enum undocumented. All
+caught.
+
+### 1.18 — A mutation-check harness that read stale results
+
+Worth recording because it nearly produced a false "the guard does not fire".
+
+The harness ran `./gradlew :protocol:test :protocol:charsetHostilityTest` and
+read both tasks' XML. When `test` failed — which is the whole point of a
+mutation check — Gradle aborted the build before `charsetHostilityTest` ran, and
+the harness read the *previous* run's results as if they were current. Four
+mutations were scored against stale output.
+
+Fixed by deleting `build/test-results` before each run and passing `--continue`.
+The build was correct throughout; the measurement was not. This is the same
+shape as the Phase 0 finding where an UP-TO-DATE task reported success without
+looking, and the same lesson: a green result is only evidence if you can show
+the thing actually ran.

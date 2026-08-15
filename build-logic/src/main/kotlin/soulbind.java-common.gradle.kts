@@ -63,6 +63,46 @@ tasks.withType<Test>().configureEach {
     }
 }
 
+// The charset-hostility run.
+//
+// Code that hashes or signs must encode to UTF-8 explicitly, because a digest
+// taken over platform-default bytes differs between hosts and locks out every
+// credential minted on the other one. Tests assert that with pinned vectors --
+// but on this JVM the default charset IS UTF-8 (JEP 400), so `getBytes()` and
+// `getBytes(UTF_8)` produce identical bytes and the assertion cannot observe the
+// difference. Found by mutation-checking: replacing the explicit UTF-8 with the
+// platform default produced a GREEN run.
+//
+// So the tagged tests run a SECOND time under a default charset that is not
+// UTF-8. Under that JVM the two spellings diverge and the pinned vectors fail.
+// The tag is deliberately narrow: it selects only tests whose claim is about
+// byte encoding, because running the whole suite under a hostile charset would
+// be testing the JDK rather than this code.
+val charsetHostilityTest = tasks.register<Test>("charsetHostilityTest") {
+    description = "Re-runs @Tag(\"charset\") tests under a non-UTF-8 default charset."
+    group = "verification"
+
+    val testSourceSet = project.extensions.getByType<SourceSetContainer>().named("test").get()
+    testClassesDirs = testSourceSet.output.classesDirs
+    classpath = testSourceSet.runtimeClasspath
+
+    useJUnitPlatform { includeTags("charset") }
+
+    // Passed as a raw JVM arg rather than via systemProperty: file.encoding is
+    // read during JVM start-up, before anything Gradle could set afterwards.
+    jvmArgs("-Dfile.encoding=ISO-8859-1")
+
+    // The tagged tests read this and refuse to pass silently if the hostile
+    // charset did not actually take effect -- otherwise a future JDK that
+    // ignores file.encoding would turn this whole task into a second identical
+    // run, and nothing would say so.
+    systemProperty("soulbind.hostileCharset", "true")
+}
+
+tasks.named("check") {
+    dependsOn(charsetHostilityTest)
+}
+
 tasks.withType<Jar>().configureEach {
     // Reproducible archives: a rebuild of the same source produces the same
     // bytes, so a diff in a distributed artifact means a diff in the input.

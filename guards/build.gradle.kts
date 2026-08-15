@@ -4,6 +4,16 @@ plugins { id("soulbind.java-25") }
 // data -- source text, module metadata, dependency graphs -- and fails when a
 // seam has been crossed. It targets 25 because it never ships anywhere.
 
+dependencies {
+    // Test-only, and deliberately a real dependency rather than source-text
+    // scraping: the protocol-doc guard compares the DECLARED operation table in
+    // `Authorizer.Operation` against `docs/protocol.md`. Reflecting over the
+    // enum asserts the thing that actually runs; parsing the Java source would
+    // assert a second reading of it, and could agree with the document while
+    // both disagreed with the compiled behaviour.
+    testImplementation(project(":core"))
+}
+
 tasks.withType<Test>().configureEach {
     // The repository root, because a guard's subject is the whole tree.
     systemProperty("soulbind.repoRoot", rootProject.projectDir.absolutePath)

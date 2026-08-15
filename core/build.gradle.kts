@@ -1,7 +1,12 @@
 plugins { id("soulbind.java-25") }
 
 dependencies {
-    implementation(project(":protocol"))
+    // `api`, not `implementation`: core's own public signatures return protocol
+    // types -- Authorizer.Operation.required() is an Optional<Capability>, and
+    // ConnectorRecord.capabilities() is a Set<Capability>. Declaring that as
+    // `implementation` would understate the API surface, forcing every consumer
+    // to re-declare protocol to use methods core already hands them.
+    api(project(":protocol"))
 
     implementation(libs.javalin)
     implementation(libs.bundles.jackson)
