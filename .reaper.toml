@@ -28,27 +28,92 @@ cache = ["gradle"]
 
 [run]
 # ---------------------------------------------------------------------------
-# NARROWING, PHASE 0, WITH ITS REASON.
+# The second storage backend.
 #
-# There is no end-to-end battery yet. The full-stack tiers arrive in Phase 8,
-# and their images are pinned into `images` at that point.
+# Phase 1's gate asks for the fuzz tier clean on BOTH backends. No MariaDB
+# server is reachable from the workstation -- only a client is installed -- so
+# the second half cannot be proven there, and claiming it would be a lie no test
+# report would contradict, because a skipped backend leaves no failure behind.
 #
-# The run verb therefore states plainly that there is nothing to run and exits
-# 0. It does NOT pretend to have run something.
+# This is EARLIER than the plan schedules the run stage (§14 Phase 8 populates
+# it with the full battery). Deliberate, and much narrower: one image, two
+# tiers, no Flarum, no Paper, no Velocity. Recorded as departure 5.
 #
-# The reason covers exactly this: the *run* verb, at *this* phase, because the
-# battery does not exist. It narrows nothing else -- `build` runs the real
-# compile and the real test task, including every guard, and a failure there
-# fails the session.
+# `exec = "host"` for this verb alone, which is what the manifest schema
+# describes it for: the build needs a pinned toolchain image, and the run needs
+# the guest's own container engine -- and a toolchain image has no engine client
+# inside it. The first attempt ran the engine client from inside the toolchain
+# container and failed with `podman: not found`, which is that sentence
+# restated as an exit code.
 #
-# `pipefail` is set even here. reaper's `run.cmd` goes through a shell, dash has
-# no pipefail, and a masked failure would poison @pristine -- a trap worth not
-# learning twice, so the habit starts before there is a pipe to protect.
+# So: the engine starts MariaDB on the guest, then runs the SAME pinned
+# toolchain image against it over the host network. The toolchain digest is
+# repeated here rather than inherited, because `run.image` defaults to
+# `build.image` only under container execution and this verb is host execution.
 # ---------------------------------------------------------------------------
-cmd = "set -o pipefail; echo 'soulbind: no end-to-end battery yet (Phase 0; battery lands in Phase 8)'; exit 0"
+exec = "host"
 
-# Populated in Phase 8: mariadb, flarum, paper, velocity -- all digest-pinned.
-images = []
+cmd = """
+set -o pipefail
+set -e
+
+MARIADB=docker.io/library/mariadb@sha256:67873d30a17f6a9c331f06363b2fa15f38abca415529966d67c84f87f82439fe
+TOOLCHAIN=docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012526d6fb31cc78123c740ebdc1cfd2dced12
+
+# A run must not inherit a container the previous run left behind: it would be
+# serving the previous run's schema, and a green result would be about data
+# nobody in this session created.
+podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
+
+podman run -d --name soulbind-mariadb --network host \
+  -e MARIADB_ROOT_PASSWORD=soulbind-test \
+  -e MARIADB_DATABASE=soulbind \
+  "$MARIADB"
+
+# mariadbd accepts TCP before it is ready to serve, so starting the tests on
+# container-start produces a flaky failure that reads as a soulbind defect.
+# Failing loudly beats proceeding against a database that never came up -- a run
+# against a dead server is not a skip, it is a false negative.
+ready=0
+for i in $(seq 1 90); do
+  if podman exec soulbind-mariadb mariadb-admin ping -h 127.0.0.1 -uroot -psoulbind-test --silent >/dev/null 2>&1; then
+    echo "mariadb ready after ${i}s"
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$ready" -ne 1 ]; then
+  echo "mariadb did not become ready in 90s -- refusing to run tests against a dead database" >&2
+  podman logs soulbind-mariadb >&2 || true
+  exit 1
+fi
+
+# Both tiers, both backends. StorageBackends.available() now yields two, so
+# every parameterised storage and fuzz test runs twice instead of once.
+# $PWD, not a hardcoded path: /reaper/work is where the tree appears INSIDE
+# the toolchain container under container execution, and this verb runs on the
+# host, where that path does not exist. The first attempt hardcoded it and
+# podman failed with `statfs /reaper/work: no such file or directory`.
+echo "run: mounting $PWD"
+podman run --rm --network host \
+  -v "$PWD":/work -w /work \
+  -e SOULBIND_TEST_MARIADB_URL="jdbc:mariadb://127.0.0.1:3306/soulbind" \
+  -e SOULBIND_TEST_MARIADB_USER=root \
+  -e SOULBIND_TEST_MARIADB_PASSWORD=soulbind-test \
+  -e GRADLE_USER_HOME=/work/.gradle-run-home \
+  "$TOOLCHAIN" \
+  ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache :core:test :core:fuzzTest
+
+podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
+"""
+
+# mariadb 11.4 LTS, resolved 2026-08-15. A DIGEST, never a tag, for the same
+# reason as the build image: a tag is a mutable pointer, and a run whose
+# database silently changes underneath it is a run whose green means nothing.
+images = [
+    "docker.io/library/mariadb@sha256:67873d30a17f6a9c331f06363b2fa15f38abca415529966d67c84f87f82439fe",
+]
 
 [sync]
 # Build output, dependency caches and results. `out/` is where results come

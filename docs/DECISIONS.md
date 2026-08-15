@@ -698,3 +698,68 @@ replays with `SOULBIND_SEED`.
 
 Verified rather than assumed: two runs at the same seed print the same seed and
 the task genuinely re-runs; a run without one draws a different seed.
+
+### 1.37 — The second backend found four defects the first could not
+
+The first run with a real MariaDB was the most productive hour of Phase 1. None
+of these was visible on SQLite, and none was a MariaDB quirk — each was a real
+defect that SQLite's single-writer executor or per-test temp file had been
+hiding.
+
+**The storage suite was isolated only by accident.** Ten tests failed at once,
+every one because an earlier test's rows were still there — "a fresh log starts
+at 0" finding 2. SQLite gets a fresh file per `@TempDir`; a server-backed store
+gets nothing for free. `StorageBackends.open` now drops and recreates the schema
+for MariaDB, which also re-runs the migrations, so every test exercises them
+rather than only the first.
+
+Fixing that broke the idempotence test, correctly: it *reopens* its store on
+purpose and must get the rows back. `open` (clean) and `reopen` (same store) are
+now separate, because conflating them is what made the failure possible.
+
+**Audit sequence assignment was not atomic.** `SELECT COALESCE(MAX(seq),0)+1`
+then `INSERT`, inside a transaction, with a comment claiming the transaction
+prevented collisions. It did not — a SELECT takes no lock, so two appenders read
+the same maximum and one loses on the primary key. 200 concurrent appends
+produced **45** distinct sequences.
+
+Replaced with an allocator row updated in place: `UPDATE` takes an exclusive row
+lock, so a concurrent appender blocks until the first commits. Portable, so no
+dialect needs its own migration. A database-native auto-increment would also
+work and was rejected: the two dialects spell it differently, which would put
+the audit table's DDL in two files that must agree forever — and the per-dialect
+directories are for differences a dialect genuinely forces, not ones a choice
+here created.
+
+**The test that should have caught it swallowed the evidence.** The writer tasks
+were submitted and never checked, so 155 primary-key violations read as "45
+sequences" rather than "155 appends threw". `awaitTermination` returning true
+says the threads stopped, not that they succeeded. Every future is now checked.
+
+That is the same error as 1.18, 1.25 and 1.34: an absence of failure taken as
+evidence without establishing that anything looked. Four instances now, in four
+different disguises.
+
+**A WebSocket test misused the client.** Two `sendText` calls without awaiting
+the first — which `java.net.http.WebSocket` forbids, and which silently loses a
+message rather than throwing. It passed on the workstation and failed on the
+first Linux run.
+
+### 1.38 — Departure 5: the run stage lands early, and narrowly
+
+§14 populates `[run]` in Phase 8 with the full battery. It carries one image and
+two tiers now, because Phase 1's gate asks for the fuzz tier clean on *both*
+backends and no MariaDB is reachable from the workstation. Claiming the gate
+without it would have been a claim no test report could contradict — a skipped
+backend leaves no failure behind.
+
+`[run] exec = "host"`, which the manifest schema exists for: the build needs a
+pinned toolchain image, the run needs the guest's own container engine, and a
+toolchain image has no engine client inside it. The first attempt ignored that
+and failed with `podman: not found` — the schema's sentence restated as an exit
+code. The second hardcoded `/reaper/work`, which is where the tree appears
+*inside* the toolchain container, and failed with `statfs: no such file or
+directory`.
+
+Flarum, Paper and Velocity are still Phase 8. The departure covers the run
+stage's arrival, not its scope.

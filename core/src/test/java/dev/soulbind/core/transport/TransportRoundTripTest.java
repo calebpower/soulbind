@@ -185,12 +185,23 @@ class TransportRoundTripTest {
                     .buildAsync(URI.create(core.socketUrl()), collector)
                     .get(20, TimeUnit.SECONDS);
 
+            // Each send is awaited before the next begins. java.net.http.WebSocket
+            // forbids invoking sendText again before the previous one completes,
+            // and violating it silently loses a message rather than throwing.
+            //
+            // Found in a session, not here: the unchained version passed on the
+            // workstation for months of wall-clock and failed on the first Linux
+            // run. A timing-dependent misuse that happens to work is the kind of
+            // defect that only ever shows up on somebody else's machine.
             socket.sendText(core.request("hello", """
                     {"connectorName":"test-connector","capabilities":["code-display"]}
-                    """), true);
-            socket.sendText(core.request("heartbeat", "{}"), true);
+                    """), true).get(20, TimeUnit.SECONDS);
+            socket.sendText(core.request("heartbeat", "{}"), true).get(20, TimeUnit.SECONDS);
 
-            assertTrue(collector.await(20), "no response over the socket");
+            assertTrue(
+                    collector.await(20),
+                    () -> "expected 2 responses over the socket, got "
+                            + collector.received());
 
             List<JsonNode> messages = collector.parsed(core.codec);
             assertEquals(2, messages.size());
@@ -277,6 +288,13 @@ class TransportRoundTripTest {
 
         boolean await(int seconds) throws InterruptedException {
             return expected.await(seconds, TimeUnit.SECONDS);
+        }
+
+        /** How many arrived, so a timeout says what it actually saw. */
+        int received() {
+            synchronized (messages) {
+                return messages.size();
+            }
         }
 
         boolean awaitClose(int seconds) throws InterruptedException {

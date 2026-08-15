@@ -24,12 +24,14 @@ import dev.soulbind.core.audit.AuditEntry;
 import dev.soulbind.core.audit.AuditQuery;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
@@ -184,9 +186,10 @@ class AuditRepositoryTest {
             ExecutorService pool = Executors.newFixedThreadPool(writers);
             CountDownLatch start = new CountDownLatch(1);
             Set<Long> assigned = new ConcurrentSkipListSet<>();
+            List<Future<?>> futures = new ArrayList<>();
             try {
                 for (int w = 0; w < writers; w++) {
-                    pool.submit(() -> {
+                    futures.add(pool.submit(() -> {
                         start.await();
                         for (int i = 0; i < perWriter; i++) {
                             assigned.add(storage.audit()
@@ -195,11 +198,21 @@ class AuditRepositoryTest {
                                     .sequence());
                         }
                         return null;
-                    });
+                    }));
                 }
                 start.countDown();
                 pool.shutdown();
                 assertTrue(pool.awaitTermination(60, TimeUnit.SECONDS), "writers did not finish");
+
+                // Every future is checked. Without this, a writer that threw was
+                // simply a writer that wrote nothing, and the run looked like
+                // fewer appends rather than like failures -- which is exactly how
+                // 155 primary-key violations read as "45 sequences" instead of
+                // "155 appends threw". awaitTermination returning true says the
+                // threads stopped, not that they succeeded.
+                for (Future<?> future : futures) {
+                    future.get(60, TimeUnit.SECONDS);
+                }
             } finally {
                 pool.shutdownNow();
             }
@@ -228,7 +241,12 @@ class AuditRepositoryTest {
         }
         // Reopening runs migrations again. If they were not idempotent this
         // either throws or silently drops the row written above.
-        try (Storage second = StorageBackends.open(backend, tempDir)) {
+        //
+        // reopen(), not open(): open() hands out a CLEAN store, which is what
+        // keeps tests from seeing each other's rows. Using it here would wipe
+        // the row this test just wrote and the assertion below would fail for a
+        // reason that has nothing to do with migrations.
+        try (Storage second = StorageBackends.reopen(backend, tempDir)) {
             List<AuditEntry> back = second.audit().query(AuditQuery.recent(10));
             assertEquals(1, back.size(), "reopening lost data, so migrations are not idempotent");
             assertEquals("before-reopen", back.get(0).action());

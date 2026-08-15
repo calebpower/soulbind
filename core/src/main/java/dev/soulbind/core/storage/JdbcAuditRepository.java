@@ -51,12 +51,35 @@ final class JdbcAuditRepository implements AuditRepository {
     @Override
     public AuditEntry append(AuditEntry entry) {
         return jdbc.write("audit.append", c -> {
-            // The sequence is read and written inside one transaction. On SQLite
-            // the single-writer executor also serialises this; on MariaDB the
-            // transaction is what prevents two appenders choosing the same seq.
+            // Allocated by UPDATE, not by SELECT MAX.
+            //
+            // The previous version read COALESCE(MAX(seq), 0) + 1 and claimed
+            // the surrounding transaction stopped two appenders choosing the
+            // same number. It did not: a SELECT takes no lock, so both read the
+            // same maximum and one loses on the primary key. It only ever looked
+            // correct because SQLite's single-writer executor serialised the
+            // whole append; the first run against a multi-writer backend
+            // produced 45 distinct sequences out of 200 appends.
+            //
+            // UPDATE takes an exclusive row lock. A concurrent appender blocks
+            // at its own UPDATE until this transaction commits, so the value
+            // read back below belongs to this appender alone.
+            try (PreparedStatement ps = c.prepareStatement(
+                    "UPDATE audit_seq SET next_seq = next_seq + 1 WHERE id = 1")) {
+                if (ps.executeUpdate() != 1) {
+                    // Refuse rather than fall back to MAX+1: a missing allocator
+                    // row means the schema is not what this code expects, and
+                    // silently guessing a sequence is how an audit log acquires
+                    // two entries with the same position.
+                    throw new java.sql.SQLException(
+                            "audit sequence allocator row is missing; the audit schema is not "
+                                    + "in the state this build expects");
+                }
+            }
+
             long next;
             try (PreparedStatement ps =
-                            c.prepareStatement("SELECT COALESCE(MAX(seq), 0) + 1 FROM audit");
+                            c.prepareStatement("SELECT next_seq FROM audit_seq WHERE id = 1");
                     ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 next = rs.getLong(1);

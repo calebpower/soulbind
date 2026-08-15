@@ -67,6 +67,52 @@ public final class StorageBackends {
         return switch (backend) {
             case SQLITE -> Storage.open(
                     Backend.SQLITE,
+                    // One file per @TempDir, which JUnit makes fresh per test
+                    // method -- so tests are isolated, and a test that REOPENS
+                    // its store gets the same one back.
+                    "jdbc:sqlite:" + tempDir.resolve("soulbind-test.db"),
+                    null,
+                    null);
+            case MARIADB -> {
+                // A server-backed store does NOT get a fresh file, so it has to
+                // be given a fresh schema explicitly.
+                //
+                // This was found the first time both backends actually ran: ten
+                // tests failed, every one of them because state from an earlier
+                // test was still there -- "a fresh log starts at 0" finding 2.
+                // The suite had been isolated only by ACCIDENT, by SQLite's
+                // per-test temp file, and nothing said so. On the backend that
+                // does not hand out fresh files, the accident stopped holding.
+                //
+                // Dropping and recreating is deliberate rather than truncating
+                // the tables: it also re-runs the migrations, so every test
+                // exercises them rather than only the first.
+                resetMariadbSchema();
+                yield Storage.open(
+                        Backend.MARIADB,
+                        mariadbUrl(),
+                        System.getenv("SOULBIND_TEST_MARIADB_USER"),
+                        System.getenv("SOULBIND_TEST_MARIADB_PASSWORD"));
+            }
+        };
+    }
+
+    /**
+     * Reopens the store {@link #open} last created, WITHOUT resetting it.
+     *
+     * <p>Separate from {@code open} because the two mean different things and
+     * conflating them broke a real test: {@code open} must hand out a clean
+     * store so tests do not see each other's rows, while a test asserting that
+     * migrations are idempotent must get the SAME store back, rows and all.
+     *
+     * <p>SQLite gets both for free from a per-test temp file. A server-backed
+     * store gets neither for free, which is why the distinction has to be
+     * written down rather than inferred.
+     */
+    public static Storage reopen(Backend backend, Path tempDir) {
+        return switch (backend) {
+            case SQLITE -> Storage.open(
+                    Backend.SQLITE,
                     "jdbc:sqlite:" + tempDir.resolve("soulbind-test.db"),
                     null,
                     null);
@@ -76,6 +122,50 @@ public final class StorageBackends {
                     System.getenv("SOULBIND_TEST_MARIADB_USER"),
                     System.getenv("SOULBIND_TEST_MARIADB_PASSWORD"));
         };
+    }
+
+    /**
+     * Drops and recreates the test schema.
+     *
+     * <p>Uses plain JDBC rather than going through the seam: this is test
+     * scaffolding, it lives in the storage package where knowing the backend is
+     * permitted, and asking the seam for "destroy everything" would be adding a
+     * destructive operation to production code so that a test could call it.
+     */
+    private static void resetMariadbSchema() {
+        String url = mariadbUrl();
+        int lastSlash = url.lastIndexOf('/');
+        String server = url.substring(0, lastSlash + 1);
+        String database = url.substring(lastSlash + 1);
+        int query = database.indexOf('?');
+        String options = "";
+        if (query >= 0) {
+            options = database.substring(query);
+            database = database.substring(0, query);
+        }
+        if (!database.matches("[A-Za-z0-9_]+")) {
+            // Refused rather than escaped: this string is interpolated into DDL,
+            // and a test helper that quietly accepts an injectable database name
+            // is a test helper somebody will later copy into something that runs
+            // against a real server.
+            throw new IllegalArgumentException(
+                    "refusing to reset a database whose name is not a plain identifier: "
+                            + database);
+        }
+
+        try (java.sql.Connection connection = java.sql.DriverManager.getConnection(
+                server + options,
+                System.getenv("SOULBIND_TEST_MARIADB_USER"),
+                System.getenv("SOULBIND_TEST_MARIADB_PASSWORD"));
+                java.sql.Statement statement = connection.createStatement()) {
+            statement.execute("DROP DATABASE IF EXISTS `" + database + "`");
+            statement.execute("CREATE DATABASE `" + database + "`");
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(
+                    "cannot reset the test schema at " + server + database
+                            + ". A test run against a database carrying another test's rows "
+                            + "proves nothing, so this fails rather than continuing.", e);
+        }
     }
 
     /**
