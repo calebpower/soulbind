@@ -1,0 +1,13 @@
+# Platform vocabulary allowlist (plan §5).
+#
+# This file starts EMPTY and should stay that way. Core learns platform kinds at
+# runtime from connector registration; it never enumerates them at compile time.
+#
+# Format:   <path-relative-to-repo-root>:<word>  # reason
+#
+# The reason must cover exactly what it narrows -- an entry that suppresses a
+# whole file behind a justification for one line is a bug in the justification
+# (methodology §2). An entry without a reason fails the guard.
+#
+# Every addition here is a permanent decision about what this project stops
+# noticing. Prefer changing the code.

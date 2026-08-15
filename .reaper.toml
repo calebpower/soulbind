@@ -1,0 +1,75 @@
+schema = 1
+project = "soulbind"
+
+# One guest for now. A second (a BSD, host-exec) becomes interesting only if
+# soulbind is ever claimed to run there, and claiming it without a battery
+# behind the claim is worse than not claiming it.
+guests = ["ubuntu-26.04"]
+
+# The toolchain arrives as a pinned image and the guest template stays generic.
+# The registered ubuntu-26.04 template deliberately ships no language
+# toolchains, which is why this is `container` rather than `host`.
+exec = "container"
+
+[build]
+# eclipse-temurin 25-jdk, resolved 2026-08-15. A DIGEST, never a tag: a tag is a
+# mutable pointer, and a build that silently changes compiler underneath itself
+# is a build whose green result means nothing.
+#
+# Re-pinning is a deliberate act with a dated note here, not a side effect of
+# somebody rebuilding on a Tuesday.
+image = "docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012526d6fb31cc78123c740ebdc1cfd2dced12"
+
+# `build` then `test` separately, so a compilation failure and a test failure
+# are distinguishable in the log rather than collapsing into one exit code.
+cmd = "./gradlew --no-daemon build -x test && ./gradlew --no-daemon test"
+
+cache = ["gradle"]
+
+[run]
+# ---------------------------------------------------------------------------
+# NARROWING, PHASE 0, WITH ITS REASON.
+#
+# There is no end-to-end battery yet. The full-stack tiers arrive in Phase 8,
+# and their images are pinned into `images` at that point.
+#
+# The run verb therefore states plainly that there is nothing to run and exits
+# 0. It does NOT pretend to have run something.
+#
+# The reason covers exactly this: the *run* verb, at *this* phase, because the
+# battery does not exist. It narrows nothing else -- `build` runs the real
+# compile and the real test task, including every guard, and a failure there
+# fails the session.
+#
+# `pipefail` is set even here. reaper's `run.cmd` goes through a shell, dash has
+# no pipefail, and a masked failure would poison @pristine -- a trap worth not
+# learning twice, so the habit starts before there is a pipe to protect.
+# ---------------------------------------------------------------------------
+cmd = "set -o pipefail; echo 'soulbind: no end-to-end battery yet (Phase 0; battery lands in Phase 8)'; exit 0"
+
+# Populated in Phase 8: mariadb, flarum, paper, velocity -- all digest-pinned.
+images = []
+
+[sync]
+# Build output, dependency caches and results. `out/` is where results come
+# back OUT of the guest, so syncing it in would be backwards.
+exclude = [
+    "/build/",
+    "/.gradle/",
+    "/build-logic/build/",
+    "/build-logic/.gradle/",
+    "/node_modules/",
+    "/vendor/",
+    "/out/",
+]
+
+[reset]
+# Only `state` is a rollback target. Nothing lives there yet -- the stack that
+# earns a @pristine snapshot arrives with the battery in Phase 8 -- but the
+# dataset is declared now so that the first thing to write state cannot
+# accidentally write it somewhere `reset` does not reach.
+datasets = ["state"]
+
+[resources]
+cores = 6
+ram_gb = 12

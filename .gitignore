@@ -1,0 +1,28 @@
+# Build output
+/build/
+**/build/
+/.gradle/
+/build-logic/.gradle/
+/build-logic/build/
+
+# Dependencies
+/node_modules/
+**/node_modules/
+/vendor/
+**/vendor/
+
+# Test and harness output. Results land here from a reaper session; they are
+# artifacts of a run, never inputs to one.
+/out/
+
+# Local tooling state
+.DS_Store
+*.swp
+.idea/
+*.iml
+.vscode/
+
+# Secrets never belong in the tree. Config carries environment-variable
+# overrides for exactly this reason.
+*.env
+/secrets/

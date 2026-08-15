@@ -1,0 +1,102 @@
+/*
+ * Copyright (c) 2026 Caleb L. Power
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.soulbind.guards;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+
+/**
+ * Reads the repository as data.
+ *
+ * <p>Every guard scans source text through this one helper so that the guard
+ * and its must-fail fixture exercise identical code. A fixture checked by a
+ * second, parallel implementation would prove only that the second
+ * implementation works.
+ */
+final class SourceTree {
+
+    private static final String SEP = java.io.File.separator;
+
+    private SourceTree() {
+        throw new AssertionError("no instances");
+    }
+
+    /**
+     * The repository root, supplied by the build (see guards/build.gradle.kts).
+     *
+     * <p>Deliberately not discovered by walking up from the working directory:
+     * that makes the guard's behaviour depend on where it was invoked from,
+     * which is exactly the kind of environment sensitivity that produces a
+     * guard passing for the wrong reason.
+     */
+    static Path repoRoot() {
+        String configured = System.getProperty("soulbind.repoRoot");
+        if (configured == null || configured.isBlank()) {
+            throw new IllegalStateException(
+                    "soulbind.repoRoot system property is not set. The guards read the "
+                            + "repository as data and cannot infer its location; see "
+                            + "guards/build.gradle.kts.");
+        }
+        Path root = Path.of(configured);
+        if (!Files.isDirectory(root)) {
+            throw new IllegalStateException("soulbind.repoRoot is not a directory: " + root);
+        }
+        return root;
+    }
+
+    /** Every {@code .java} file under the given directory, or empty if it does not exist. */
+    static List<Path> javaSourcesUnder(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return List.of();
+        }
+        try (Stream<Path> walk = Files.walk(dir)) {
+            List<Path> out = new ArrayList<>();
+            walk.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().endsWith(".java"))
+                    // build/ holds generated and copied output, not authored source. A guard
+                    // that scanned it would report the same violation twice and would fail
+                    // differently depending on whether the tree had been built.
+                    .filter(p -> !p.toString().contains(SEP + "build" + SEP))
+                    .forEach(out::add);
+            out.sort(Path::compareTo);
+            return out;
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot walk " + dir, e);
+        }
+    }
+
+    /** File contents as UTF-8. */
+    static String read(Path p) {
+        try {
+            return Files.readString(p, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot read " + p, e);
+        }
+    }
+
+    /** A path rendered relative to the repository root, for readable failure messages. */
+    static String rel(Path p) {
+        Path root = repoRoot();
+        return p.startsWith(root) ? root.relativize(p).toString() : p.toString();
+    }
+}

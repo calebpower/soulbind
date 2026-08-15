@@ -1,0 +1,2 @@
+# MUST-FAIL FIXTURE: this entry states no reason, which is not permitted.
+core/src/main/java/dev/soulbind/core/Something.java:discord
