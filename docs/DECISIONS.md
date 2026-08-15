@@ -184,3 +184,44 @@ is last and no boundary can be shifted by its content.
 Comparison uses `MessageDigest.isEqual`, not `String.equals`: string comparison
 returns early at the first differing character, and that timing difference is
 enough to recover a signature byte by byte.
+
+### 1.4 — SQLite's single-writer reality is handled at the seam, not by callers
+
+SQLite permits one writer. A connection pool does not make that untrue; it makes
+it *intermittent*, surfacing as `SQLITE_BUSY` under load rather than as a clear
+constraint.
+
+`Storage` therefore gives the SQLite backend a pool of one and serialises every
+write through a single-threaded executor, in WAL mode with a busy timeout. A
+caller who does not know which backend is in use cannot know to serialise — and
+the entire point of the seam is that they should not have to.
+
+MariaDB gets no such executor; forcing concurrent writers through one thread
+would discard the reason to run it.
+
+*Mutation-checked:* removing the executor and widening the pool makes
+`concurrentAppendsAreUnique` fail. The assertion is on the sequences **read back
+from storage**, never on how many calls returned successfully — the latter
+passes even when two writers collide.
+
+### 1.5 — NARROWING: MariaDB storage tests skip when no server is reachable
+
+`StorageBackends.available()` yields MariaDB only when
+`SOULBIND_TEST_MARIADB_URL` is set. On a workstation without a database server,
+storage tests run against SQLite alone.
+
+**The reason covers exactly this:** MariaDB coverage on a machine with no
+MariaDB. It does not excuse a failure on either backend, the skip is visible in
+the test report rather than silently passing, and the containerised battery
+supplies a server so both backends run there. The specification requires both,
+and both run where both can.
+
+### 1.6 — Audit detail that cannot be serialised is recorded, not dropped
+
+If a detail map fails to serialise, the entry is still appended with a
+`_detailSerialisationFailed` marker in place of the detail.
+
+Neither alternative is acceptable: dropping the detail silently makes the audit
+log lie by omission, and failing the append means a serialisation bug can
+prevent a security-relevant event being recorded at all. The reader sees that
+something was lost rather than assuming there was nothing to see.

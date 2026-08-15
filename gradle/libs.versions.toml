@@ -20,7 +20,7 @@ mariadb = "3.5.1"
 slf4j = "2.0.16"
 logback = "1.5.15"
 junit = "5.11.4"
-toml = "0.7.2"
+toml = "1.1.1"
 
 [libraries]
 # --- HTTP + WebSocket (Apache-2.0; Jetty beneath it is EPL-2.0/Apache-2.0
