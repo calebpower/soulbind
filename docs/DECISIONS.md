@@ -225,3 +225,30 @@ Neither alternative is acceptable: dropping the detail silently makes the audit
 log lie by omission, and failing the append means a serialisation bug can
 prevent a security-relevant event being recorded at all. The reader sees that
 something was lost rather than assuming there was nothing to see.
+
+### 1.7 — The storage seam guard exempts a PACKAGE, not a source set
+
+First run, the guard fired on eight real violations — all of them in the storage
+package's own tests, which name both backends (parameterising over them is their
+entire job) and hold a SQL-shaped value from the hostile-input corpus.
+
+The exemption had been written as `core/src/main/java/.../storage`, covering
+only `src/main`. Corrected to match the package path wherever it appears, so
+`src/test` is covered too.
+
+Had it been left as it was, the guard would have fired on the tests that prove
+the seam works — and a guard that fires on correct code gets suppressed rather
+than obeyed.
+
+*Mutation-checked twice:* SQL leaked into `core/audit`, and a branch on a
+backend name in `core/audit`. Both caught.
+
+### 1.8 — The seam guard reads code, not comments, and says so
+
+Prose explaining the seam necessarily mentions SQL and backend names — the
+READMEs and javadoc in this repository do it constantly. A guard that fired on
+its own explanation would be routed around.
+
+So comments are stripped before matching. **This is a real narrowing:** a
+violation hidden inside a comment is not caught. It is also not a violation,
+because a comment does not execute. The reason covers exactly that.
