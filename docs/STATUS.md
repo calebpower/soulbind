@@ -26,7 +26,7 @@ Last updated: 2026-08-15, Phase 1 in progress.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 416 tests, green.
+ordinary one and `charsetHostilityTest` — across 419 tests, green, including the seeded fuzz tier.
 
 Real behaviour exists now, though nothing links anything yet — that is Phase 2.
 A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite
@@ -115,7 +115,7 @@ registered connector can hello + heartbeat over both transports.*
 | Gate item | State |
 |---|---|
 | Matrix green | **Met.** 220 rows: every operation × every capability, plus none, all, suspended, and no credential |
-| Fuzz clean on both backends | Not started — T7 harness outstanding |
+| Fuzz clean on both backends | **Partly met.** The T7 harness exists, is corpus-driven, seeded and replayable, and is clean on SQLite. MariaDB is not reachable on this workstation, so the second half is unproven here — see below |
 | hello + heartbeat over both transports | **Met.** Asserted end-to-end against a running server on every available backend, over the socket and the signed request transport |
 
 Outstanding Phase 1 deliverables: WebSocket and webhook/poll transports, `hello`/heartbeat, audit query API, `soulbind-admin`

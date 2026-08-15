@@ -636,3 +636,65 @@ before matching, the same stated narrowing as 1.8.
 timestamp window, replay check removed, signature never checked, nonce store
 back to check-then-act, authorization result ignored, schema accepted blindly,
 and an unauthenticated socket left open. All caught.
+
+### 1.33 — The fuzz oracle is four properties, not "the right things are rejected"
+
+Many corpus values are perfectly legal and must succeed. An oracle of "this is
+rejected" would need a second implementation of every rule to compare against,
+and would be wrong wherever the two disagreed with no way to tell which.
+
+The four properties need no second implementation and hold for every input a
+caller can construct: never a 5xx; every response a well-formed envelope; never
+`internal` — an unhandled path reporting itself through the envelope rather than
+as a crash; and the server still answering afterwards, checked last against a
+request known to be good.
+
+*Mutation-checked:* a deliberate crash on operation names over 40 characters.
+Both fuzz tests caught it, naming the input.
+
+### 1.34 — The fuzz tier gets its own never-up-to-date task
+
+**The second instance of the Phase 0 defect, and it would have been invisible.**
+A fuzz run draws a fresh seed and explores inputs no previous run tried, so a
+cached success is a statement about a run that already happened. Gradle marked
+`:core:test` up-to-date and the second invocation explored nothing — which
+looked exactly like a passing fuzz run.
+
+`fuzzTest` therefore has `outputs.upToDateWhen { false }` and is wired into
+`check`.
+
+**Stated narrowing:** the `fuzz` tag is excluded from the default test task, so
+the tier runs once per build rather than twice. It covers exactly that tag, and
+`check` still runs it.
+
+Wiring it up produced a third instance of the same family: `configureEach`
+applied `excludeTags("fuzz")` to *every* Test task including `fuzzTest`, and
+JUnit resolves a tag that is both included and excluded as excluded — so
+`fuzzTest` ran **zero tests** and reported success. Caught only by counting tests
+run rather than reading the exit code. The exclusion is now conditional on the
+task name, and the comment says why.
+
+### 1.35 — Hostile credentials are fuzzed at the dispatcher, not over HTTP
+
+The first fuzz run reported 17 violations, every one of them
+`java.net.http: invalid header value` — my own test client refusing to build the
+request. Non-ASCII and control characters cannot appear in an HTTP header value
+at all, in any conformant stack.
+
+Fuzzing them there would measure the client, not the server. But the full value
+space *is* reachable through the dispatcher, which the socket transport and the
+PHP client both feed directly — so a second fuzz test drives the dispatcher with
+the whole corpus in the operation, credential and payload positions. The HTTP
+fuzz restricts the credential position to header-safe values, and says so.
+
+Same shape as 1.30: the defence is real, and it is tested where it can be
+exercised rather than where it cannot.
+
+### 1.36 — Seeds are printed on success as well as failure
+
+If the seed were printed only on failure, the first failure would be the first
+time anybody found out whether the printing worked. Every run prints; every run
+replays with `SOULBIND_SEED`.
+
+Verified rather than assumed: two runs at the same seed print the same seed and
+the task genuinely re-runs; a run without one draws a different seed.

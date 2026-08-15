@@ -49,7 +49,29 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
+    // Captured outside the closure: configureEach applies to EVERY Test task,
+    // including fuzzTest, and JUnit resolves a tag that is both included and
+    // excluded as excluded. Applying the exclusion unconditionally therefore
+    // made fuzzTest run zero tests -- a green run that fuzzed nothing.
+    val testTaskName = name
+
+    useJUnitPlatform {
+        // The fuzz tier is excluded from the DEFAULT test task and run by
+        // `fuzzTest` below instead. Two reasons, and the first is the one that
+        // matters: a fuzz run must never be skipped as up-to-date. A fresh seed
+        // explores something new every time, so "fuzz clean" reported from a
+        // cached result is a claim about whenever it last happened to run --
+        // which is exactly the failure Phase 0 found in the guards.
+        //
+        // The second is ordinary: running it in both tasks would fuzz twice per
+        // build for no added coverage.
+        //
+        // The narrowing covers exactly the `fuzz` tag. Nothing else is excluded,
+        // and fuzzTest is wired into `check`, so a normal build still runs it.
+        if (testTaskName != "fuzzTest") {
+            excludeTags("fuzz")
+        }
+    }
 
     // Every randomised tier prints its seed and accepts it back. Wiring the
     // environment variable through here means a failing run is replayable
@@ -99,8 +121,37 @@ val charsetHostilityTest = tasks.register<Test>("charsetHostilityTest") {
     systemProperty("soulbind.hostileCharset", "true")
 }
 
+// The fuzz tier.
+//
+// Its own task because it must NEVER be up-to-date: each run draws a fresh seed
+// and explores inputs no previous run tried, so a cached "success" is a
+// statement about a run that already happened rather than about this build.
+//
+// SOULBIND_SEED replays a specific run exactly. Every run prints its seed
+// whether it passed or failed, because a fuzz failure nobody can reproduce is a
+// fuzz failure nobody will fix -- and if the seed is only printed on failure,
+// the first failure is the first time anybody tests that the printing works.
+val fuzzTest = tasks.register<Test>("fuzzTest") {
+    description = "Runs the seeded fuzz tier. Never up-to-date; replay with SOULBIND_SEED."
+    group = "verification"
+
+    val testSourceSet = project.extensions.getByType<SourceSetContainer>().named("test").get()
+    testClassesDirs = testSourceSet.output.classesDirs
+    classpath = testSourceSet.runtimeClasspath
+
+    useJUnitPlatform { includeTags("fuzz") }
+    outputs.upToDateWhen { false }
+
+    testLogging {
+        // The seed line goes to stdout, and it is the whole point of the run.
+        showStandardStreams = true
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
 tasks.named("check") {
-    dependsOn(charsetHostilityTest)
+    dependsOn(charsetHostilityTest, fuzzTest)
 }
 
 tasks.withType<Jar>().configureEach {

@@ -50,6 +50,7 @@ import java.util.UUID;
 final class TestCore implements AutoCloseable {
 
     final Storage storage;
+    private final Dispatcher dispatcher;
     final TransportServer server;
     final Codec codec;
     final int port;
@@ -70,13 +71,18 @@ final class TestCore implements AutoCloseable {
         Authenticator authenticator = new Authenticator(storage.connectors());
         Duration window = Duration.ofSeconds(300);
 
-        Dispatcher dispatcher = new Dispatcher(
+        this.dispatcher = new Dispatcher(
                 authenticator,
                 CoreHandlers.build(storage.connectors(), codec, clock, (int) window.toSeconds()));
 
         this.server = new TransportServer(
                 dispatcher, codec, authenticator, window, new NonceStore(window), clock);
         this.port = server.start("127.0.0.1", 0);
+    }
+
+    /** The dispatcher, for tests that want it without a socket in the way. */
+    Dispatcher dispatcher() {
+        return dispatcher;
     }
 
     static Clock fixedClock() {
