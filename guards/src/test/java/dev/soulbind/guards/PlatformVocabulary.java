@@ -55,7 +55,12 @@ final class PlatformVocabulary {
             "paper", "spigot", "bedrock", "java edition");
 
     /** Modules whose source must never name a platform. */
-    static final List<String> GUARDED_MODULES = List.of("core", "protocol");
+    // `config` joins core and protocol beyond the specification's §5 wording,
+    // which names only those two. It is shared dispatcher-side infrastructure --
+    // a platform name in the config loader would be exactly the compile-time
+    // knowledge the seam exists to prevent, and the specification's reasoning
+    // covers it even though its list predates the module.
+    static final List<String> GUARDED_MODULES = List.of("core", "protocol", "config");
 
     private PlatformVocabulary() {
         throw new AssertionError("no instances");

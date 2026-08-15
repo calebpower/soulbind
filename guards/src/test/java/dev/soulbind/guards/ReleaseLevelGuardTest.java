@@ -17,6 +17,7 @@
 package dev.soulbind.guards;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -24,6 +25,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,12 +55,41 @@ class ReleaseLevelGuardTest {
      */
     private static final Map<String, Integer> EXPECTED_RELEASE = new LinkedHashMap<>() {{
         put("protocol", 21);           // depended on by the plugins
+        put("config", 21);             // shared loader; the lower floor is the one that holds
         put("connector-sdk", 21);      // depended on by the plugins
         put("connector-velocity", 21); // loads inside a proxy JVM
         put("connector-plan", 21);     // loads inside a server JVM
         put("core", 25);               // standalone service
         put("connector-discord", 25);  // standalone daemon
     }};
+
+    /**
+     * Modules the release table deliberately omits.
+     *
+     * <p>{@code guards} produces no production bytecode and ships nowhere. The
+     * exclusion covers exactly that module.
+     */
+    private static final java.util.Set<String> NOT_RELEASE_GOVERNED = java.util.Set.of("guards");
+
+    @Test
+    @DisplayName("every module in the build appears in the release table")
+    void tableCoversEveryModule() {
+        // Without this, adding a module and forgetting to add a row here would
+        // leave it entirely outside the guard -- green, and uncovered. That is
+        // the failure this whole guard exists to prevent, applied to itself.
+        java.util.List<String> uncovered = new java.util.ArrayList<>();
+        for (String module : SourceTree.allModules()) {
+            if (!EXPECTED_RELEASE.containsKey(module) && !NOT_RELEASE_GOVERNED.contains(module)) {
+                uncovered.add(module);
+            }
+        }
+        assertTrue(
+                uncovered.isEmpty(),
+                () -> "modules in settings.gradle.kts with no declared release level: "
+                        + uncovered + ". Decide the level deliberately -- a module that loads "
+                        + "inside a server operator's JVM and targets too high a release fails "
+                        + "at class-load time, far from its cause.");
+    }
 
     /** Class-file major version for a given Java release. */
     private static int majorFor(int release) {
@@ -98,25 +129,43 @@ class ReleaseLevelGuardTest {
             int expectedMajor = majorFor(e.getValue());
 
             Path classesDir = root.resolve(module).resolve("build/classes/java/main");
-            if (!Files.isDirectory(classesDir)) {
-                // Nothing compiled yet. Not a pass: say so, rather than let an
-                // unbuilt tree read as a green guard.
-                continue;
-            }
 
-            Path aClass = firstClassFile(classesDir);
-            if (aClass == null) {
-                continue;
-            }
+            // An unbuilt module is a FAILURE, not a skip.
+            //
+            // This previously did `continue`, with a comment saying an unbuilt
+            // tree must not read as a green guard -- while doing exactly that.
+            // The guards task now depends on every inspected module's `classes`
+            // task, so reaching here with nothing compiled means the dependency
+            // was dropped, and the honest report is that the guard could not
+            // look rather than that it looked and was satisfied.
+            assertTrue(
+                    Files.isDirectory(classesDir),
+                    () -> module + " has no compiled output at " + classesDir
+                            + ". The guard cannot inspect bytecode that does not exist; wire "
+                            + "the module into guards/build.gradle.kts rather than letting it "
+                            + "drop out of coverage.");
 
-            int actualMajor = classFileMajor(aClass);
-            assertEquals(
-                    expectedMajor,
-                    actualMajor,
-                    () -> ("%s emitted class-file major %d but must emit %d (Java %d). "
-                            + "A module that loads inside a server operator's JVM and targets "
-                            + "too high a release fails at class-load time, not at build time.")
-                            .formatted(module, actualMajor, expectedMajor, e.getValue()));
+            List<Path> classFiles = classFilesUnder(classesDir);
+            assertFalse(
+                    classFiles.isEmpty(),
+                    () -> module + " compiled to zero class files, so this module contributed "
+                            + "no evidence to the guard");
+
+            // Every class file, not a sample: one arbitrary class agreeing proves
+            // nothing about the rest, and a mixed-version output is exactly the
+            // kind of thing a sample misses.
+            for (Path classFile : classFiles) {
+                int actualMajor = classFileMajor(classFile);
+                assertEquals(
+                        expectedMajor,
+                        actualMajor,
+                        () -> ("%s emitted class-file major %d for %s but must emit %d "
+                                + "(Java %d). A module that loads inside a server operator's "
+                                + "JVM and targets too high a release fails at class-load "
+                                + "time, not at build time.")
+                                .formatted(module, actualMajor, SourceTree.rel(classFile),
+                                        expectedMajor, e.getValue()));
+            }
         }
     }
 
@@ -143,12 +192,12 @@ class ReleaseLevelGuardTest {
                         + "and prove nothing");
     }
 
-    private static Path firstClassFile(Path dir) {
+    private static List<Path> classFilesUnder(Path dir) {
         try (var walk = Files.walk(dir)) {
             return walk.filter(Files::isRegularFile)
                     .filter(p -> p.getFileName().toString().endsWith(".class"))
-                    .findFirst()
-                    .orElse(null);
+                    .sorted()
+                    .toList();
         } catch (IOException ex) {
             throw new UncheckedIOException("cannot walk " + dir, ex);
         }

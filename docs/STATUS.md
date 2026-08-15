@@ -26,12 +26,13 @@ Last updated: 2026-08-15, Phase 1 in progress.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 308 tests, green.
+ordinary one and `charsetHostilityTest` — across 383 tests, green.
 
 Real behaviour exists now, but nothing links anything yet: there is no transport,
 so no connector can say `hello`. What runs is the storage seam against SQLite
 (MariaDB skips without `SOULBIND_TEST_MARIADB_URL`), link-code normalisation,
-HMAC request signing, credential minting, and the authorization matrix.
+HMAC request signing, credential minting, the authorization matrix, and the
+shared TOML configuration loader with core's schema on top of it.
 
 **`charsetHostilityTest` re-runs the `charset`-tagged tests under
 `-Dfile.encoding=ISO-8859-1`.** It exists because this JVM's default charset is
@@ -117,8 +118,7 @@ registered connector can hello + heartbeat over both transports.*
 | Fuzz clean on both backends | Not started — T7 harness outstanding |
 | hello + heartbeat over both transports | Not started — no transport exists yet |
 
-Outstanding Phase 1 deliverables: TOML config loader, WebSocket and
-webhook/poll transports, `hello`/heartbeat, audit query API, `soulbind-admin`
+Outstanding Phase 1 deliverables: WebSocket and webhook/poll transports, `hello`/heartbeat, audit query API, `soulbind-admin`
 bootstrap, `soulbind doctor`, T2 DTO wire conformance, the audit-immutability
 guard, T6 migration idempotence on both backends, and the T7 fuzz harness.
 
@@ -130,7 +130,13 @@ guard, T6 migration idempotence on both backends, and the T7 fuzz harness.
 | Release level | Declared convention *and* emitted bytecode, per module |
 | Dependency graph | No YAML parser; no copyleft artifact shaded |
 | Storage seam | No SQL, JDBC type or backend-conditional branch outside `core/storage` |
+| TOML entry point | Exactly one module declares a TOML parser |
+| Release-level coverage | Every module in `settings.gradle.kts` has a declared release level |
 | Protocol doc sync | `docs/protocol.md`'s operation and capability tables match the code, both directions |
 
 Every one is paired with a deliberately-broken fixture and has been
 mutation-checked against the real tree, not only the fixture.
+
+Their module coverage is derived from `settings.gradle.kts` rather than
+hand-listed, so a new module is guarded the day it is created and has to be
+excluded deliberately, with a reason, rather than by omission.

@@ -14,7 +14,22 @@ dependencies {
     testImplementation(project(":core"))
 }
 
+// Modules whose COMPILED OUTPUT a guard inspects.
+//
+// The release-level guard reads class-file major versions, which only exist
+// after compilation. Without these dependencies the guard ran against whatever
+// happened to be on disk from an earlier build -- or against nothing at all,
+// which it used to treat as a pass. Anything added here must also appear in
+// ReleaseLevelGuardTest's expected table, and vice versa; a module in one and
+// not the other is a module that quietly left coverage.
+val inspectedModules = listOf(
+    ":protocol", ":config", ":core", ":connector-sdk",
+    ":connector-discord", ":connector-velocity", ":connector-plan",
+)
+
 tasks.withType<Test>().configureEach {
+    dependsOn(inspectedModules.map { "$it:classes" })
+
     // The repository root, because a guard's subject is the whole tree.
     systemProperty("soulbind.repoRoot", rootProject.projectDir.absolutePath)
 

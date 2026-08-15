@@ -23,6 +23,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -83,6 +85,52 @@ final class SourceTree {
         } catch (IOException e) {
             throw new UncheckedIOException("cannot walk " + dir, e);
         }
+    }
+
+
+    /**
+     * Every Gradle module, read from {@code settings.gradle.kts}.
+     *
+     * <p>Derived rather than hand-listed, and that is the whole point. Each
+     * guard used to carry its own copy of the module list, so adding a module
+     * meant remembering four places — and forgetting one produced a module
+     * quietly outside coverage, with every guard still green. Reading the
+     * build's own list means a new module is covered by default and has to be
+     * excluded deliberately, with a reason, rather than by omission.
+     */
+    static List<String> allModules() {
+        String settings = read(repoRoot().resolve("settings.gradle.kts"));
+        int start = settings.indexOf("include(");
+        if (start < 0) {
+            throw new IllegalStateException(
+                    "settings.gradle.kts has no include(...) block; the guards derive their "
+                            + "module coverage from it and cannot proceed without it");
+        }
+        int end = settings.indexOf(')', start);
+        List<String> modules = new ArrayList<>();
+        Matcher m = Pattern.compile("\"([a-z0-9-]+)\"")
+                .matcher(settings.substring(start, end));
+        while (m.find()) {
+            modules.add(m.group(1));
+        }
+        if (modules.isEmpty()) {
+            throw new IllegalStateException("parsed no modules from settings.gradle.kts");
+        }
+        return List.copyOf(modules);
+    }
+
+    /**
+     * Every module that ships Java the seams apply to.
+     *
+     * <p>{@code guards} is excluded, and only {@code guards}: it contains no
+     * production code, exists to read the repository as data, and necessarily
+     * names the very things the guards forbid elsewhere. The exclusion covers
+     * exactly that module and nothing else.
+     */
+    static List<String> productionModules() {
+        List<String> out = new ArrayList<>(allModules());
+        out.remove("guards");
+        return List.copyOf(out);
     }
 
     /** File contents as UTF-8. */

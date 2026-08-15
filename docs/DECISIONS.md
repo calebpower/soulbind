@@ -422,3 +422,105 @@ The build was correct throughout; the measurement was not. This is the same
 shape as the Phase 0 finding where an UP-TO-DATE task reported success without
 looking, and the same lesson: a green result is only evidence if you can show
 the thing actually ran.
+
+### 1.19 — The release-level guard skipped unbuilt modules while claiming not to
+
+Its comment said an unbuilt tree "must not read as a green guard"; the code
+underneath said `continue`. Every module happened to be built, so the guard was
+covering — but it would have stopped silently the first time it was not.
+
+Fixed properly rather than by deleting the comment: the guards task now depends
+on every inspected module's `classes` task, an unbuilt module is a *failure*
+naming the module, and every class file is checked rather than one arbitrary
+sample.
+
+*Mutation-checked:* removed `connector-velocity`'s compiled output and excluded
+its compile task. The guard failed, naming the module.
+
+### 1.20 — Guard coverage is derived from the build, not hand-listed
+
+Four guards each carried their own copy of the module list. Adding a module
+meant remembering four places, and forgetting one produced a module quietly
+outside coverage with every guard still green.
+
+They now read `settings.gradle.kts`. A new module is covered the day it is
+created and has to be excluded *deliberately*, with a reason, rather than by
+omission. The only exclusion is `guards` itself, which contains no production
+code and necessarily names the things it forbids elsewhere.
+
+The release-level guard keeps its hand-written table — that table is the
+contract, and deriving it from the build would assert only that the build agrees
+with itself — but a new test asserts the table covers every module in the build.
+
+### 1.21 — A `config` module rather than the loader in `connector-sdk`
+
+Specification §5 puts the shared loader in `connector-sdk` and adds that "core
+reuses the same loader code". Taken literally, core would depend on the
+connector runtime — inheriting transports, retry and the decision cache it has
+no use for, and inverting the seam that keeps client-side machinery out of the
+dispatcher.
+
+A module of its own satisfies the stated intent exactly: one loader, one TOML
+parser, no duplication. **The departure is the module's location and nothing
+else.** Recorded as departure 4 in the README.
+
+`tomlj` is `implementation`, never `api`, so no consumer gains a parser on its
+compile classpath — which is what makes §5's "the shared loader is the only TOML
+entry point" a guard rather than a request. That guard fired on its first run:
+`core` still declared tomlj from earlier scaffolding.
+
+### 1.22 — Config key paths forbid underscores and hyphens
+
+`storage.password` maps to `SOULBIND_STORAGE_PASSWORD`. If key paths could
+contain underscores, `a.b_c` and `a_b.c` would both map to `SOULBIND_A_B_C`, and
+an operator setting a secret would silently configure a different key.
+
+Refusing the character is cheaper than detecting the collision, so the character
+is refused. `ConfigSchema` *also* checks for environment-name collisions — a
+check unreachable while the path rule holds, kept because it is what would catch
+a future relaxation of that rule.
+
+### 1.23 — Booleans are strict; unknown keys are fatal
+
+`Boolean.parseBoolean` maps every non-`true` string to `false`.
+`SOULBIND_SERVER_TLS=yes` would therefore mean TLS silently disabled. The loader
+accepts exactly `true` and `false`, case-insensitively after trimming, and
+refuses everything else by name.
+
+Unknown keys are rejected for the same reason: a misspelt key that is silently
+ignored looks present, uses the default, and surfaces somewhere unrelated. Near
+misses are suggested within edit distance 2 only — confidently naming an
+unrelated key sends the operator to change something already correct.
+
+*Mutation-checked:* unknown-key check disabled, `Boolean.valueOf` semantics
+restored, environment overrides ignored, collected problems never raised, the
+path rule relaxed to allow underscores, and redaction removed. All caught.
+
+### 1.24 — A wrong-typed required key was also reported as missing
+
+Found by the test asserting every problem is reported at once: a required key
+with a bad value produced both `must be an integer` and `missing required key`.
+
+It is not missing. Telling an operator to add a key they can see in the file
+sends them looking in the wrong place entirely. The "missing" complaint now
+fires only when the key was genuinely absent from both the file and the
+environment.
+
+### 1.25 — Two more measurement defects in the mutation harness
+
+Recorded as a pair with 1.18, because the shape kept recurring and each time it
+produced a *false negative* — a mutation reported as uncaught.
+
+First: a mutation that replaced two `if` branches with an unconditional `return`
+made the following statements unreachable, so the module did not compile. No
+result files were written, and the harness read "zero failures".
+
+Second: the same reading applied whenever a task did not run at all.
+
+Both fixed by asserting the mutation target exists before editing, and by
+reporting the number of tests that actually *ran* alongside the number that
+failed. A green result is evidence only if the thing ran; so is a red one.
+
+The three findings together — Phase 0's UP-TO-DATE task, 1.18's aborted build,
+and these — are all the same error: trusting an absence of failure without
+establishing that anything looked.

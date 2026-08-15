@@ -16,6 +16,7 @@
 
 package dev.soulbind.guards;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -63,15 +64,28 @@ class DependencyGraphGuardTest {
             "yamlbeans",
             "eo-yaml");
 
-    /** Every module that produces Java bytecode. */
-    private static final List<String> JAVA_MODULES = List.of(
-            "protocol", "core", "connector-sdk",
-            "connector-discord", "connector-velocity", "connector-plan", "guards");
+    /**
+     * Every module that produces Java bytecode, derived from the build rather
+     * than hand-listed, so a new module cannot be created outside coverage.
+     */
+    private static List<String> javaModules() {
+        return SourceTree.allModules();
+    }
+
+    /**
+     * The one module permitted to declare a TOML parser.
+     *
+     * <p>Specification §5: soulbind's own config is TOML everywhere, through one
+     * shared loader. "One loader" is only true if there is one parser — a second
+     * module declaring tomlj is a second loader waiting to be written, with its
+     * own idea of what an unknown key means.
+     */
+    private static final String TOML_OWNER = "config";
 
     @Test
     @DisplayName("no YAML parser is declared in any Java module")
     void noYamlParserDeclared() {
-        List<String> violations = scanForYaml(SourceTree.repoRoot(), JAVA_MODULES);
+        List<String> violations = scanForYaml(SourceTree.repoRoot(), javaModules());
 
         assertTrue(
                 violations.isEmpty(),
@@ -97,6 +111,36 @@ class DependencyGraphGuardTest {
         assertTrue(
                 violations.stream().anyMatch(v -> v.toLowerCase(Locale.ROOT).contains("snakeyaml")),
                 () -> "expected the fixture's parser to be named in the violation: " + violations);
+    }
+
+    @Test
+    @DisplayName("exactly one module declares a TOML parser")
+    void tomlHasOneEntryPoint() {
+        List<String> declaring = new ArrayList<>();
+        for (String module : javaModules()) {
+            Path buildFile = SourceTree.repoRoot().resolve(module).resolve("build.gradle.kts");
+            if (!Files.isRegularFile(buildFile)) {
+                continue;
+            }
+            for (String line : SourceTree.read(buildFile).split("\n", -1)) {
+                String code = line.contains("//") ? line.substring(0, line.indexOf("//")) : line;
+                if (code.toLowerCase(Locale.ROOT).contains("libs.toml")
+                        || code.toLowerCase(Locale.ROOT).contains("tomlj")) {
+                    declaring.add(module);
+                    break;
+                }
+            }
+        }
+
+        assertEquals(
+                List.of(TOML_OWNER),
+                declaring,
+                "the shared loader in `" + TOML_OWNER + "` is the only TOML entry point "
+                        + "(specification §5). A second module with a parser is a second "
+                        + "loader waiting to be written -- with its own idea of whether an "
+                        + "unknown key is a typo or a feature. Consumers get the loader through "
+                        + "`config`, which declares tomlj as `implementation` precisely so no "
+                        + "parser reaches their compile classpath.");
     }
 
     /**

@@ -13,7 +13,11 @@ dependencies {
     implementation(libs.hikari)
     implementation(libs.flyway.core)
     implementation(libs.flyway.mysql)
-    implementation(libs.toml)
+    // The shared TOML loader, not a TOML parser. core gets unknown-key
+    // rejection, environment overrides and redaction from `config`; it never
+    // sees tomlj, because `config` declares that as `implementation`. A guard
+    // asserts `config` is the only module declaring a parser at all.
+    api(project(":config"))
     implementation(libs.slf4j.api)
 
     runtimeOnly(libs.logback.classic)

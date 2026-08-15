@@ -71,6 +71,7 @@ Fixed, because these are easy to conflate.
 | Module | Target | What it is |
 |---|---|---|
 | [`protocol/`](protocol/) | Java 21 | Wire DTOs, link-code alphabet and normalisation, request signing, schema constants |
+| [`config/`](config/) | Java 21 | The shared TOML loader. The only module with a TOML parser |
 | [`core/`](core/) | Java 25 | The dispatcher service |
 | [`connector-sdk/`](connector-sdk/) | Java 21 | Connector runtime: transports, decision cache, retry |
 | [`connector-discord/`](connector-discord/) | Java 25 | Reference chat connector |
@@ -150,3 +151,4 @@ it is listed here with the section it overrides.
 | 1 | §4, preamble | `docs/simulated-user-testing.md` is **not** vendored; only `testing-methodology.md` is | No such file exists upstream. It was folded into `testing-methodology.md`, whose §11 is the specification for the simulated-user tier. The citation is a stale reference in the upstream docs, recorded so the absence is not later mistaken for an omission |
 | 2 | §13 | `[run]` states that no battery exists and exits 0 | Phase 0 has no end-to-end battery; it lands in Phase 8, when the run verb and its pinned images become real. A narrowing scoped to the run verb at this phase only — `build` runs the real compile, the real test task and every guard |
 | 3 | §5, §14 Phase 0 | Storage, transport and capability guards land in **Phase 1**, not Phase 0 | Their subject code does not exist yet. A guard written before its subject cannot be given a meaningful must-fail fixture, would pass vacuously, and would read as coverage while proving nothing. The reason covers exactly these three guards |
+| 4 | §4, §5 | The shared config loader lives in its own [`config/`](config/) module, not in `connector-sdk` | §5 places it in `connector-sdk` and adds that "core reuses the same loader code". Taken literally, core would have to depend on the connector runtime — inheriting transports, retry and the decision cache it has no use for, and inverting the seam that keeps client-side machinery out of the dispatcher. A module of its own satisfies the stated intent exactly: one loader, one TOML parser, no duplication. The departure is the module's location and nothing else |

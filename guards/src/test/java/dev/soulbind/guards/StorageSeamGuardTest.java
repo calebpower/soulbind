@@ -58,10 +58,16 @@ class StorageSeamGuardTest {
      */
     private static final String STORAGE_PACKAGE = "dev/soulbind/core/storage";
 
-    /** Modules whose source must not know about databases. */
-    private static final List<String> GUARDED_MODULES =
-            List.of("core", "protocol", "connector-sdk",
-                    "connector-discord", "connector-velocity", "connector-plan");
+    /**
+     * Modules whose source must not know about databases.
+     *
+     * <p>Derived from {@code settings.gradle.kts}, not hand-listed: a new module
+     * is guarded the day it is created, rather than the day somebody remembers
+     * to add it here.
+     */
+    private static List<String> guardedModules() {
+        return SourceTree.productionModules();
+    }
 
     private static final Pattern JDBC_TYPE = Pattern.compile(
             "\\bjava\\.sql\\.|\\bjavax\\.sql\\.|\\bConnection\\b|\\bPreparedStatement\\b"
@@ -76,7 +82,7 @@ class StorageSeamGuardTest {
     @Test
     @DisplayName("no SQL and no JDBC type escapes the storage package")
     void seamHolds() {
-        List<String> violations = scan(SourceTree.repoRoot(), GUARDED_MODULES);
+        List<String> violations = scan(SourceTree.repoRoot(), guardedModules());
         assertTrue(
                 violations.isEmpty(),
                 () -> "persistence sits behind the storage seam. A SQL string or JDBC type "
