@@ -1007,3 +1007,45 @@ core/build/tmp/compileJava/.../Main.class.uniqueId1`.
 `"build/"` without the leading slash matches at any depth, which is what was
 meant. `/out/` stays anchored deliberately: it is where results come back *out*
 of the guest, and only the root one is that.
+
+### 2.14 — Bedrock translation lives in the connector, and is the point of the seam
+
+Bedrock clients reach a Java server through Geyser; Floodgate gives them a UUID
+in a reserved range and usually a prefixed name. Those are conventions of that
+stack, and `connector-velocity` is where knowing them is allowed — core sees the
+same platform kind with `flags.bedrock = true` and never branches on it.
+
+**The UUID is the identity; the name is not.** A prefix is configurable, can be
+turned off, and changes when an operator decides. Treating it as the identifier
+is how a rename silently reassigns an entitlement.
+
+Only one leading prefix is stripped: a player legitimately named `..Alex` behind
+a `.` prefix becomes `.Alex`. Stripping repeatedly mangles a real name, and a
+mangled display name is worse than an odd one because it looks correct.
+
+A Java player gets **no** bedrock flag rather than `bedrock = false`. Writing one
+would put a Bedrock-shaped field on every identity in the system and invite a
+reader to treat its absence as "unknown" rather than "no".
+
+The XUID renders unsigned. An XUID can exceed `Long.MAX_VALUE`, and a signed
+rendering produces a negative number matching nothing — only for accounts above
+the boundary, which is to say in production and not in a hand-written test.
+
+*Mutation-checked:* XUID signed, prefix stripped everywhere, Java players given
+`bedrock = false`, display folding case. All caught.
+
+### 2.15 — A comment that was simply wrong, caught by a mutation passing
+
+One mutation was **not** caught: replacing the structural Bedrock-UUID check
+with `toString().startsWith("00000000-0000-0000")`. Investigating showed the two
+are genuinely equivalent — `UUID.toString()` always emits the same dashed
+layout — so there is no input that distinguishes them.
+
+The comment justifying the structural check claimed the string form "varies with
+how it was rendered". That is false. It has been corrected to the two reasons
+that are true: no string allocation on a path taken for every player join, and
+no dependence on a JDK formatting detail this code has no business relying on.
+
+Recorded because the mutation did its job in an unusual way — it did not find a
+defect in the code, it found a defect in the *reasoning*, which would have
+misled the next person to touch it.
