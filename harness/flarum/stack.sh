@@ -427,13 +427,18 @@ cat > "$SITE/router.php" <<'PHPR'
 // chdir into public/ FIRST. Flarum's public/index.php does `require
 // '../site.php'`, which resolves against the WORKING DIRECTORY and not against
 // the file -- under a real web server the cwd is the document root, and under
-// `php -S` it is wherever the server was started. Without this the site fails
-// with "require(../site.php): Failed to open stream", which reads like a broken
-// Flarum install and is really a broken harness.
+// `php -S` it is wherever the server was started.
 chdir(__DIR__ . '/public');
 
-// Serve a real file if one exists, otherwise hand everything to Flarum --
-// exactly what `try_files $uri /index.php?$query_string` does.
+// Returning false hands the request back to php -S, which serves it from the
+// DOCROOT -- the -t argument, not this file's directory. The first version
+// checked is_file() under /site/public and then returned false to a server whose
+// docroot was /site, so every asset 404'd with "No such file or directory"
+// while the file sat there one directory down. The server is now started with
+// `-t public`, so both halves agree about where static files live.
+//
+// Query strings are stripped before the check: Flarum cache-busts its bundles
+// with ?v=..., and `assets/forum.js?v=e93f403e` is not a filename.
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if ($path !== '/' && is_file(__DIR__ . '/public' . $path)) {
     return false;
@@ -455,7 +460,7 @@ podman run -d --name "$WEB_C" --network "$NET" \
     -p "${FORUM_PORT}:${FORUM_PORT}" \
     -e PHP_CLI_SERVER_WORKERS=8 \
     -v "$SITE":/site -w /site \
-    "$FORUM_IMAGE" php -S "0.0.0.0:${FORUM_PORT}" router.php >/dev/null
+    "$FORUM_IMAGE" php -S "0.0.0.0:${FORUM_PORT}" -t public router.php >/dev/null
 
 wait_for_url "the forum" "$FORUM_URL/" 120
 
@@ -697,7 +702,11 @@ fi
 
 if [ "$ASSET_FAILURES" -ne 0 ]; then
     log "$ASSET_FAILURES of $ASSET_COUNT assets did not serve; the SPA cannot boot"
-    podman logs "$WEB_C" 2>&1 | tail -30 || true
+    # Whether they are missing from disk or merely unreachable are different
+    # faults: one is assets:publish, the other is the server's docroot.
+    log "--- what is actually in public/assets ---"
+    podman exec "$WEB_C" ls -la /site/public/assets 2>&1 | head -15 || true
+    podman logs "$WEB_C" 2>&1 | tail -20 || true
     exit 1
 fi
 log "all $ASSET_COUNT referenced assets serve"
