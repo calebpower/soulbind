@@ -1028,6 +1028,17 @@ set_rule() {
         "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" forum-register "$1" "$2"
 }
 
+# On any browser failure, keep what the page looked like. Playwright writes a
+# trace and screenshot into test-results/, which lives inside the suite mount
+# and would otherwise be discarded with the container.
+keep_browser_evidence() {
+    if [ -d "$REPO/harness/flarum/browser/test-results" ]; then
+        mkdir -p "$RUN/browser-evidence"
+        cp -r "$REPO/harness/flarum/browser/test-results/." "$RUN/browser-evidence/" 2>/dev/null || true
+        log "browser evidence kept in $RUN/browser-evidence"
+    fi
+}
+
 browser() {
     podman run --rm --network host \
         -v "$REPO/harness/flarum/browser":/suite -w /suite \

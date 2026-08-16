@@ -47,24 +47,31 @@ async function register(page, name) {
   await page.getByRole('button', { name: /sign up/i }).click();
   const dialog = page.locator('.Modal');
 
-  // input[name=...], not getByLabel.
+  // Fill and verify ONE FIELD AT A TIME.
   //
-  // Flarum's sign-up fields carry name attributes and no <label>, so a label
-  // lookup resolves by placeholder and heuristics -- and resolved the username
-  // and email boxes to the SAME input. Filling both in turn left the username
-  // holding an email address and the email empty, which the forum reported as
-  // "username may only contain letters, numbers, and dashes" and "the email
-  // field is required". Two validation errors that look like a broken form and
-  // were a broken selector.
-  await dialog.locator('input[name="username"]').fill(name);
-  await dialog.locator('input[name="email"]').fill(`${name}@example.com`);
-  await dialog.locator('input[name="password"]').fill('a-long-enough-password');
+  // A batch fill followed by one assertion cannot say which fill misbehaved.
+  // The first version filled three fields and then checked two, and when the
+  // username came back holding an email address there was no way to tell
+  // whether the email fill had targeted the wrong input or the username fill
+  // had been overwritten -- so the report named a field that was a symptom.
+  //
+  // input[name=...] because Flarum's sign-up inputs carry name attributes and
+  // no <label>; a label lookup resolved username and email to the same input.
+  const fields = [
+    ['username', name],
+    ['email', `${name}@example.com`],
+    ['password', 'a-long-enough-password'],
+  ];
 
-  // The fields must actually hold what was typed before submitting. Without
-  // this the next failure is again a validation message, and again reads as a
-  // problem with the forum rather than with this file.
-  await expect(dialog.locator('input[name="username"]')).toHaveValue(name);
-  await expect(dialog.locator('input[name="email"]')).toHaveValue(`${name}@example.com`);
+  for (const [field, value] of fields) {
+    const input = dialog.locator(`input[name="${field}"]`);
+    await input.fill(value);
+
+    // Immediately, so a misdirected fill is reported against the field that
+    // caused it rather than the field that shows the damage.
+    await expect(input, `filling ${field} did not stick — the form may not be the one this expects`)
+      .toHaveValue(value, { timeout: 5_000 });
+  }
 
   await dialog.getByRole('button', { name: /sign up/i }).click();
   return dialog;
