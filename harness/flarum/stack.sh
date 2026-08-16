@@ -541,6 +541,35 @@ smoke_failed() {
     log "HTTP $SMOKE_STATUS from $FORUM_URL/ ($(wc -c < "$SMOKE_BODY" 2>/dev/null || echo 0) bytes)"
     log "--- first 40 lines of the response ---"
     head -40 "$SMOKE_BODY" 2>/dev/null || true
+    log "--- what Flarum's own ExtensionManager sees ---"
+    # Asking the class that actually decides, in process.
+    #
+    # Everything upstream now checks out: installed.json records the package with
+    # type=flarum-extension, and extend.php loads and returns its extenders. Yet
+    # `flarum info` lists nothing. Those cannot both be true unless Flarum is
+    # looking somewhere other than where I am looking -- and no amount of
+    # reasoning from outside will say where. So this asks it.
+    podman exec "$WEB_C" php -r '
+        require "/site/vendor/autoload.php";
+        try {
+            $site = require "/site/site.php";
+            $app = $site->bootApp();
+            $paths = $app->getContainer()->make(Flarum\Foundation\Paths::class);
+            echo "vendor path Flarum uses: ", $paths->vendor, "\n";
+            echo "installed.json exists there: ",
+                is_file($paths->vendor . "/composer/installed.json") ? "yes" : "NO", "\n";
+            $m = $app->getContainer()->make(Flarum\Extension\ExtensionManager::class);
+            $all = $m->getExtensions();
+            echo "extensions discovered: ", count($all), "\n";
+            foreach ($all as $id => $ext) {
+                echo "  ", $id, " enabled=", $m->isEnabled($id) ? "yes" : "no", "\n";
+            }
+        } catch (Throwable $e) {
+            echo "booting Flarum threw ", get_class($e), ": ", $e->getMessage(), "\n";
+            echo "  at ", $e->getFile(), ":", $e->getLine(), "\n";
+        }
+    ' 2>&1 | head -25 || true
+
     log "--- web container log ---"
     podman logs "$WEB_C" 2>&1 | tail -40 || true
     exit 1
@@ -617,6 +646,35 @@ webhook_failed() {
             echo "  at ", $e->getFile(), ":", $e->getLine(), "\n";
         }
     ' 2>&1 | head -20 || true
+
+    log "--- what Flarum's own ExtensionManager sees ---"
+    # Asking the class that actually decides, in process.
+    #
+    # Everything upstream now checks out: installed.json records the package with
+    # type=flarum-extension, and extend.php loads and returns its extenders. Yet
+    # `flarum info` lists nothing. Those cannot both be true unless Flarum is
+    # looking somewhere other than where I am looking -- and no amount of
+    # reasoning from outside will say where. So this asks it.
+    podman exec "$WEB_C" php -r '
+        require "/site/vendor/autoload.php";
+        try {
+            $site = require "/site/site.php";
+            $app = $site->bootApp();
+            $paths = $app->getContainer()->make(Flarum\Foundation\Paths::class);
+            echo "vendor path Flarum uses: ", $paths->vendor, "\n";
+            echo "installed.json exists there: ",
+                is_file($paths->vendor . "/composer/installed.json") ? "yes" : "NO", "\n";
+            $m = $app->getContainer()->make(Flarum\Extension\ExtensionManager::class);
+            $all = $m->getExtensions();
+            echo "extensions discovered: ", count($all), "\n";
+            foreach ($all as $id => $ext) {
+                echo "  ", $id, " enabled=", $m->isEnabled($id) ? "yes" : "no", "\n";
+            }
+        } catch (Throwable $e) {
+            echo "booting Flarum threw ", get_class($e), ": ", $e->getMessage(), "\n";
+            echo "  at ", $e->getFile(), ":", $e->getLine(), "\n";
+        }
+    ' 2>&1 | head -25 || true
 
     log "--- web container log ---"
     podman logs "$WEB_C" 2>&1 | tail -20 || true
