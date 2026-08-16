@@ -224,7 +224,7 @@ images = [
     # the forum runs PHP 8.3 while the unit suite runs 8.4; they are repeated here
     # because this list is what the manifest validator reads.
     "docker.io/library/php@sha256:f62df9916bc05ae3c5120b41a115938f22623b0c98c815cbe2c67bc73cec21ef",
-    "mcr.microsoft.com/playwright@sha256:f87ec3ea2f3a394e050d0a5f1f83052b52b17fb70836e0bf29b5afb31fb58ce4",
+    "mcr.microsoft.com/playwright@sha256:e46352b075b3c97e226ad9ed27d6999dbc6e7f021ba94b30d833136fcee349f1",
 ]
 
 [sync]

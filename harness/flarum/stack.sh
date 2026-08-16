@@ -134,6 +134,27 @@ mkdir -p "$RUN/core" "$RUN/forum"
 
 podman network create "$NET" >/dev/null
 
+# --- pull everything first ---------------------------------------------------
+#
+# A digest that cannot be resolved fails CLOSED, which is right, but it failed
+# three minutes in -- after MariaDB, after core, after installing Flarum and its
+# 135 packages. The playwright pin was simply wrong: a digest I had written down
+# from a misread header and never once pulled. It looked exactly as
+# authoritative as the correct ones.
+#
+# Pulling up front turns that into a ten-second failure naming the image, and
+# costs nothing on a run where the images are already present.
+log "preflight: resolving every pinned image"
+for image in "$FLARUM_DB_IMAGE" "$FLARUM_PHP_IMAGE" "$FLARUM_TOOLCHAIN_IMAGE" \
+             "$COMPOSER_IMAGE" "$FLARUM_BROWSER_IMAGE"; do
+    if ! podman image exists "$image" && ! podman pull --quiet "$image" >/dev/null 2>&1; then
+        log "cannot resolve pinned image: $image"
+        log "a digest that does not exist is not a pin, it is a typo that fails closed"
+        exit 1
+    fi
+done
+log "preflight: all five images resolve"
+
 # --- the forum's PHP image --------------------------------------------------
 #
 # Built from the pinned base, with the extensions Flarum needs. Once, here,
