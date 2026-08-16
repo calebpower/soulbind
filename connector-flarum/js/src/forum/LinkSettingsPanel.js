@@ -77,6 +77,10 @@ export default class LinkSettingsPanel extends Component {
       this.unavailable = false;
       this.linked = !!(response.data && response.data.linked);
       this.identities = (response.data && response.data.identities) || [];
+      // The server counts OTHERS: identity.describe includes this account, and a
+      // browser subtracting one would be assuming its own identity is always
+      // in the list.
+      this.otherCount = (response.data && response.data.otherCount) || 0;
       m.redraw();
     });
   }
@@ -124,7 +128,7 @@ export default class LinkSettingsPanel extends Component {
               '.SoulbindPanel-status',
               this.linked
                 ? app.translator.trans('soulbind-connector.forum.link.linked', {
-                    count: this.identities.length,
+                    count: this.otherCount,
                   })
                 : app.translator.trans('soulbind-connector.forum.link.not_linked')
             ),

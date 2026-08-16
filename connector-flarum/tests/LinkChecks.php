@@ -70,6 +70,27 @@ final class LinkChecks
             $failures[] = 'the identities core listed did not come back';
         }
 
+        // OTHERS excludes this account. identity.describe returns every identity
+        // on the subject, this one included, so a panel counting them all tells a
+        // member with one linked game account they are "linked to 2 other" -- and
+        // they go looking for an account that does not exist.
+        $both = self::service(FakeTransport::ok([
+            'linked' => true,
+            'identities' => [
+                ['platformKind' => 'forum', 'platformId' => 'u1'],
+                ['platformKind' => 'game', 'platformId' => 'g1'],
+            ],
+        ]))->status('u1');
+
+        if (($both->data['otherCount'] ?? null) !== 1) {
+            $failures[] = 'a subject holding this account and one other reported '
+                . var_export($both->data['otherCount'] ?? null, true) . ' others';
+        }
+        if (($linked->data['otherCount'] ?? null) !== 1) {
+            $failures[] = 'an identity list with no entry for this account should count '
+                . 'all of them as others';
+        }
+
         $unlinked = self::service(FakeTransport::ok(['linked' => false, 'identities' => []]))
             ->status('u1');
         if (!$unlinked->ok || $unlinked->data['linked'] !== false) {

@@ -55,9 +55,30 @@ final class LinkService
         ]);
 
         if ($outcome instanceof OkOutcome) {
+            $identities = self::identities($outcome->payload);
+
             return LinkResult::success([
                 'linked' => (bool) ($outcome->payload['linked'] ?? false),
-                'identities' => self::identities($outcome->payload),
+                'identities' => $identities,
+                // OTHERS, excluding this account.
+                //
+                // identity.describe returns every identity on the subject,
+                // including the one asking. A panel that counted them all told a
+                // member with one linked game account that they were "linked to 2
+                // other" -- and somebody reading that goes looking for a second
+                // account that does not exist.
+                //
+                // Counted here rather than in the panel because this is where the
+                // platform kind and the caller's id both are, and a browser
+                // subtracting one would be guessing that its own identity is
+                // always present.
+                'otherCount' => count(array_filter(
+                    $identities,
+                    fn (array $i): bool => !(
+                        ($i['platformKind'] ?? null) === $this->platformKind
+                        && (string) ($i['platformId'] ?? '') === $platformId
+                    )
+                )),
             ]);
         }
 
