@@ -20,19 +20,27 @@ declare(strict_types=1);
 
 namespace Soulbind\Flarum\Listener;
 
-use Flarum\Foundation\KnownError;
 use RuntimeException;
 use Soulbind\Flarum\Gate\GateOutcome;
 
 /**
  * A gate said no.
  *
- * Implements the host's KnownError so the forum renders it as a message to the
- * person rather than as a server fault. A gate refusing is this extension
- * working; logging it as a 500 would bury a working refusal in an error report
- * and tell the person nothing.
+ * Deliberately NOT a Flarum KnownError, which it used to be.
+ *
+ * Flarum resolves a KnownError before it consults custom handlers, and the
+ * KnownError path produces a response with no details -- so implementing it
+ * meant the refusal could never carry its reason, and the person saw a bare
+ * status code. A custom handler is the only path that can attach the wording,
+ * and Flarum will not reach one for a KnownError.
+ *
+ * Nothing is lost by dropping it: HandledError::shouldBeReported() is true only
+ * for the type `unknown`, so a handler that names its type keeps a refusal out
+ * of the error log exactly as KnownError did.
+ *
+ * @see \Soulbind\Flarum\Listener\GateRefusedHandler
  */
-final class GateRefused extends RuntimeException implements KnownError
+final class GateRefused extends RuntimeException
 {
     public function __construct(public readonly GateOutcome $outcome)
     {

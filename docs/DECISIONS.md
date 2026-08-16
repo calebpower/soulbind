@@ -2446,3 +2446,63 @@ between the person and their reason.
 from Flarum's own container, and calls the gate, before any browser starts. A
 container that cannot build the thing under test is not a subtle failure; it only
 looked subtle because nothing had asked the container to build it.
+
+### 7.24 — Correcting 7.22: a status is not enough, and KnownError prevents the fix
+
+7.22 registered a status for `GateRefused` and said that was the missing hop. It
+was necessary and it was not sufficient, and the reason is in Flarum's
+`Registry::handle()`:
+
+```php
+return $this->handleKnownTypes($error)     // KnownError first
+    ?? $this->handleCustomTypes($error)    // custom handlers second
+    ?? HandledError::unknown($error);
+```
+
+`handleKnownTypes` builds a `HandledError` with **no details**. So an exception
+implementing `KnownError` can never explain itself, and — because that branch
+wins — registering a custom handler alongside it does nothing at all. The two
+are mutually exclusive, and the one I had chosen was the one that cannot carry a
+reason.
+
+The API said so plainly once the probe could reach it:
+
+```
+HTTP 403 {"errors":[{"status":"403","code":"soulbind_gate_refused"}]}
+```
+
+Correctly refused, correctly typed, correctly statused, and silent.
+
+So `GateRefused` no longer implements `KnownError`, and a `GateRefusedHandler`
+returns `(new HandledError($e, TYPE, 403))->withDetails([['detail' => …]])`.
+Nothing is lost by dropping the interface: `shouldBeReported()` is true only for
+the type `unknown`, so a handler that names its type keeps a refusal out of the
+error log exactly as `KnownError` did.
+
+The check now asserts both halves — that a handler is registered, and that
+`GateRefused` does **not** implement `KnownError` — because either alone is a
+configuration that silently swallows the reason. Both mutations caught.
+
+### 7.25 — One config value, two meanings
+
+The Java SDK builds its endpoint as `trimTrailingSlash(coreUrl) + "/v1/rpc"`.
+This side treated the same setting as a complete endpoint and posted to the base
+URL, where core does not answer.
+
+So every `decide` was an outage, every gate failed closed, and the forum refused
+everybody with reason `unreachable` — while core sat answering the Velocity
+connector perfectly, from the same configuration value.
+
+An operator configures both connectors with that value and reasonably expects it
+to mean one thing. It meant two, and the failure it produced looked exactly like
+core being down.
+
+The path is now a constant, appended the same way, and checked against five
+bases including a trailing slash and a prefix path — `https://example.com/soulbind`
+must become `https://example.com/soulbind/v1/rpc`, because core behind a prefix
+is a real deployment and dropping the prefix would be the same bug wearing a
+different hat.
+
+Nothing in the PHP suite could have found this: none of it opens a socket, which
+is deliberate and remains right. The harness found it the moment it asked the
+gate a question, which is the argument for the gate-resolution smoke in 7.23.

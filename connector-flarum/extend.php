@@ -24,6 +24,7 @@ use Flarum\User\Event\Saving as UserSaving;
 use Soulbind\Flarum\Controller\WebhookController;
 use Soulbind\Flarum\Listener\GatePosting;
 use Soulbind\Flarum\Listener\GateRefused;
+use Soulbind\Flarum\Listener\GateRefusedHandler;
 use Soulbind\Flarum\Listener\GateRegistration;
 use Soulbind\Flarum\Provider\SoulbindProvider;
 use Soulbind\Flarum\Settings\ConnectorSettings;
@@ -69,7 +70,13 @@ return [
      * payload, which is not the problem and cannot be the fix.
      */
     (new Extend\ErrorHandling())
-        ->status(GateRefused::TYPE, 403),
+        // A HANDLER, not just a status.
+        //
+        // Flarum resolves KnownError types before custom handlers, and that path
+        // builds a response with no details -- so a refusal registered only by
+        // status arrives as a bare code and the frontend shows "Oops! Something
+        // went wrong." The handler is the only place the reason can be attached.
+        ->handler(GateRefused::class, GateRefusedHandler::class),
 
     (new Extend\Event())
         ->listen(UserSaving::class, GateRegistration::class)

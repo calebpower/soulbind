@@ -20,6 +20,8 @@ declare(strict_types=1);
 
 namespace Soulbind\Flarum\Tests;
 
+use Soulbind\Flarum\Client\CurlTransport;
+
 /**
  * The extension's identity, as the HOST computes it.
  *
@@ -80,14 +82,28 @@ final class PackagingChecks
             return $failures;
         }
 
-        // The constant, not a repeated literal. Two spellings of the same
-        // string in two files is the failure this check exists to catch, so
-        // satisfying it by writing the literal twice would be missing the
-        // point.
-        if (!str_contains($extend, 'GateRefused::TYPE')) {
-            $failures[] = 'extend.php does not register GateRefused::TYPE. If it names the '
-                . 'string literally instead, the two can drift and the drift is silent -- a '
-                . 'refusal that renders as a generic error looks like a bug in the forum.';
+        // A HANDLER, not merely a status.
+        //
+        // Flarum resolves known error types before custom handlers, and the
+        // known-type path builds a response with no details. A refusal
+        // registered only by status therefore arrives as a bare code and the
+        // frontend renders "Oops! Something went wrong" -- which is what it did.
+        // Only a handler can attach the reason.
+        if (!str_contains($extend, '->handler(GateRefused::class')) {
+            $failures[] = 'extend.php does not register a HANDLER for GateRefused. A '
+                . 'status alone produces a response with no details, so the person is '
+                . 'refused without being told why.';
+        }
+
+        // And the exception must NOT be a KnownError, or Flarum resolves it on
+        // the known path and never reaches the handler above.
+        $refusalSource = (string) file_get_contents(
+            dirname(__DIR__) . '/src/Listener/GateRefused.php'
+        );
+        if (preg_match('/implements\s+[^{]*KnownError/', $refusalSource) === 1) {
+            $failures[] = 'GateRefused implements KnownError, so Flarum resolves it '
+                . 'before consulting custom handlers and the handler never runs. The '
+                . 'two cannot both be present.';
         }
 
         // Read from the SOURCE, never loaded.
@@ -103,6 +119,55 @@ final class PackagingChecks
                 . 'for extend.php to register a status against';
         } elseif (trim($m[1]) === '') {
             $failures[] = 'GateRefused::TYPE is empty';
+        }
+
+        return $failures;
+    }
+
+    /**
+     * The endpoint is the configured base plus the protocol's path.
+     *
+     * The same config value is handed to both connectors, so it has to mean the
+     * same thing to both. The Java SDK builds
+     * `trimTrailingSlash(coreUrl) + "/v1/rpc"`; this side treated the setting as
+     * a complete endpoint and posted to the base URL.
+     *
+     * Core does not answer there. So every decide was an outage, every gate
+     * failed closed, and the forum refused everybody with reason `unreachable`
+     * -- while core sat answering the other connector perfectly. Nothing in this
+     * suite could see it, because nothing in this suite opens a socket; the
+     * harness saw it the moment it asked the gate a question.
+     *
+     * @return list<string>
+     */
+    public static function theEndpointMatchesTheProtocolPath(): array
+    {
+        $failures = [];
+
+        $cases = [
+            'https://core.example.com' => 'https://core.example.com/v1/rpc',
+            // A trailing slash is what an operator pastes out of a browser, and
+            // must not produce a doubled separator.
+            'https://core.example.com/' => 'https://core.example.com/v1/rpc',
+            'https://core.example.com///' => 'https://core.example.com/v1/rpc',
+            // A base path is legitimate: core can sit behind a prefix.
+            'https://example.com/soulbind' => 'https://example.com/soulbind/v1/rpc',
+            'http://host:8477' => 'http://host:8477/v1/rpc',
+        ];
+
+        foreach ($cases as $configured => $expected) {
+            $actual = (new CurlTransport((string) $configured, 2000))->endpoint();
+            if ($actual !== $expected) {
+                $failures[] = "the base '{$configured}' produced '{$actual}', expected "
+                    . "'{$expected}'";
+            }
+        }
+
+        // And the path itself is the protocol's, not a local invention.
+        if (CurlTransport::RPC_PATH !== '/v1/rpc') {
+            $failures[] = 'the RPC path is ' . CurlTransport::RPC_PATH
+                . ", but docs/protocol.md says /v1/rpc. The path is part of the wire "
+                . 'contract, and the two sides must agree about it.';
         }
 
         return $failures;

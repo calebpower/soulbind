@@ -30,10 +30,35 @@ namespace Soulbind\Flarum\Client;
  */
 final class CurlTransport implements Transport
 {
+    /** The path every soulbind request goes to. Part of the wire contract. */
+    public const RPC_PATH = '/v1/rpc';
+
+    private readonly string $endpoint;
+
+    /**
+     * @param string $coreUrl the BASE url, as configured -- not the endpoint.
+     *
+     * The path is appended here, exactly as the Java SDK does
+     * (`trimTrailingSlash(coreUrl) + "/v1/rpc"`). It has to be the same on both
+     * sides, because an operator configures both connectors with the same value
+     * and reasonably expects it to mean the same thing.
+     *
+     * It did not. This side treated the setting as a complete endpoint and
+     * posted to the base URL, where core does not answer -- so every decide was
+     * an outage, every gate failed closed, and the forum refused everybody with
+     * 'unreachable' while core sat there answering the other connector fine.
+     */
     public function __construct(
-        private readonly string $endpoint,
+        string $coreUrl,
         private readonly int $timeoutMs
     ) {
+        $this->endpoint = rtrim($coreUrl, '/') . self::RPC_PATH;
+    }
+
+    /** Exposed so a check can assert it without opening a socket. */
+    public function endpoint(): string
+    {
+        return $this->endpoint;
     }
 
     public function send(string $body, array $headers): string

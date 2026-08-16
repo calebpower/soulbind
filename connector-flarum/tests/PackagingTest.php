@@ -70,4 +70,13 @@ final class PackagingTest extends TestCase
             'a refusal would render as a generic error and tell the person nothing'
         );
     }
+    #[Test]
+    #[DisplayName('the endpoint is the configured base plus the protocol path')]
+    public function theEndpointMatchesTheProtocolPath(): void
+    {
+        $this->assertNoFailures(
+            PackagingChecks::theEndpointMatchesTheProtocolPath(),
+            'the two connectors would read one config value as two different endpoints'
+        );
+    }
 }
