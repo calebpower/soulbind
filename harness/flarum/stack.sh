@@ -391,6 +391,25 @@ podman run -d --name "$WEB_C" --network "$NET" \
 wait_for_url "the forum" "$FORUM_URL/" 120
 
 log "forum is up on $FORUM_PORT"
+
+# A BASELINE, taken before the extension is enabled.
+#
+# Without it, a failure after enabling is ambiguous: it could be the extension
+# breaking Flarum, or the check itself being wrong about what a working page
+# looks like. Those send somebody to read entirely different code, and the
+# difference costs one curl.
+log "baseline: the forum renders BEFORE the extension is enabled"
+BASELINE_BODY="$RUN/forum-baseline.html"
+BASELINE_STATUS=$(curl -s -o "$BASELINE_BODY" -w '%{http_code}' "$FORUM_URL/" || echo 000)
+if [ "$BASELINE_STATUS" != "200" ] || ! grep -q "soulbind harness" "$BASELINE_BODY"; then
+    log "the forum does not render even WITHOUT the extension: HTTP $BASELINE_STATUS"
+    log "so the check below would have blamed the extension for something else"
+    head -40 "$BASELINE_BODY" 2>/dev/null || true
+    podman logs "$WEB_C" 2>&1 | tail -40 || true
+    exit 1
+fi
+log "baseline good"
+
 log "core credential for the forum is in $RUN/forum.credential"
 
 # --- enable and configure the extension -------------------------------------
@@ -424,12 +443,38 @@ podman exec "$WEB_C" php flarum cache:clear >/dev/null 2>&1 || true
 # Proves the pieces are actually wired before any browser opens. A Playwright
 # failure against a stack that never came up correctly is a report about the
 # harness wearing the costume of a report about soulbind.
-log "smoke: the forum serves and the extension is enabled"
+log "smoke: the forum still serves with the extension enabled"
 
-curl -sf "$FORUM_URL/" | grep -q "soulbind harness" || {
-    log "the forum did not serve its own title; something is wrong before any test ran"
+# Captured, not piped into grep. The first version was
+# `curl -sf "$FORUM_URL/" | grep -q "soulbind harness"`, which collapses every
+# possible failure -- a 500, an empty body, a redirect, a working page whose
+# title is simply spelled differently -- into one message that names none of
+# them. A smoke test that cannot say what went wrong sends somebody to read the
+# wrong code.
+SMOKE_BODY="$RUN/forum-index.html"
+SMOKE_STATUS=$(curl -s -o "$SMOKE_BODY" -w '%{http_code}' "$FORUM_URL/" || echo 000)
+
+smoke_failed() {
+    log "SMOKE FAILED: $1"
+    log "HTTP $SMOKE_STATUS from $FORUM_URL/ ($(wc -c < "$SMOKE_BODY" 2>/dev/null || echo 0) bytes)"
+    log "--- first 40 lines of the response ---"
+    head -40 "$SMOKE_BODY" 2>/dev/null || true
+    log "--- web container log ---"
+    podman logs "$WEB_C" 2>&1 | tail -40 || true
     exit 1
 }
+
+[ "$SMOKE_STATUS" = "200" ] || smoke_failed "the forum did not answer 200"
+
+# The title proves the page RENDERED, not merely that something answered. A
+# Flarum error page is still HTTP 200 in some configurations.
+grep -q "soulbind harness" "$SMOKE_BODY" \
+    || smoke_failed "the response did not contain the forum title"
+
+grep -qi "fatal error\|stack trace" "$SMOKE_BODY" \
+    && smoke_failed "the page rendered a PHP error"
+
+log "the forum renders with the extension enabled"
 
 ENABLED=$(sql "SELECT value FROM settings WHERE \`key\`='extensions_enabled';" | tail -1)
 case "$ENABLED" in
