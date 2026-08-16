@@ -33,7 +33,18 @@ app.initializers.add('soulbind/flarum-connector', () => {
   const t = (key) => app.translator.trans(`soulbind-flarum.admin.settings.${key}`);
 
   app.extensionData
-    .for('soulbind-flarum-connector')
+    /*
+     * NOT 'soulbind-flarum-connector'.
+     *
+     * Flarum computes an extension id by stripping a leading `flarum-` from the
+     * package half of the composer name, so `soulbind/flarum-connector` becomes
+     * `soulbind-connector`. Addressing the intuitive id instead registers these
+     * settings against an extension that does not exist: no error, no missing
+     * file, just an empty settings panel.
+     *
+     * PackagingChecks asserts this string matches what Flarum will compute.
+     */
+    .for('soulbind-connector')
 
     .registerSetting({
       setting: 'soulbind.core_url',

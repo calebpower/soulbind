@@ -2263,3 +2263,59 @@ same discipline as showing a minted credential once.
 The core URL is not published either. What the page needs is whether the
 connector is configured, so a boolean is derived from the URL and that is what
 crosses — a member's browser has no reason to learn where core lives.
+
+### 7.20 — The extension id is not the package name, and only a forum could say so
+
+Flarum computes an extension id by splitting the composer name on the slash and
+stripping a leading `flarum-ext-` or `flarum-` from the package half:
+
+```
+soulbind/flarum-connector  ->  soulbind + connector  ->  soulbind-connector
+```
+
+Not `soulbind-flarum-connector`, which is what slash-replacement gives and what
+both the harness and the admin page used.
+
+**What that cost.** The harness enabled an id no extension answers to, so the
+extension stayed disabled and its routes never registered. The webhook 404'd —
+while composer's `installed.json` recorded `type: flarum-extension` correctly,
+`extend.php` loaded and returned all six extenders, and the staged tree was
+exactly right. Four browser-tier iterations went into eliminating each of those
+in turn.
+
+The same wrong id was in `js/src/admin/index.js`, where the failure is worse
+because it is silent: settings registered against a nonexistent extension
+produce no error, no missing file, and an empty settings panel.
+
+**Nothing without a running forum could have found this.** Every static check
+passed. The package was well-formed by every measure available on this
+workstation. It took booting Flarum and asking its own `ExtensionManager` which
+extensions it had discovered — which returned seventeen, one of them
+`soulbind-connector`, disabled.
+
+That is the argument for the browser tier existing, stated as a defect rather
+than as a principle.
+
+**What now prevents it.** `PackagingChecks` implements Flarum's derivation and
+asserts the admin page's `.for(...)` argument matches what Flarum will compute
+from `composer.json`. It is static, so it runs anywhere, while the failure it
+prevents needs a forum, a database and a browser. The rule itself is pinned
+against six cases including `flarum/flarum-ext-markdown` and the awkward
+`acme/flarum-flarum`.
+
+The harness does **not** use that implementation. It asks the running Flarum for
+the id, because hardcoding the correct value would fix today and re-arm the
+identical trap for whoever renames the package.
+
+Two defects in the checks themselves surfaced while writing them, both worth
+recording because both are ways a guard lies:
+
+- The derivation case for `acme/flarum-flarum` expected `acme-`. `str_replace`
+  removes a substring, so the real answer is `acme-flarum`. The implementation
+  was right and my expectation was wrong — the case is kept, with a note, since
+  it is exactly where the intuitive reading and the actual behaviour diverge.
+- The admin-page check grepped the whole file for the wrong id, and matched the
+  comment explaining which id is wrong. The check failed on a correct file,
+  using its own explanation as the evidence against it. It now reads the
+  `.for(...)` argument. A check that cannot tell code from prose about the code
+  gets silenced rather than obeyed.

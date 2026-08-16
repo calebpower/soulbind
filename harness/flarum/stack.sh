@@ -469,7 +469,41 @@ sql() {
         -h 127.0.0.1 -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" 2>/dev/null
 }
 
-EXT_ID=soulbind-flarum-connector
+# Ask FLARUM for the extension id. Do not compute it here.
+#
+# Flarum strips a leading `flarum-` from the package half of the composer name,
+# so `soulbind/flarum-connector` becomes `soulbind-connector` and not the
+# intuitive `soulbind-flarum-connector`. Enabling the intuitive one writes a
+# setting no extension answers to: composer, installed.json and extend.php all
+# look perfect, the extension stays disabled, and the routes never register.
+# That cost four iterations of this harness.
+#
+# Hardcoding the CORRECT id here would fix today and re-arm the same trap for
+# whoever renames the package. The id comes from the ExtensionManager, which is
+# the thing that decides.
+EXT_ID=$(podman exec "$WEB_C" php -r '
+    require "/site/vendor/autoload.php";
+    $site = require "/site/site.php";
+    $m = $site->bootApp()->getContainer()->make(Flarum\Extension\ExtensionManager::class);
+    foreach ($m->getExtensions() as $id => $ext) {
+        if (str_contains((string) $ext->name, "soulbind")) { echo $id; return; }
+    }
+' 2>/dev/null)
+
+if [ -z "$EXT_ID" ]; then
+    log "Flarum does not know about the soulbind extension at all."
+    log "It was installed, so this is discovery failing rather than installation."
+    podman exec "$WEB_C" php -r '
+        require "/site/vendor/autoload.php";
+        $site = require "/site/site.php";
+        $m = $site->bootApp()->getContainer()->make(Flarum\Extension\ExtensionManager::class);
+        echo "discovered: ", count($m->getExtensions()), "\n";
+        foreach ($m->getExtensions() as $id => $e) { echo "  ", $id, "\n"; }
+    ' 2>&1 | head -25 || true
+    exit 1
+fi
+log "Flarum calls this extension '$EXT_ID'"
+
 FORUM_CRED_VALUE=$(cat "$RUN/forum.credential")
 
 sql <<SQL
