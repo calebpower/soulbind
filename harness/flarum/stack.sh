@@ -814,6 +814,42 @@ case "$WEBHOOK_STATUS" in
         webhook_failed "unexpected webhook status $WEBHOOK_STATUS" ;;
 esac
 
+# --- what does the API actually return when the gate refuses? ---------------
+#
+# A browser shows what Flarum CHOSE to render. This shows what Flarum sent, which
+# is where the reason either survives or is dropped -- and it costs a curl rather
+# than a sixteen-second browser timeout.
+#
+# The rule is set to deny first, so this is the refusal path on purpose.
+log "smoke: the refusal the API actually returns"
+"$REPO/harness/fullstack/set-rule.sh" \
+    "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" forum-register true deny >/dev/null
+
+REFUSAL_BODY="$RUN/api-refusal.json"
+REFUSAL_STATUS=$(curl -s -o "$REFUSAL_BODY" -w '%{http_code}' \
+    -X POST "$FORUM_URL/api/users" \
+    -H 'Content-Type: application/json' \
+    -d '{"data":{"attributes":{"username":"smokeprobe","email":"smokeprobe@example.com","password":"a-long-enough-password"}}}' \
+    || echo 000)
+
+log "  HTTP $REFUSAL_STATUS"
+log "  body: $(head -c 400 "$REFUSAL_BODY" 2>/dev/null)"
+
+case "$REFUSAL_STATUS" in
+    403) log "  the refusal is mapped to 403" ;;
+    500) log "  the refusal is still a generic 500 -- the type is not registered" ;;
+    2*)  log "  the registration was ACCEPTED while the gate denies"; exit 1 ;;
+    *)   log "  unexpected status" ;;
+esac
+
+# The reason has to be IN there. A 403 whose body says nothing leaves the person
+# with a blank refusal, which is the same failure with a better status code.
+if grep -q "not linked" "$REFUSAL_BODY"; then
+    log "  the reason survived into the response"
+else
+    log "  the reason did NOT survive; the person cannot be told why"
+fi
+
 log "stack is up and the extension is live"
 
 # --- the browser tier -------------------------------------------------------
