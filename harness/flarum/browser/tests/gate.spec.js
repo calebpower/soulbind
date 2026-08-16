@@ -99,12 +99,20 @@ test('@refused an unlinked account is refused, in core\'s own words', async ({ p
 
 test('@admitted the account is admitted once the rule allows it', async ({ page }) => {
   const name = uniqueName('allowed');
-  await register(page, name);
+  const dialog = await register(page, name);
 
-  // Signed in, which is the observable form of "registration completed". The
-  // pair with @refused is what stops a gate that denies everything from passing
-  // the suite.
-  await expect(page.locator('#header-secondary')).toContainText(name, { timeout: 30_000 });
+  // NOT "the person is signed in".
+  //
+  // Flarum does not sign somebody in after registration by default -- it asks
+  // them to confirm their email first. Asserting a signed-in header tests that
+  // forum setting, not this gate, and it failed for exactly that reason.
+  //
+  // What this tier can honestly claim is that nothing REFUSED the registration.
+  // That the account was actually created is asserted by the orchestrator
+  // against the database, where the answer is unambiguous.
+  await expect(dialog).not.toContainText(/not linked|needs a linked account/i);
+  await expect(dialog).not.toContainText(/permission|problem on our side/i);
+  await expectNoServerError(page);
 });
 
 test('@outage a dead core denies, and blames the system rather than the person',
@@ -137,6 +145,12 @@ test('@recovery the next attempt simply works, with no intervention', async ({ p
   // is an outage that becomes an incident, and @admitted cannot see that because
   // it never had an outage to recover from.
   const name = uniqueName('after');
-  await register(page, name);
-  await expect(page.locator('#header-secondary')).toContainText(name, { timeout: 30_000 });
+  const dialog = await register(page, name);
+
+  // Same reasoning as @admitted: "not refused" is the claim a browser can make
+  // honestly. That the account exists is checked against the database by the
+  // orchestrator.
+  await expect(dialog).not.toContainText(/problem on our side/i);
+  await expect(dialog).not.toContainText(/not linked|needs a linked account/i);
+  await expectNoServerError(page);
 });

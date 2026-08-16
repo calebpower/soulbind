@@ -1084,6 +1084,44 @@ set_rule false allow
 browser npx playwright test --grep "@recovery"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-4.json" 2>/dev/null || true
 
+# --- did the allowed registrations actually create accounts? ----------------
+#
+# The browser can honestly claim "nothing refused this". Whether a row exists is
+# a database question, and the database answers it without ambiguity.
+#
+# Split deliberately: asserting "signed in" in the browser tested Flarum's email
+# confirmation setting rather than this gate, and failed for that reason. Each
+# tier now claims only what it can see.
+log "checking the allowed registrations created accounts"
+
+CREATED=$(sql <<'SQL'
+SELECT COUNT(*) FROM users WHERE username LIKE 'allowed%' OR username LIKE 'after%';
+SQL
+)
+REFUSED_ROWS=$(sql <<'SQL'
+SELECT COUNT(*) FROM users WHERE username LIKE 'unlinked%' OR username LIKE 'outage%';
+SQL
+)
+
+log "  accounts created by the allowing passes: ${CREATED:-0}"
+log "  accounts created by the refusing passes: ${REFUSED_ROWS:-0}"
+
+if [ "${CREATED:-0}" -lt 2 ]; then
+    log "the allowing passes did not create both accounts, so the gate is refusing"
+    log "when it should admit -- or the registration never completed."
+    exit 1
+fi
+
+# The other half, and the more important one: a refused registration must not
+# have created anything. A gate that shows a refusal and creates the account
+# anyway is worse than no gate, because it looks like it is working.
+if [ "${REFUSED_ROWS:-0}" -ne 0 ]; then
+    log "a REFUSED registration created an account anyway. The gate reported a"
+    log "refusal and did not prevent one, which is worse than not gating at all."
+    exit 1
+fi
+log "accounts exist exactly where they should"
+
 # --- every spec must have run somewhere -------------------------------------
 #
 # Four --grep passes is four chances for a spec to belong to no pass at all. A
