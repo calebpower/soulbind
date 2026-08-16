@@ -143,6 +143,30 @@ Warmed up before measuring, and measured over a realistic override distribution
 rather than the empty list: measuring only the fast path and calling it the
 budget would be the easy mistake.
 
+## Outstanding, and needing the owner
+
+One item in the whole build cannot be done from here.
+
+**The Phase 6 manual smoke.** The specification asks for one run against a real
+chat platform in a throwaway server, recorded here — and names it as **evidence,
+not a tier**, because a check that needs somebody to create an account and click
+through a consent screen is not a check that runs.
+
+It needs a bot token and a server, which means a human with an account. Nothing
+else is blocked by it: the connector's logic, its refusal wording, its privacy
+rule and its role effector are all covered against the scripted surface, and the
+full link flow game↔chat runs green in the stack on every invocation.
+
+What the manual run would add is the one thing a scripted surface cannot: that
+the client library is wired to the seam correctly — command registration
+reaching the platform, an interaction arriving as an invocation, a role actually
+appearing on a member.
+
+To run it: register a bot, invite it to a throwaway server with role-management
+permission, put the token in `SOULBIND_PLATFORM_TOKEN`, point
+`soulbind-discord.toml` at a core, and run `/link` and `/whoami`. Record what
+happened here.
+
 ## Guards in force
 
 | Guard | Holds |
