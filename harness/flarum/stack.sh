@@ -29,7 +29,7 @@ REPO=$(cd "$HERE/../.." && pwd)
 # version kept the whole Flarum site there -- so the sync raced composer writing
 # vendor/ and failed with "file has vanished". out/ is for results, and results
 # are small.
-RUN=${RUN:-/tmp/soulbind-forum-stack}
+RUN=${RUN:-/tmp/soulbind-forum-stack-${CORE_BACKEND:-sqlite}}
 
 . "$HERE/pins.env"
 
@@ -40,12 +40,24 @@ DB_ROOT=flarum-root
 
 CORE_PORT=${CORE_PORT:-8477}
 FORUM_PORT=${FORUM_PORT:-8480}
+# Distinct ports per engine, so a stale container from the other run cannot be
+# the thing a test connects to.
+# Assigned OUTRIGHT, not with :- defaults.
+#
+# CORE_PORT is already set by the line above, so ${CORE_PORT:-8478} keeps 8477
+# and both engines would bind the same port -- the second run would either
+# fail to start or, worse, drive the first run's stack and report it green.
+if [ "${CORE_BACKEND:-sqlite}" = "mariadb" ]; then
+    CORE_PORT=8478
+    FORUM_PORT=8481
+fi
 FORUM_URL="http://127.0.0.1:${FORUM_PORT}"
 
-NET=soulbind-forum-net
-DB_C=soulbind-forum-db
-WEB_C=soulbind-forum-web
-CORE_C=soulbind-forum-core
+SUFFIX=${CORE_BACKEND:-sqlite}
+NET=soulbind-forum-net-$SUFFIX
+DB_C=soulbind-forum-db-$SUFFIX
+WEB_C=soulbind-forum-web-$SUFFIX
+CORE_C=soulbind-forum-core-$SUFFIX
 
 log() { echo "[forum] $*"; }
 
@@ -197,6 +209,7 @@ log "mariadb ready after ${i}s"
 # Running core in a container has a second benefit the host version could not
 # have had: stopping it for the outage pass is `podman stop`, which the
 # orchestrator can do reliably, rather than signalling a pid and hoping.
+log "core storage backend: ${CORE_BACKEND:-sqlite}"
 log "building core in the toolchain container"
 
 podman run --rm -v "$REPO":/work -w /work \
@@ -206,14 +219,41 @@ podman run --rm -v "$REPO":/work -w /work \
     :core:installDist
 
 mkdir -p "$RUN/core"
+
+# Core's storage, chosen by CORE_BACKEND.
+#
+# The gate asks for the T5 suite green CROSS-ENGINE, and a browser tier that only
+# ever drove core on SQLite would be answering half of that. The connector does
+# not know which backend core uses -- that is the storage seam's whole point --
+# but "the connector cannot tell" is a claim, and this is what tests it.
+case "${CORE_BACKEND:-sqlite}" in
+    sqlite)
+        CORE_STORAGE='backend = "sqlite"
+url = "jdbc:sqlite:/state/soulbind.db"'
+        ;;
+    mariadb)
+        # Its own database on the server Flarum already uses. A second container
+        # would be a second thing to wait for, and a second thing to blame when
+        # it does not come up.
+        podman exec -i "$DB_C" mariadb -h 127.0.0.1 -uroot -p"$DB_ROOT" \
+            -e "CREATE DATABASE IF NOT EXISTS soulbind CHARACTER SET utf8mb4;
+                GRANT ALL ON soulbind.* TO '$DB_USER'@'%'; FLUSH PRIVILEGES;" 2>/dev/null
+        CORE_STORAGE="backend = \"mariadb\"
+url = \"jdbc:mariadb://${DB_C}:3306/soulbind\"
+user = \"${DB_USER}\""
+        ;;
+    *)
+        log "unknown CORE_BACKEND '${CORE_BACKEND}'"
+        exit 1 ;;
+esac
+
 cat > "$RUN/core/soulbind.toml" <<TOML
 [server]
 host = "0.0.0.0"
 port = $CORE_PORT
 
 [storage]
-backend = "sqlite"
-url = "jdbc:sqlite:/state/soulbind.db"
+$CORE_STORAGE
 
 [linking]
 codettlseconds = 600
@@ -225,6 +265,7 @@ TOML
 core_cli() {
     podman run --rm --network "$NET" \
         -v "$REPO":/work:ro -v "$RUN/core":/state \
+        -e SOULBIND_STORAGE_PASSWORD="${DB_PASS}" \
         "$FLARUM_TOOLCHAIN_IMAGE" \
         /work/core/build/install/core/bin/core "$@" --config /state/soulbind.toml
 }
@@ -253,6 +294,7 @@ start_core() {
     podman run -d --name "$CORE_C" --network "$NET" \
         -p "${CORE_PORT}:${CORE_PORT}" \
         -v "$REPO":/work:ro -v "$RUN/core":/state \
+        -e SOULBIND_STORAGE_PASSWORD="${DB_PASS}" \
         "$FLARUM_TOOLCHAIN_IMAGE" \
         /work/core/build/install/core/bin/core serve --config /state/soulbind.toml \
         >/dev/null

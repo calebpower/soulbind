@@ -155,8 +155,15 @@ podman run --rm -v "$PWD":/work -w /work/connector-flarum "$PHP" sh -c '
 # The scope is narrow and stays narrow: a forum, a database and a browser. The
 # game-side images -- Paper, Velocity -- remain Phase 8 as written.
 # ---------------------------------------------------------------------------
-echo "run: forum tier"
-sh harness/flarum/stack.sh
+# BOTH engines, because the gate asks for the T5 suite green cross-engine.
+#
+# The connector cannot tell which backend core uses -- that is what the storage
+# seam is for -- but "cannot tell" is a claim, and running the browser tier
+# against each is what tests it rather than asserting it.
+for engine in sqlite mariadb; do
+    echo "run: forum tier (core on $engine)"
+    CORE_BACKEND=$engine sh harness/flarum/stack.sh
+done
 
 # A run must not inherit a container the previous run left behind: it would be
 # serving the previous run's schema, and a green result would be about data
