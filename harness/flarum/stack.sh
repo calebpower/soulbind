@@ -862,6 +862,21 @@ case "$REFUSAL_STATUS" in
         exit 1 ;;
 esac
 
+# A 500 with code "unknown" means Flarum did not recognise the exception. It
+# does NOT mean the exception was GateRefused-and-unregistered: any throw from
+# anywhere in this extension looks identical from out here.
+#
+# I assumed it was the registration and spent an iteration on that assumption.
+# Flarum writes the real exception, with its class and stack, to its log.
+if [ "$REFUSAL_STATUS" = "500" ]; then
+    log "--- what Flarum logged for that 500 ---"
+    podman exec "$WEB_C" sh -c 'tail -40 /site/storage/logs/flarum.log 2>/dev/null' \
+        | grep -vE "^\s*#[0-9]+ " | head -20 || true
+    log "--- the first stack frames ---"
+    podman exec "$WEB_C" sh -c 'tail -60 /site/storage/logs/flarum.log 2>/dev/null' \
+        | grep -E "^\s*#[0-9]" | head -8 || true
+fi
+
 # The reason has to be IN there. A 403 whose body says nothing leaves the person
 # with a blank refusal, which is the same failure with a better status code.
 if grep -q "not linked" "$REFUSAL_BODY"; then
