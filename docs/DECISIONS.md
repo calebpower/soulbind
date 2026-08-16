@@ -1424,3 +1424,88 @@ Three mechanisms now cover it: the contract suite (runtime, needs a real
 multi-writer backend), the check-then-act guard (static, runs anywhere), and
 `reaper test` after every phase. The guard is the only one that works on this
 workstation, which is why it exists.
+
+## Phase 5 — connector-velocity
+
+### 5.1 — The transport seam, and what it buys
+
+`Transport` is one method. Everything above it — envelope construction, signing,
+refusal handling, decision caching — is tested against `InMemoryTransport` with
+no socket. That makes conditions a real network cannot be asked for on demand
+one line each: a core reachable for one call and gone for the next, a truncated
+body, a gateway answering in JSON.
+
+The Velocity API comes from the PaperMC repository, which is the only reason a
+second repository exists. Content-filtered to `com.velocitypowered`, because a
+typo'd coordinate resolving from an unexpected host is how a supply chain gets a
+participant nobody chose. Version 3.5.1, a release rather than the estate's
+snapshot, and `compileOnly` — the proxy supplies it, and the api module is MIT
+while the proxy is GPLv3, which is what keeps this distributable.
+
+### 5.2 — Refused is not unreachable, and two consequences
+
+A refusal is core saying no: tell the person, do not retry, and **do not consult
+the cache**. Serving a cached allow after core refuses this connector's
+capability would use a stale answer to route around a permissions problem, and
+it would keep working long enough for nobody to notice.
+
+A response that is not an envelope is an **outage**. An API gateway, service mesh
+or rate limiter answering in JSON is not core, and core never saw the request —
+reporting that as a denial tells somebody they were refused by a system that
+never heard of them.
+
+*Mutation-checked:* a refusal falling through to the fail mode, an unreadable
+effect defaulting open, an outage reported as a refusal. All caught. A fourth —
+a non-envelope treated as a refusal — was **not**, and the reason is instructive:
+the test feeding it an HTML error page never reached that branch, because HTML
+fails JSON parsing entirely and takes the unparseable path. The branch needed
+*valid JSON that is not an envelope*, which is also the likely case in practice.
+
+### 5.3 — No core round trip on the event thread, and a timeout that agrees with an outage
+
+A join event waiting on a network call holds a proxy thread. A proxy that stops
+accepting connections because one backend service is slow is a worse outcome
+than any single decision, so the call goes to a pool and the event thread waits
+briefly for a result.
+
+When the wait expires the **fail mode decides, by the same code path as an
+outage** — because from the player's point of view it was one. Separate branches
+for "timed out" and "unreachable" is how the two drift until one of them fails
+open, and a test asserts the two verdicts are identical.
+
+The abandoned call is cancelled with an interrupt. Otherwise every join behind a
+slow core accumulates work whose answer nobody will read.
+
+The budget is bounded at both ends in configuration: below 50ms no round trip
+completes and every join falls to the fail mode; above 10s a slow core holds
+proxy threads long enough to stop the proxy accepting connections at all.
+
+*Mutation-checked:* the budget ignored, the timed-out call left running, a
+timeout failing open regardless of configuration, an unconfigured gate ceasing
+to allow, and the kick ceasing to name what is missing. All caught.
+
+### 5.4 — An unconfigured gate allows everybody, deliberately
+
+A deployment that wants `/link` without enforcement must be able to say so.
+Turning enforcement on before a community has linked is how an operator locks
+out their own players, and the migration path has to exist.
+
+### 5.5 — The effector is optional, and says so honestly
+
+The permissions plugin is a soft dependency, looked up reflectively. Its absence
+is logged **once** and is non-fatal: a proxy without one should still run
+`/link` and still enforce the join gate. Refusing to start over a missing
+optional integration turns one operator's choice into an outage.
+
+A present-but-unloadable plugin is logged with its cause rather than reported as
+absent — "no permissions plugin found" would send an operator looking for one
+that is sitting right there.
+
+**An absent effector reports `false` from `grant`.** It initially returned
+`true`, because the no-op did not throw. That would let a caller log "granted"
+for a group that exists nowhere, and an operator reading that log would have no
+way to discover the plugin was missing.
+
+A grant that throws is reported, not propagated. A player who linked
+successfully should not see an error because a permissions plugin was briefly
+unhappy: the link happened, and the group is a consequence that can be retried.
