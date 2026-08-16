@@ -863,18 +863,42 @@ case "$REFUSAL_STATUS" in
 esac
 
 # A 500 with code "unknown" means Flarum did not recognise the exception. It
-# does NOT mean the exception was GateRefused-and-unregistered: any throw from
-# anywhere in this extension looks identical from out here.
+# does NOT mean the exception was GateRefused-and-unregistered: Flarum's own
+# Registry calls getType() on any KnownError, so a GateRefused would carry its
+# own code even unregistered. Any other throw in this extension looks like this.
 #
-# I assumed it was the registration and spent an iteration on that assumption.
-# Flarum writes the real exception, with its class and stack, to its log.
+# The first version of this dump tailed storage/logs/flarum.log and printed
+# nothing -- which told me only that I had guessed the wrong file. All three
+# places the truth could be are now checked, and each says so if it is empty.
 if [ "$REFUSAL_STATUS" = "500" ]; then
-    log "--- what Flarum logged for that 500 ---"
-    podman exec "$WEB_C" sh -c 'tail -40 /site/storage/logs/flarum.log 2>/dev/null' \
-        | grep -vE "^\s*#[0-9]+ " | head -20 || true
-    log "--- the first stack frames ---"
-    podman exec "$WEB_C" sh -c 'tail -60 /site/storage/logs/flarum.log 2>/dev/null' \
-        | grep -E "^\s*#[0-9]" | head -8 || true
+    log "--- flarum's log directory ---"
+    podman exec "$WEB_C" sh -c 'ls -la /site/storage/logs 2>&1' | head -10 || true
+    podman exec "$WEB_C" sh -c 'cat /site/storage/logs/*.log 2>/dev/null | tail -30' \
+        | head -30 || log "  (no log files with content)"
+
+    log "--- the web server's stderr, where php -S puts PHP errors ---"
+    podman logs "$WEB_C" 2>&1 | grep -viE "accepted$|closing$|Development Server" | tail -25 || true
+
+    # Last resort, and the most direct: ask Flarum to do the thing and report
+    # what it throws, in process, with the class and the message.
+    log "--- the exception, raised in process ---"
+    podman exec "$WEB_C" php -r '
+        require "/site/vendor/autoload.php";
+        $site = require "/site/site.php";
+        $app = $site->bootApp();
+        $c = $app->getContainer();
+        try {
+            $gate = $c->make(Soulbind\Flarum\Gate\AccessGate::class);
+            $outcome = $gate->checkRegistration("probe@example.com");
+            echo "gate answered: allowed=", $outcome->allowed ? "yes" : "no",
+                 " reason=", $outcome->reason, " message=", $outcome->message, "\n";
+        } catch (Throwable $e) {
+            echo "resolving or calling the gate threw ", get_class($e), ": ",
+                 $e->getMessage(), "\n  at ", $e->getFile(), ":", $e->getLine(), "\n";
+            $p = $e->getPrevious();
+            if ($p) { echo "  caused by ", get_class($p), ": ", $p->getMessage(), "\n"; }
+        }
+    ' 2>&1 | head -20 || true
 fi
 
 # The reason has to be IN there. A 403 whose body says nothing leaves the person
