@@ -38,6 +38,34 @@ absorb a Java-side mistake as the new expectation.
    `1`/`l`/`I`), is case-insensitive, and strips separators before comparison.
 2. **HMAC request signing** — key, timestamp, nonce and body to signature.
 
+## What they cannot pin, and what covers it instead
+
+A corpus is rows of input-to-output. Two whole classes of contract do not fit
+that shape, and both were found to be uncovered by mutating the code and
+watching every row still pass.
+
+**Rules about inputs that produce no output.** The signer must reject an empty
+key, an empty nonce, and a nonce containing the field separator — the last
+because it would make the canonical form ambiguous, letting two different
+requests sign to identical bytes. No `→ digest` row can express "and this one
+throws". Deleting either nonce rule left the whole file green. Covered by
+`VectorChecks::signerArgumentValidation` and `RequestSignerTest`, which state
+the rules directly and are held to agree with each other.
+
+**Properties over the whole input space.** Eight rows here pin the eight
+characters known to fold into the alphabet — `U+017F`, `U+00DF`, and the
+`ﬀ`/`ﬅ`/`ﬆ` ligatures. Eight rows catch eight characters and nothing else, and
+the defect they were written for was found by mutation rather than by any row
+(`../docs/DECISIONS.md` 7.3). The actual guard is an exhaustive sweep of every
+code point, in both languages, asserting that nothing outside the alphabet
+normalises into it.
+
+**The rule of thumb.** When adding a row here, ask what a *wrong*
+implementation would have to do to still pass. If the answer is "quite a lot",
+the row is doing work. If the answer is "anything, as long as it is wrong in a
+way this input does not reach", the corpus is the wrong tool and the property
+belongs in a sweep or a direct assertion.
+
 ## Why committed rather than generated at test time
 
 Generated-at-test-time vectors prove both implementations agree with *the

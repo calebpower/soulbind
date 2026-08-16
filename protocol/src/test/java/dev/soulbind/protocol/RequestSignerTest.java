@@ -17,6 +17,7 @@
 package dev.soulbind.protocol;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -123,6 +124,29 @@ class RequestSignerTest {
             assertTrue(
                     e.getMessage().contains("separator"),
                     () -> "the refusal must say why: " + e.getMessage());
+        }
+
+        @Test
+        @DisplayName("a carriage return in the nonce is ACCEPTED -- deliberately")
+        void carriageReturnIsNotTheSeparator() {
+            // The separator is LF alone, so a CR creates no ambiguity about
+            // where a field ends, and the other implementation signs it.
+            //
+            // Stated as a test rather than left implicit because it is a
+            // CONTRACT, not an accident of how the check was written: if either
+            // side starts rejecting CR, it stops being able to verify what the
+            // other produces, and a signature that verifies on one connector and
+            // not another is the worst kind of intermittent.
+            //
+            // The nonce is generated client-side as a UUID, so no caller-supplied
+            // CR reaches this in practice. On the receiving side a caller does
+            // control it -- and SignedRequestVerifier catches
+            // IllegalArgumentException and answers MALFORMED, so a hostile nonce
+            // is a refusal rather than a 500.
+            assertDoesNotThrow(
+                    () -> RequestSigner.canonicalBytes(1L, "a\rb", "body"),
+                    "CR is not the field separator; rejecting it here would diverge from the "
+                            + "other implementation");
         }
 
         @ParameterizedTest

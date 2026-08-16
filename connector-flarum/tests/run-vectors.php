@@ -53,6 +53,7 @@ $checks = [
     'normalisation is idempotent' => VectorChecks::idempotence(...),
     'the corpus is balanced' => VectorChecks::corpusShape(...),
     'folding cannot synthesise a code' => VectorChecks::foldingCannotSynthesise(...),
+    'signer argument contract' => VectorChecks::signerArgumentValidation(...),
 ];
 
 echo 'soulbind vector check (', $hostile ? 'HOSTILE charset' : 'ordinary', ")\n";

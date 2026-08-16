@@ -106,6 +106,17 @@ final class GoldenVectorTest extends TestCase
     }
 
     #[Test]
+    #[DisplayName('the signer refuses what the other implementation refuses')]
+    public function theSignerArgumentContractHolds(): void
+    {
+        $this->assertNoFailures(
+            VectorChecks::signerArgumentValidation(),
+            'the signer disagrees with the other implementation about which arguments are '
+                . 'legal, so one side will produce signatures the other refuses to verify'
+        );
+    }
+
+    #[Test]
     #[DisplayName('the hostile run is actually hostile')]
     public function theHostileRunIsActuallyHostile(): void
     {

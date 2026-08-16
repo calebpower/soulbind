@@ -175,6 +175,73 @@ final class VectorChecks
 
 
     /**
+     * The signer's argument contract, which the digest corpus cannot express.
+     *
+     * A vector file is rows of (key, timestamp, nonce, body) -> digest. It can
+     * only ever describe inputs that produce a signature, so the rules about
+     * inputs that must NOT produce one are invisible to it. Mutation confirmed
+     * that: deleting either validation rule from the signer left every vector
+     * passing.
+     *
+     * The other side states the same rules and tests them directly. These are
+     * the same rules, so that the two agree about refusals and not merely about
+     * digests -- a signer that accepts what the other rejects is a signer that
+     * produces signatures the other will not verify.
+     *
+     * @return list<string>
+     */
+    public static function signerArgumentValidation(): array
+    {
+        $failures = [];
+
+        $mustReject = [
+            'an empty signing key' => ['', 1700000000, 'abc123', '{}'],
+            'an empty nonce' => ['k', 1700000000, '', '{}'],
+            // A nonce carrying the field separator would make the canonical form
+            // ambiguous: two different (nonce, body) pairs could produce
+            // identical signed bytes, and one signature would then authenticate
+            // a request nobody signed.
+            'a nonce containing the separator' => ['k', 1700000000, "a\nb", '{}'],
+            'a nonce that is only a separator' => ['k', 1700000000, "\n", '{}'],
+        ];
+
+        foreach ($mustReject as $what => [$key, $timestamp, $nonce, $body]) {
+            try {
+                RequestSigner::sign($key, $timestamp, $nonce, $body);
+                $failures[] = "{$what} was signed instead of rejected";
+            } catch (\InvalidArgumentException) {
+                // as intended
+            }
+        }
+
+        // A carriage return is deliberately NOT rejected: the separator is LF
+        // alone, so a CR creates no ambiguity, and both implementations treat it
+        // as ordinary content. Asserted so that the two stay agreed about it --
+        // if one side starts rejecting CR, it stops being able to verify what
+        // the other signs, and this states which behaviour is the contract
+        // rather than leaving it to whichever was written second.
+        try {
+            RequestSigner::sign('k', 1700000000, "a\rb", '{}');
+        } catch (\InvalidArgumentException) {
+            $failures[] = 'a nonce containing a carriage return was rejected. CR is not the '
+                . 'field separator and the other implementation signs it; rejecting it here '
+                . 'means this side cannot verify what the other side produces.';
+        }
+
+        // The obverse: a fix that rejected everything would satisfy every
+        // assertion above.
+        try {
+            RequestSigner::sign('k', 1700000000, 'abc123', null);
+            RequestSigner::sign('k', 1700000000, 'abc123', '');
+        } catch (\InvalidArgumentException $e) {
+            $failures[] = 'a valid call was rejected: ' . $e->getMessage()
+                . '. An absent body is legal and canonicalises to empty.';
+        }
+
+        return $failures;
+    }
+
+    /**
      * Exactly these 48 characters are a code on their own. Nothing else is.
      *
      * Written out by hand, not derived from {@see LinkCode::ALPHABET} and not

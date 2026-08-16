@@ -1900,3 +1900,42 @@ rather than after a server has come up.
 The image is pinned by digest for the same reason as the others, and needs only
 `mbstring`, `hash` and `json` — notably not `ext-xmlwriter`, because the runner
 does not use PHPUnit (7.2).
+
+### 7.7 — The signer's argument contract is asserted, because vectors cannot
+
+Applying 7.3's method to the other cross-language surface: mutate the signer,
+see what survives. Eight mutations of the digest path — separator changed to
+CRLF, timestamp and nonce swapped, an absent body signed as the four characters
+`null`, SHA-256 downgraded to SHA-1, key and message swapped, separator dropped
+— were all caught by the corpus. Two were not:
+
+- removing the check that a nonce must not be empty
+- removing the check that a nonce must not contain the field separator
+
+Not a defect. Both rules were present and correct in both implementations, and
+the other side already tests them directly. But a vector file is rows of
+`(key, timestamp, nonce, body) → digest`; it can only describe inputs that
+*produce* a signature, so rules about inputs that must **not** produce one are
+invisible to it. Deleting either rule left every vector passing.
+
+That matters here more than it would elsewhere, because the two sides must agree
+about *refusals* as well as digests. A signer that accepts what the other rejects
+produces signatures the other will not verify — and the separator rule is the one
+that keeps the canonical form unambiguous, so two different requests cannot sign
+to identical bytes.
+
+`VectorChecks::signerArgumentValidation` states the rules directly. All ten
+mutations are now caught.
+
+It also pins the *negative*: a carriage return is deliberately **accepted**. The
+separator is LF alone, so a CR creates no ambiguity, and both sides sign it. That
+was previously true on both sides by accident of how the check was written —
+neither tested it — so a plausible "harden the nonce" change on either side would
+have silently broken interoperability. `RequestSignerTest` now states it too, and
+both statements are mutation-checked by making CR rejected and watching each fail.
+
+The nonce is generated client-side as a UUID, so no caller-supplied CR reaches
+the signer in practice. On the receiving side a caller *does* control it, and
+`SignedRequestVerifier` already catches `IllegalArgumentException` and answers
+`malformed` — a hostile nonce is a refusal, not a 500. Checked rather than
+assumed while writing this.
