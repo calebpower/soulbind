@@ -65,7 +65,11 @@ test('@refused an unlinked account is refused, in core\'s own words', async ({ p
 
   // The refusal must reach the PERSON. A gate that denies correctly and renders
   // a blank modal has failed at the only job this tier tests.
-  await expect(dialog).toContainText('Link a game account before registering.');
+  // Core's OWN wording, not the connector's. The gate passes core's detail
+  // through because core knows what is missing and the connector does not --
+  // and a rule carries no custom message, which I learned by trying to send
+  // one and having the whole payload refused.
+  await expect(dialog).toContainText(/not linked to any other/i);
   await expectNoServerError(page);
 });
 

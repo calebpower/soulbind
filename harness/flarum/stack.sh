@@ -781,7 +781,7 @@ log "browser tier"
 # and its three-argument form still behaves exactly as it did.
 set_rule() {
     "$REPO/harness/fullstack/set-rule.sh" \
-        "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" forum-register "$1" "$2" "$3"
+        "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" forum-register "$1" "$2"
 }
 
 browser() {
@@ -819,24 +819,24 @@ else
 fi
 
 log "pass 1 of 4: an unlinked account is refused, in core's own words"
-set_rule true deny "Link a game account before registering."
+set_rule true deny
 browser npx playwright test --grep "@refused"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-1.json" 2>/dev/null || true
 
 log "pass 2 of 4: the rule allows, and the account is admitted"
-set_rule false allow ""
+set_rule false allow
 browser npx playwright test --grep "@admitted"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-2.json" 2>/dev/null || true
 
 log "pass 3 of 4: core is stopped, and the gate must hold"
-set_rule true deny "Link a game account before registering."
+set_rule true deny
 stop_core
 browser npx playwright test --grep "@outage"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-3.json" 2>/dev/null || true
 
 log "pass 4 of 4: core returns, and nothing needs cleaning up after it"
 start_core
-set_rule false allow ""
+set_rule false allow
 browser npx playwright test --grep "@recovery"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-4.json" 2>/dev/null || true
 

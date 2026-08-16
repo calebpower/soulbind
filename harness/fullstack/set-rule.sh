@@ -14,11 +14,13 @@ GATE=$3
 # arguments -- so the Phase 5 caller keeps its behaviour byte for byte while the
 # forum tier, which needs several different rules across its passes, can ask for
 # them here instead of growing a second copy of the signing code.
+# A rule has no `detail`. The wording a person sees on a denial comes from the
+# policy engine, not from the rule -- I tried to pass one and core refused the
+# whole payload.
 REQUIRE_LINKED=${4:-true}
 DEFAULT_EFFECT=${5:-deny}
-DETAIL=${6:-}
 
-python3 - "$CORE" "$CREDENTIAL" "$GATE" "$REQUIRE_LINKED" "$DEFAULT_EFFECT" "$DETAIL" <<'PYEOF'
+python3 - "$CORE" "$CREDENTIAL" "$GATE" "$REQUIRE_LINKED" "$DEFAULT_EFFECT" <<'PYEOF'
 import hashlib
 import hmac
 import json
@@ -31,7 +33,6 @@ import uuid
 core, credential, gate = sys.argv[1], sys.argv[2], sys.argv[3]
 require_linked = sys.argv[4].lower() == "true" if len(sys.argv) > 4 else True
 default_effect = sys.argv[5] if len(sys.argv) > 5 else "deny"
-detail = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] else None
 
 body = json.dumps({
     "schema": 1,
@@ -46,7 +47,6 @@ body = json.dumps({
         "requiredKinds": [],
         "graceSeconds": 0,
         "defaultEffect": default_effect,
-        **({"detail": detail} if detail else {}),
     },
 }, separators=(",", ":"))
 
