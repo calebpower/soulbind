@@ -55,6 +55,17 @@ final class JdbcEventRepository implements EventRepository {
                 }
             }
 
+            // CHECK-THEN-ACT REVIEWED: the read above is not a check.
+            //
+            // The UPDATE preceding it took an exclusive row lock on the
+            // allocator and has already incremented it; this SELECT reads that
+            // transaction's own uncommitted value, and a concurrent allocator
+            // blocks at its own UPDATE until this one commits. The read cannot
+            // observe a value another writer will also claim.
+            //
+            // The dangerous shape is read-then-decide-then-write. This is
+            // write-then-read-what-I-wrote, which is the inversion that makes it
+            // safe -- and the reason the sequence is allocated by UPDATE at all.
             long next;
             try (PreparedStatement ps =
                             c.prepareStatement("SELECT next_seq FROM event_seq WHERE id = 1");
@@ -129,45 +140,62 @@ final class JdbcEventRepository implements EventRepository {
     @Override
     public long acknowledge(String connectorId, long position, Instant at) {
         return jdbc.write("event.acknowledge", c -> {
-            long current = 0L;
+            // The predicate travels WITH the update. This was SELECT-then-
+            // compute-then-UPDATE, which loses under concurrency: two threads
+            // read 5, one writes 10, the other writes 7, and the cursor goes
+            // backwards -- redelivering events the connector already applied.
+            //
+            // Invisible on SQLite, whose write transactions are serialised by
+            // the engine, so the interleaving cannot occur there at all. Found
+            // by the check-then-act guard rather than by a test, because no test
+            // on this workstation could reach it.
+            try (PreparedStatement ps = c.prepareStatement(
+                    "UPDATE event_cursor SET position = ?, updated_at = ?"
+                            + " WHERE connector_id = ? AND position < ?")) {
+                ps.setLong(1, position);
+                ps.setLong(2, at.toEpochMilli());
+                ps.setString(3, connectorId);
+                ps.setLong(4, position);
+                ps.executeUpdate();
+            }
+
+            // Insert if this connector has no cursor yet, tolerating a
+            // concurrent insert the same way every other insert-if-absent does.
+            Jdbc.ensureExists(
+                    conn -> {
+                        try (PreparedStatement ps = conn.prepareStatement(
+                                "INSERT INTO event_cursor (connector_id, position, updated_at)"
+                                        + " VALUES (?, ?, ?)")) {
+                            ps.setString(1, connectorId);
+                            ps.setLong(2, position);
+                            ps.setLong(3, at.toEpochMilli());
+                            ps.executeUpdate();
+                        }
+                        return null;
+                    },
+                    conn -> {
+                        try (PreparedStatement ps = conn.prepareStatement(
+                                "SELECT 1 FROM event_cursor WHERE connector_id = ?")) {
+                            ps.setString(1, connectorId);
+                            try (ResultSet rs = ps.executeQuery()) {
+                                return rs.next();
+                            }
+                        }
+                    },
+                    c);
+
+            // Read back what the cursor ACTUALLY is, rather than returning what
+            // this caller hoped for. Under concurrency another acknowledgement
+            // may legitimately have moved it further on, and reporting a
+            // position lower than the truth would have a connector re-poll
+            // events it has already acknowledged.
             try (PreparedStatement ps = c.prepareStatement(
                     "SELECT position FROM event_cursor WHERE connector_id = ?")) {
                 ps.setString(1, connectorId);
                 try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        current = rs.getLong(1);
-                    }
+                    return rs.next() ? rs.getLong(1) : position;
                 }
             }
-
-            // Never backwards. A cursor that could move back would let a buggy
-            // acknowledgement replay the entire history -- survivable, since
-            // delivery is at-least-once and keys exist, but a very different
-            // amount of work arriving without warning.
-            long target = Math.max(current, position);
-            if (target == current && current != 0L) {
-                return current;
-            }
-
-            try (PreparedStatement update = c.prepareStatement(
-                    "UPDATE event_cursor SET position = ?, updated_at = ?"
-                            + " WHERE connector_id = ?")) {
-                update.setLong(1, target);
-                update.setLong(2, at.toEpochMilli());
-                update.setString(3, connectorId);
-                if (update.executeUpdate() == 1) {
-                    return target;
-                }
-            }
-            try (PreparedStatement insert = c.prepareStatement(
-                    "INSERT INTO event_cursor (connector_id, position, updated_at)"
-                            + " VALUES (?, ?, ?)")) {
-                insert.setString(1, connectorId);
-                insert.setLong(2, target);
-                insert.setLong(3, at.toEpochMilli());
-                insert.executeUpdate();
-            }
-            return target;
         });
     }
 

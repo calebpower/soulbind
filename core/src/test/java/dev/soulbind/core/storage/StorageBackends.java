@@ -205,6 +205,32 @@ public final class StorageBackends {
         return backend.configName();
     }
 
+    /**
+     * Opens a store with write serialisation disabled, so races are reachable.
+     *
+     * <p>The point of the concurrency contract suite. On SQLite the single-writer
+     * executor silently supplied correctness the repositories had not earned for
+     * two phases; opening without it makes a check-then-act fail here rather
+     * than in a session, or in production.
+     *
+     * <p>MariaDB has no executor to disable, so this is the ordinary open there
+     * — which is the whole point: the two backends should then behave the same.
+     */
+    public static Storage openUnserialised(Backend backend, Path tempDir) {
+        return switch (backend) {
+            case SQLITE -> Storage.openWithoutWriteSerialisation(
+                    Backend.SQLITE, jdbcUrlFor(Backend.SQLITE, tempDir), null, null);
+            case MARIADB -> {
+                resetMariadbSchema();
+                yield Storage.open(
+                        Backend.MARIADB,
+                        mariadbUrl(),
+                        System.getenv("SOULBIND_TEST_MARIADB_USER"),
+                        System.getenv("SOULBIND_TEST_MARIADB_PASSWORD"));
+            }
+        };
+    }
+
     /** The backends available in this environment. Always at least SQLite. */
     public static Stream<Arguments> available() {
         return mariadbAvailable()

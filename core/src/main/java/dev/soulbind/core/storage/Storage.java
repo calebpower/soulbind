@@ -66,6 +66,45 @@ public final class Storage implements AutoCloseable {
      * one I tested" is how a migration bug reaches production.
      */
     public static Storage open(Backend backend, String jdbcUrl, String user, String password) {
+        return open(backend, jdbcUrl, user, password, true);
+    }
+
+    /**
+     * Opens a store with write serialisation DISABLED. Test scaffolding.
+     *
+     * <p>The single-writer executor exists because SQLite permits one writer. It
+     * is a <b>deployment</b> necessity, not a correctness mechanism — and the
+     * distinction matters, because for two phases it silently supplied
+     * correctness the repositories had not earned.
+     *
+     * <p>Three real defects hid behind it: audit sequence assignment that raced,
+     * and two insert-if-absent paths that were SELECT-then-INSERT. Each was
+     * invisible on SQLite, where the executor serialised every write, and each
+     * surfaced the first time a multi-writer backend ran. The second pair
+     * reached a live 500 before anything noticed.
+     *
+     * <p>So the invariant is stated and tested rather than hoped for:
+     * <b>repository correctness must not depend on the executor.</b> Opening
+     * without it — with a real connection pool, WAL and a busy timeout — lets
+     * writes genuinely interleave on SQLite, so a check-then-act fails on the
+     * workstation instead of waiting for a session.
+     *
+     * <p>Not public, and not a configuration option. A deployment running SQLite
+     * without serialisation would meet SQLITE_BUSY under load, which is exactly
+     * the intermittent failure the executor exists to prevent. This is for tests
+     * that need the races to be reachable.
+     */
+    static Storage openWithoutWriteSerialisation(
+            Backend backend, String jdbcUrl, String user, String password) {
+        return open(backend, jdbcUrl, user, password, false);
+    }
+
+    private static Storage open(
+            Backend backend,
+            String jdbcUrl,
+            String user,
+            String password,
+            boolean serialiseWrites) {
         HikariConfig cfg = new HikariConfig();
         cfg.setJdbcUrl(jdbcUrl);
         if (user != null) {
@@ -87,16 +126,18 @@ public final class Storage implements AutoCloseable {
                 // This is handled HERE rather than left to callers, because a
                 // caller who does not know the backend cannot know to serialise,
                 // and the whole point of the seam is that they should not have to.
-                cfg.setMaximumPoolSize(1);
+                cfg.setMaximumPoolSize(serialiseWrites ? 1 : 4);
                 cfg.addDataSourceProperty("journal_mode", "WAL");
                 cfg.addDataSourceProperty("busy_timeout", "5000");
                 cfg.addDataSourceProperty("foreign_keys", "true");
-                writeExecutor = Executors.newSingleThreadExecutor(
-                        r -> {
-                            Thread t = new Thread(r, "soulbind-sqlite-writer");
-                            t.setDaemon(true);
-                            return t;
-                        });
+                writeExecutor = serialiseWrites
+                        ? Executors.newSingleThreadExecutor(
+                                r -> {
+                                    Thread t = new Thread(r, "soulbind-sqlite-writer");
+                                    t.setDaemon(true);
+                                    return t;
+                                })
+                        : null;
             }
             case MARIADB -> {
                 cfg.setMaximumPoolSize(10);

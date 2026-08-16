@@ -1330,3 +1330,67 @@ be an outage caused by bookkeeping.
 
 Eviction is access-ordered, so a connector being hammered with one repeated
 redelivery keeps that key live — which is exactly the case the dedup is for.
+
+## Closing the single-writer blind spot
+
+### X.1 — The executor is a deployment necessity, not a correctness mechanism
+
+Four defects of one shape reached the repository, each invisible on SQLite and
+each found only when a multi-writer backend ran: audit sequences allocated by
+`SELECT MAX+1`; `platformKind.seen` and `gate.seen` as SELECT-then-INSERT (which
+reached a live HTTP 500); and an event cursor advanced by SELECT-then-UPDATE,
+which could move **backwards** and redeliver events a connector had applied.
+
+The last was found by the guard below, not by any test — no test on this
+workstation could have found it.
+
+The single-writer executor exists because SQLite permits one writer. It is a
+**deployment** necessity. For four phases it also silently supplied correctness
+the repositories had not earned, and the distinction only became visible when
+something removed it.
+
+### X.2 — What could be fixed here, and what could not
+
+**`Storage.openWithoutWriteSerialisation`** opens SQLite with a real pool and no
+executor, so the concurrency contract suite can let writes interleave. Package-
+private and test-only: a deployment running SQLite unserialised would meet
+SQLITE_BUSY under load, which is the intermittent failure the executor prevents.
+
+**It is not sufficient, and the reason is worth recording.** Reverting the three
+historical defects, the unserialised suite caught only one. SQLite serialises
+write transactions *at the engine level* — the interleaving that produces
+check-then-act defects **cannot occur** there, whatever this project configures.
+That is not a gap in the harness; it is what SQLite is.
+
+So the runtime approach has a ceiling, and the honest conclusion is that this
+defect class needs a mechanism that reads the code.
+
+### X.3 — The check-then-act guard
+
+Flags any `jdbc.write` block that reads before it writes, unless it uses
+`Jdbc.ensureExists` — which reads *after* the write fails rather than before it,
+the inversion that makes the race harmless — or carries a
+`CHECK-THEN-ACT REVIEWED:` comment saying why it is safe.
+
+Not a suppression mechanism: the comment has to state the reasoning, and it
+lives where the next reader is. Both sequence allocators carry one, because
+their read follows an atomic `UPDATE` holding the row lock — write-then-read-
+what-I-wrote, not read-then-decide-then-write.
+
+**What it does not prove:** that the flagged shape is always wrong, or that its
+absence means correctness. It proves every read-then-write in the storage layer
+was looked at by somebody, which is the property that was actually missing.
+
+### X.4 — The guard was disarmed by a comment, and its own mutation check found it
+
+Reverting `platformKind.seen` to its historical form did **not** trip the guard.
+The reverted code still carried the comment "See `Jdbc.ensureExists` for why…",
+and the exemption was matched against the raw line — so prose mentioning the
+sanctioned helper switched the guard off for the whole block.
+
+Exactly the lesson the storage seam guard already carried, unlearned in a new
+place: the exemption is now matched against code with comments stripped, while
+the REVIEWED marker is still matched on the raw line, because that one **is**
+meant to be a comment.
+
+A guard an explanation can switch off is not a guard.

@@ -77,6 +77,17 @@ final class JdbcAuditRepository implements AuditRepository {
                 }
             }
 
+            // CHECK-THEN-ACT REVIEWED: the read above is not a check.
+            //
+            // The UPDATE preceding it took an exclusive row lock on the
+            // allocator and has already incremented it; this SELECT reads that
+            // transaction's own uncommitted value, and a concurrent allocator
+            // blocks at its own UPDATE until this one commits. The read cannot
+            // observe a value another writer will also claim.
+            //
+            // The dangerous shape is read-then-decide-then-write. This is
+            // write-then-read-what-I-wrote, which is the inversion that makes it
+            // safe -- and the reason the sequence is allocated by UPDATE at all.
             long next;
             try (PreparedStatement ps =
                             c.prepareStatement("SELECT next_seq FROM audit_seq WHERE id = 1");
