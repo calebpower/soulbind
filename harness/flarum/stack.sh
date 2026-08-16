@@ -149,3 +149,184 @@ wait_for "core" 60 curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/"
 echo "$FORUM_CRED" > "$RUN/forum.credential"
 echo "$HARNESS_CRED" > "$RUN/harness.credential"
 log "core is up on $CORE_PORT"
+
+# --- the forum --------------------------------------------------------------
+#
+# Installed into a volume the web container keeps, not into the repository:
+# a Flarum site is a hundred megabytes of somebody else's code plus a
+# database-backed config, and none of it belongs in this tree.
+log "installing flarum $FLARUM_VERSION"
+
+mkdir -p "$RUN/forum/site"
+
+# The site's own composer.lock is emitted to out/ on first run, the same way the
+# extension's was, so the forum a test ran against can be reproduced exactly
+# rather than "whatever resolved that day".
+SITE_LOCK="$REPO/harness/flarum/site-composer.lock"
+if [ -f "$SITE_LOCK" ]; then
+    cp "$SITE_LOCK" "$RUN/forum/site/composer.lock"
+    log "installing the forum from its committed lock"
+else
+    log "NO committed site lock; this run resolves fresh and emits one to out/"
+fi
+
+cat > "$RUN/forum/site/composer.json" <<JSON
+{
+    "name": "soulbind/forum-harness",
+    "description": "Not a package. The forum a browser tier drives.",
+    "type": "project",
+    "require": {
+        "flarum/core": "$FLARUM_VERSION",
+        "soulbind/flarum-connector": "*"
+    },
+    "repositories": [
+        { "type": "path", "url": "/extension", "options": { "symlink": false } }
+    ],
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "flarum/extension-manager-composer-plugin": false,
+            "composer/package-versions-deprecated": false
+        }
+    }
+}
+JSON
+
+podman run --rm --network "$NET" \
+    -v "$RUN/forum/site":/site \
+    -v "$REPO/connector-flarum":/extension:ro \
+    -w /site -e COMPOSER_HOME=/tmp/composer \
+    "$COMPOSER_IMAGE" composer install --no-interaction --no-progress --no-plugins
+
+if [ ! -f "$SITE_LOCK" ]; then
+    mkdir -p "$REPO/out"
+    cp "$RUN/forum/site/composer.lock" "$REPO/out/site-composer.lock"
+    log "site lock written to out/site-composer.lock -- review and commit it"
+fi
+
+# Flarum's own installer, driven from a file rather than interactively.
+cat > "$RUN/forum/site/install.yml" <<YML
+debug: false
+offline: false
+baseUrl: $FORUM_URL
+databaseConfiguration:
+  driver: mysql
+  host: $DB_C
+  port: 3306
+  database: $DB_NAME
+  username: $DB_USER
+  password: $DB_PASS
+  prefix: ''
+adminUser:
+  username: admin
+  password: harness-admin-password
+  passwordConfirmation: harness-admin-password
+  email: admin@example.com
+settings:
+  forum_title: soulbind harness
+YML
+
+podman run --rm --network "$NET" \
+    -v "$RUN/forum/site":/site -w /site \
+    "$FLARUM_PHP_IMAGE" sh -c '
+      set -e
+      docker-php-ext-install pdo_mysql > /dev/null 2>&1 || true
+      php flarum install --file=install.yml
+    '
+
+log "starting the forum"
+# php -S, not a real web server. This is a harness: a browser tier needs a URL
+# that serves Flarum, not a production topology. The router script below is what
+# an nginx try_files rule would do, and is the whole difference.
+cat > "$RUN/forum/site/router.php" <<'PHPR'
+<?php
+// Serve a real file if one exists, otherwise hand everything to Flarum's front
+// controller -- exactly what `try_files $uri /index.php?$query_string` does.
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$file = __DIR__ . '/public' . $path;
+if ($path !== '/' && is_file($file)) {
+    return false;
+}
+require __DIR__ . '/public/index.php';
+PHPR
+
+podman run -d --name "$WEB_C" --network "$NET" \
+    -p "${FORUM_PORT}:${FORUM_PORT}" \
+    -v "$RUN/forum/site":/site -w /site \
+    "$FLARUM_PHP_IMAGE" sh -c "
+      docker-php-ext-install pdo_mysql > /dev/null 2>&1 || true
+      php -S 0.0.0.0:${FORUM_PORT} router.php
+    " >/dev/null
+
+wait_for "the forum" 90 curl -sf -o /dev/null "$FORUM_URL/"
+
+log "forum is up on $FORUM_PORT"
+log "core credential for the forum is in $RUN/forum.credential"
+
+# --- enable and configure the extension -------------------------------------
+#
+# Through the database, which is what the admin UI writes. A CLI command would
+# be tidier if one existed for every setting; it does not, and half the values
+# below are this extension's own. Writing what the UI writes keeps one code path
+# rather than a second that can drift from it.
+log "enabling and configuring the extension"
+
+sql() {
+    podman exec -i "$DB_C" mariadb -h 127.0.0.1 -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "$1"
+}
+
+EXT_ID=soulbind-flarum-connector
+
+sql "REPLACE INTO settings (\`key\`, \`value\`) VALUES
+      ('extensions_enabled', '[\"${EXT_ID}\"]'),
+      ('soulbind.core_url',       'http://host.containers.internal:${CORE_PORT}/'),
+      ('soulbind.credential',     '$(cat "$RUN/forum.credential")'),
+      ('soulbind.webhook_secret', '$(cat "$RUN/forum.credential")'),
+      ('soulbind.fail_mode',      'closed'),
+      ('soulbind.register_gate',  'forum-register'),
+      ('soulbind.post_gate',      'forum-post'),
+      ('soulbind.timeout_ms',     '2000');"
+
+podman exec "$WEB_C" php flarum cache:clear >/dev/null 2>&1 || true
+
+# --- the smoke --------------------------------------------------------------
+#
+# Proves the pieces are actually wired before any browser opens. A Playwright
+# failure against a stack that never came up correctly is a report about the
+# harness wearing the costume of a report about soulbind.
+log "smoke: the forum serves and the extension is enabled"
+
+curl -sf "$FORUM_URL/" | grep -q "soulbind harness" || {
+    log "the forum did not serve its own title; something is wrong before any test ran"
+    exit 1
+}
+
+ENABLED=$(sql "SELECT value FROM settings WHERE \`key\`='extensions_enabled';" | tail -1)
+case "$ENABLED" in
+    *"$EXT_ID"*) log "extension enabled" ;;
+    *) log "the extension is NOT enabled: $ENABLED"; exit 1 ;;
+esac
+
+# The webhook endpoint must exist and must REFUSE an unsigned request. If it
+# 404s, the extension's routes did not load and every gate assertion after this
+# would be testing an extension that is not running -- passing for the wrong
+# reason, which is worse than failing.
+log "smoke: the webhook endpoint exists and refuses an unsigned delivery"
+WEBHOOK_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/json' -d '{}' "$FORUM_URL/soulbind/webhook")
+case "$WEBHOOK_STATUS" in
+    400|401)
+        log "webhook refused an unsigned delivery with $WEBHOOK_STATUS" ;;
+    404)
+        log "the webhook endpoint 404s: the extension's routes did not load"
+        exit 1 ;;
+    200)
+        log "the webhook ACCEPTED an unsigned delivery -- signature verification is not running"
+        exit 1 ;;
+    *)
+        log "unexpected webhook status $WEBHOOK_STATUS"
+        exit 1 ;;
+esac
+
+log "stack is up and the extension is live"

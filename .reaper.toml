@@ -142,6 +142,22 @@ podman run --rm -v "$PWD":/work -w /work/connector-flarum "$PHP" sh -c '
   vendor/bin/phpunit --configuration phpunit-hostile.xml
 '
 
+# ---------------------------------------------------------------------------
+# The forum tier.
+#
+# EARLIER than the plan schedules it: §14 puts the forum image in Phase 8 with
+# the rest of the full-stack battery. Phase 7's own gate asks for a forum
+# account linking against a real core, and none of MariaDB, PHP or a web server
+# runs on the workstation -- so the choice is to bring the stage forward or to
+# claim a gate no test report could contradict, because a tier that never ran
+# leaves no failure behind. Recorded as departure 6.
+#
+# The scope is narrow and stays narrow: a forum, a database and a browser. The
+# game-side images -- Paper, Velocity -- remain Phase 8 as written.
+# ---------------------------------------------------------------------------
+echo "run: forum tier"
+sh harness/flarum/stack.sh
+
 # A run must not inherit a container the previous run left behind: it would be
 # serving the previous run's schema, and a green result would be about data
 # nobody in this session created.
@@ -204,6 +220,11 @@ images = [
     # bootstrap inside the step meant to raise confidence is the shortcut a
     # pinned digest exists to avoid.
     "docker.io/library/composer@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040",
+    # The forum tier. Digests live in harness/flarum/pins.env, which explains why
+    # the forum runs PHP 8.3 while the unit suite runs 8.4; they are repeated here
+    # because this list is what the manifest validator reads.
+    "docker.io/library/php@sha256:f62df9916bc05ae3c5120b41a115938f22623b0c98c815cbe2c67bc73cec21ef",
+    "mcr.microsoft.com/playwright@sha256:f87ec3ea2f3a394e050d0a5f1f83052b52b17fb70836e0bf29b5afb31fb58ce4",
 ]
 
 [sync]
