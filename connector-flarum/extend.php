@@ -34,6 +34,15 @@ return [
 
     (new Extend\Frontend('admin'))->js(__DIR__ . '/js/dist/admin.js'),
 
+    /*
+     * Forum JavaScript, for one purpose: putting a gate's reason back on the
+     * page. Flarum renders a response `detail` only for status 422, and shows a
+     * fixed sentence for every other status -- so without this, a refusal that
+     * travelled correctly all the way to the browser arrives as "You do not have
+     * permission to do that."
+     */
+    (new Extend\Frontend('forum'))->js(__DIR__ . '/js/dist/forum.js'),
+
     (new Extend\Locales(__DIR__ . '/locale')),
 
     /*

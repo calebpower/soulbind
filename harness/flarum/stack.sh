@@ -290,6 +290,38 @@ log "core is up on $CORE_PORT"
 # around it.
 log "installing flarum $FLARUM_VERSION"
 
+# --- build the frontend bundles ---------------------------------------------
+#
+# Built here rather than committed, and built BEFORE the extension is staged, so
+# the forum installs the bundles this source produces rather than whatever was
+# last checked in.
+#
+# extend.php has registered js/dist/admin.js since the admin page was written,
+# and that file has never existed. Flarum tolerated it silently -- which is
+# precisely how an asset stays missing: nothing complains, and the page it
+# belongs to simply does nothing.
+log "building the frontend bundles"
+
+podman run --rm -v "$REPO/connector-flarum/js":/js -w /js \
+    "$FLARUM_BROWSER_IMAGE" sh -c '
+      set -e
+      if [ -f package-lock.json ]; then npm ci --no-audit --no-fund
+      else npm install --no-audit --no-fund; fi
+      npm run build
+    '
+
+# Assert they exist and are not empty. A build that "succeeded" and produced
+# nothing is the failure this whole step exists to stop, and webpack is capable
+# of exiting 0 with no output when its entry resolves to nothing.
+for bundle in admin forum; do
+    f="$REPO/connector-flarum/js/dist/${bundle}.js"
+    if [ ! -s "$f" ]; then
+        log "js/dist/${bundle}.js was not built, or is empty"
+        exit 1
+    fi
+    log "  built ${bundle}.js ($(wc -c < "$f" | tr -d ' ') bytes)"
+done
+
 # Stage what a USER would install, not the working tree.
 #
 # A composer path repository copies the directory as it finds it, and the

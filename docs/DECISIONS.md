@@ -2550,3 +2550,44 @@ was reported under "the endpoint matches the protocol path". The check failed
 correctly and blamed the wrong thing, which is the same defect I had just fixed
 in core's handlers — and I introduced it while fixing that. It now sits in the
 refusal check, and the mutation confirms the attribution as well as the failure.
+
+### 7.27 — The extension ships forum JavaScript, for one branch in Flarum
+
+Flarum's `requestErrorCatch` renders a response `detail` for exactly one status:
+
+```js
+case 422:
+  content = formattedErrors.map(...)      // the detail
+case 401:
+case 403:
+  content = app.translator.trans('core.lib.error.permission_denied_message');
+```
+
+Every other status gets a fixed sentence. So a refusal that travelled correctly
+through core, the connector, the gate, the exception handler and the API arrived
+at the person as *"You do not have permission to do that."*
+
+**The cheap fix was 422**, and it would have worked immediately. It also tells
+every API client that their payload was unprocessable — untrue, and unactionable,
+which is the same objection that ruled out 400 for a refusal. Choosing a wrong
+status to win a rendering argument is exactly the kind of trade that looks free
+and is paid for by whoever integrates next.
+
+So the statuses stay honest — 403 refused, 503 unavailable — and the extension
+ships a forum bundle that puts the reason back on the page. It extends
+`requestErrorCatch`, replaces the alert content only when the error carries one
+of this connector's two codes, and otherwise leaves Flarum's message alone: a
+partial override that blanked the alert would be worse than none.
+
+What it shows is **core's** detail, not the connector's fallback translation.
+Core knows which platform kinds are missing; this connector does not. The
+translations added in 7.26 remain as the fallback for when the bundle has not
+loaded.
+
+**A missing asset that had been missing all along.** `extend.php` registered
+`js/dist/admin.js` from the day the admin page was written, and that file has
+never existed. Flarum tolerated it in silence — which is precisely how an asset
+stays missing: nothing complains, and the page it belongs to simply does
+nothing. The harness now builds both bundles before staging the extension, and
+asserts each is non-empty, because webpack can exit 0 having produced nothing
+when its entry resolves to nothing.

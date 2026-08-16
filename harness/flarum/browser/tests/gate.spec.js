@@ -65,10 +65,13 @@ test('@refused an unlinked account is refused, in core\'s own words', async ({ p
 
   // The refusal must reach the PERSON. A gate that denies correctly and renders
   // a blank modal has failed at the only job this tier tests.
-  // What Flarum RENDERS, which is chosen by the error type -- not the detail in
-  // the response body. Core's precise reason is still in the API payload for
-  // anything reading it; a person gets the actionable sentence.
-  await expect(dialog).toContainText(/needs a linked account/i);
+  // CORE's own words, on the page.
+  //
+  // Flarum renders a response detail only for status 422 and a fixed sentence
+  // otherwise, so the forum bundle puts the reason back. Asserting core's
+  // wording rather than the connector's fallback translation is the point:
+  // core knows which kinds are missing, and this connector does not.
+  await expect(dialog).toContainText(/not linked to any other/i);
 
   // And emphatically NOT the outage wording. These are different types on
   // purpose: telling somebody the system is broken when they simply have not
