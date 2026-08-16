@@ -48,17 +48,19 @@ browser tier.
 
 ## Building and testing just this module
 
-The vector checks — the cross-language oracle this module exists to satisfy —
-run with **no dependencies at all**:
+The whole suite — the cross-language vectors and this module's own unit checks —
+runs with **no dependencies at all**:
 
 ```sh
-php tests/run-vectors.php            # the ordinary run
-php tests/run-vectors.php --hostile  # under a non-UTF-8 internal encoding
+php tests/run-checks.php            # the ordinary run
+php tests/run-checks.php --hostile  # under a non-UTF-8 internal encoding
 ```
 
 They need only `mbstring`, `hash` and `json`. That is deliberate. An oracle whose
 whole purpose is to be run from both languages must not require a toolchain to
-be installed first, or it stops being run and its silence reads as agreement.
+be installed first, or it stops being run and its silence reads as agreement —
+and once a runner exists for the vectors, there is no reason for the rest of the
+suite to be less runnable than its most important part.
 
 `reaper test` runs both passes in a digest-pinned `php:8.4-cli` image before it
 starts anything else, so a cross-language disagreement fails in seconds.
@@ -78,14 +80,17 @@ a *second entry point* to the same checks, not additional coverage.
 
 ### One implementation, two entry points
 
-`tests/VectorChecks.php` holds every assertion. `tests/run-vectors.php` and
-`tests/GoldenVectorTest.php` both call into it and neither restates it, because
-two copies drift and the copy run less often drifts further while still looking
-like coverage.
+Every assertion lives in a `*Checks` class — `tests/VectorChecks.php`,
+`tests/CacheChecks.php` — and each has two callers: `tests/run-checks.php` and a
+PHPUnit class. Neither restates the assertions, because two copies drift and the
+copy run less often drifts further while still looking like coverage.
 
-The runner reflects over `VectorChecks`, enumerates every public check, and
-refuses to pass unless **both** entry points invoke every one — otherwise a
-check added to one runner and forgotten in the other fails silently.
+The runner reflects over each `*Checks` class, enumerates every public check, and
+refuses to pass unless **both** entry points invoke every one. Without that, a
+check added to one runner and forgotten in the other fails silently — the suite
+still passes and the gap looks like coverage. Adding a check class means adding
+one line to the runner's `$suites` table; a class with no PHPUnit counterpart, or
+one that declares no checks, is itself a failure.
 
 ## The seam this module sits behind
 

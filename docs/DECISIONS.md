@@ -1790,7 +1790,7 @@ installed is an oracle that stops being run, and its silence reads the same as
 agreement.
 
 So the assertions live in `tests/VectorChecks.php` and have two entry points:
-`tests/run-vectors.php`, which needs nothing but `mbstring`, `hash` and `json`;
+`tests/run-checks.php`, which needs nothing but `mbstring`, `hash` and `json`;
 and `tests/GoldenVectorTest.php` under PHPUnit, for where PHPUnit runs. One
 implementation, because two copies drift and the copy run less often drifts
 further while still looking like coverage.
@@ -1939,3 +1939,55 @@ the signer in practice. On the receiving side a caller *does* control it, and
 `SignedRequestVerifier` already catches `IllegalArgumentException` and answers
 `malformed` — a hostile nonce is a refusal, not a 500. Checked rather than
 assumed while writing this.
+
+### 7.8 — The decision cache mirrors the other side's rules, not its shape
+
+A forum and a game server that disagree about what an outage means is one person
+let in on one and turned away on the other, at the same moment, for the same
+reason. So `Client/DecisionCache.php` restates the *rules*, and the checks assert
+each of them:
+
+- The shipped default is **closed**, and it is the only default.
+- A fail mode that is not exactly `open` is **closed** — `opne`, `true`, `yes`,
+  `allow` and an empty string all deny. A typo must never be the thing that opens
+  a gate. It is not an exception either: refusing to boot a forum over a spelling
+  mistake is a worse failure than denying during an outage.
+- A TTL of zero means do not cache **and forget what was cached**. The eviction
+  half matters: without it, a zero-TTL answer leaves the previous decision in
+  place, so the cache keeps serving an allow core has just withdrawn.
+- Expiry is **exclusive** of the instant it names, matching the other side. An
+  off-by-one here is a decision served one second past its licence.
+- The cache key joins on `U+001F`, which cannot appear in a gate name or a
+  platform identifier. A colon would let `("a:b", "c")` and `("a", "b:c")`
+  collide, and a collision here serves one subject's decision to another.
+- A fail-mode answer carries **TTL 0** and is never stored. It is the absence of
+  a decision, not a decision; caching it would extend an outage past its end.
+- An unparseable `decide` response is a **denial**. A response nobody can parse
+  must never be the thing that lets somebody through — and the check pairs that
+  with a well-formed allow, because a parser that denied everything would satisfy
+  the first half.
+- Webhook invalidation is scoped to one identity. Too narrow and the webhook does
+  not take effect; too broad and one webhook becomes a stampede of synchronous
+  decides, which is what the cache exists to prevent.
+
+All ten mutations of these rules are caught, including the two that only a
+negative assertion catches: making the default open, and letting a typo open it.
+
+### 7.9 — The PHPUnit-free runner generalised beyond the vectors
+
+7.2 built a dependency-free runner because the vectors must be checkable
+anywhere. Once it existed, there was no argument for the rest of the suite being
+less runnable than its most important part — especially while `composer install`
+cannot complete here at all.
+
+`tests/run-checks.php` (was `run-vectors.php`) now runs every `*Checks` class
+listed in one table, and the wiring assertion generalised with it: for each
+class it enumerates the public checks by reflection and refuses to pass unless
+the runner *and* the class's PHPUnit counterpart invoke every one. A listed class
+with no PHPUnit counterpart, or one declaring no checks at all, is itself a
+failure — otherwise adding a class to the table would report coverage that does
+not exist.
+
+*Alternative:* let PHPUnit be the only home for non-vector tests and accept they
+do not run here. Rejected — that is a suite nobody on this machine can run,
+which is indistinguishable from a suite that passes.

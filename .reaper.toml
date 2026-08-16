@@ -81,11 +81,11 @@ TOOLCHAIN=docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012
 # ---------------------------------------------------------------------------
 PHP=docker.io/library/php@sha256:f78661b492226388a7057679cc731c3e43bc92ba66cd49a8cfe12374a56bee9f
 
-echo "run: cross-language vectors"
+echo "run: cross-language vectors and PHP unit checks"
 podman run --rm -v "$PWD":/work -w /work "$PHP" \
-  php connector-flarum/tests/run-vectors.php
+  php connector-flarum/tests/run-checks.php
 podman run --rm -v "$PWD":/work -w /work "$PHP" \
-  php connector-flarum/tests/run-vectors.php --hostile
+  php connector-flarum/tests/run-checks.php --hostile
 
 # A run must not inherit a container the previous run left behind: it would be
 # serving the previous run's schema, and a green result would be about data

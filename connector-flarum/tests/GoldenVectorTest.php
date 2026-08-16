@@ -28,7 +28,7 @@ use PHPUnit\Framework\TestCase;
  * The golden vectors, run under PHPUnit.
  *
  * <p>The assertions themselves live in {@see VectorChecks} and are shared with
- * `tests/run-vectors.php`, which runs them with no dependencies at all. This
+ * `tests/run-checks.php`, which runs them with no dependencies at all. This
  * class is one of two ENTRY POINTS to one implementation, deliberately: two
  * copies of the assertions would drift, and the copy run less often would drift
  * further while still looking like coverage.
