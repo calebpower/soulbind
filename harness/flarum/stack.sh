@@ -25,7 +25,11 @@ set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
-RUN=${RUN:-$REPO/out/flarum-stack}
+# NOT under out/. reaper rsyncs out/ back at the end of a run, and the first
+# version kept the whole Flarum site there -- so the sync raced composer writing
+# vendor/ and failed with "file has vanished". out/ is for results, and results
+# are small.
+RUN=${RUN:-/tmp/soulbind-forum-stack}
 
 . "$HERE/pins.env"
 
@@ -243,62 +247,60 @@ log "core is up on $CORE_PORT"
 
 # --- the forum --------------------------------------------------------------
 #
-# Installed into a volume the web container keeps, not into the repository:
-# a Flarum site is a hundred megabytes of somebody else's code plus a
-# database-backed config, and none of it belongs in this tree.
+# From the SKELETON, not from flarum/core.
+#
+# flarum/core is a library. The `flarum` CLI, `public/index.php`, `storage/` and
+# the rest of a runnable site come from the flarum/flarum skeleton, which is a
+# project rather than a dependency. The first attempt required core alone and
+# got "Could not open input file: flarum" -- a site with the engine and no car
+# around it.
 log "installing flarum $FLARUM_VERSION"
 
-mkdir -p "$RUN/forum/site"
+SITE="$RUN/forum/site"
+mkdir -p "$SITE"
 
-# The site's own composer.lock is emitted to out/ on first run, the same way the
-# extension's was, so the forum a test ran against can be reproduced exactly
-# rather than "whatever resolved that day".
+composer_in_site() {
+    podman run --rm --network "$NET" \
+        -v "$SITE":/site \
+        -v "$REPO/connector-flarum":/extension:ro \
+        -w /site -e COMPOSER_HOME=/tmp/composer \
+        "$COMPOSER_IMAGE" composer "$@" --no-interaction --no-progress
+}
+
 SITE_LOCK="$REPO/harness/flarum/site-composer.lock"
+
+podman run --rm --network "$NET" \
+    -v "$RUN/forum":/parent -w /parent -e COMPOSER_HOME=/tmp/composer \
+    "$COMPOSER_IMAGE" composer create-project \
+    "flarum/flarum:^${FLARUM_VERSION%.*}" site --no-interaction --no-progress --no-install
+
 if [ -f "$SITE_LOCK" ]; then
-    cp "$SITE_LOCK" "$RUN/forum/site/composer.lock"
+    cp "$SITE_LOCK" "$SITE/composer.lock"
     log "installing the forum from its committed lock"
 else
     log "NO committed site lock; this run resolves fresh and emits one to out/"
 fi
 
-cat > "$RUN/forum/site/composer.json" <<JSON
-{
-    "name": "soulbind/forum-harness",
-    "description": "Not a package. The forum a browser tier drives.",
-    "type": "project",
-    "require": {
-        "flarum/core": "$FLARUM_VERSION",
-        "soulbind/flarum-connector": "*@dev"
-    },
-    "repositories": [
-        { "type": "path", "url": "/extension", "options": { "symlink": false } }
-    ],
-    "_note_stability": "minimum-stability stays STABLE. Only the local path package is allowed to be dev, via the @dev on its constraint above -- it is a working tree with no version tag, so composer reads it as dev-main. Relaxing minimum-stability globally would let a dev release of Flarum or any of its 117 dependencies in, and the forum under test would stop being the forum people run.",
-    "minimum-stability": "stable",
-    "prefer-stable": true,
-    "config": {
-        "allow-plugins": {
-            "flarum/extension-manager-composer-plugin": false,
-            "composer/package-versions-deprecated": false
-        }
-    }
-}
-JSON
+# The extension arrives as a path repository. `*@dev` is scoped to THIS package
+# only -- it is a working tree with no version tag, so composer reads it as
+# dev-main. Relaxing minimum-stability globally would let a dev release of
+# Flarum or any of its dependencies in, and the forum under test would quietly
+# stop being the forum people run.
+composer_in_site config repositories.soulbind '{"type":"path","url":"/extension","options":{"symlink":false}}'
+composer_in_site require "soulbind/flarum-connector:*@dev" --no-plugins
 
-podman run --rm --network "$NET" \
-    -v "$RUN/forum/site":/site \
-    -v "$REPO/connector-flarum":/extension:ro \
-    -w /site -e COMPOSER_HOME=/tmp/composer \
-    "$COMPOSER_IMAGE" composer install --no-interaction --no-progress --no-plugins
-
+# out/ carries RESULTS, and only small ones: reaper rsyncs it back, and the
+# first version put the whole site under it -- so the sync raced composer
+# writing vendor/ and failed with "file has vanished". The site lives outside
+# out/ now, and only the lock is copied in.
 if [ ! -f "$SITE_LOCK" ]; then
     mkdir -p "$REPO/out"
-    cp "$RUN/forum/site/composer.lock" "$REPO/out/site-composer.lock"
+    cp "$SITE/composer.lock" "$REPO/out/site-composer.lock"
     log "site lock written to out/site-composer.lock -- review and commit it"
 fi
 
 # Flarum's own installer, driven from a file rather than interactively.
-cat > "$RUN/forum/site/install.yml" <<YML
+cat > "$SITE/install.yml" <<YML
 debug: false
 offline: false
 baseUrl: $FORUM_URL
@@ -320,7 +322,7 @@ settings:
 YML
 
 podman run --rm --network "$NET" \
-    -v "$RUN/forum/site":/site -w /site \
+    -v "$SITE":/site -w /site \
     "$FLARUM_PHP_IMAGE" sh -c '
       set -e
       docker-php-ext-install pdo_mysql > /dev/null 2>&1 || true
@@ -331,7 +333,7 @@ log "starting the forum"
 # php -S, not a real web server. This is a harness: a browser tier needs a URL
 # that serves Flarum, not a production topology. The router script below is what
 # an nginx try_files rule would do, and is the whole difference.
-cat > "$RUN/forum/site/router.php" <<'PHPR'
+cat > "$SITE/router.php" <<'PHPR'
 <?php
 // Serve a real file if one exists, otherwise hand everything to Flarum's front
 // controller -- exactly what `try_files $uri /index.php?$query_string` does.
@@ -345,7 +347,7 @@ PHPR
 
 podman run -d --name "$WEB_C" --network "$NET" \
     -p "${FORUM_PORT}:${FORUM_PORT}" \
-    -v "$RUN/forum/site":/site -w /site \
+    -v "$SITE":/site -w /site \
     "$FLARUM_PHP_IMAGE" sh -c "
       docker-php-ext-install pdo_mysql > /dev/null 2>&1 || true
       php -S 0.0.0.0:${FORUM_PORT} router.php
