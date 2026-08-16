@@ -47,6 +47,7 @@ if ($hostile) {
 require __DIR__ . '/autoload.php';
 
 use Soulbind\Flarum\Tests\CacheChecks;
+use Soulbind\Flarum\Tests\ClientChecks;
 use Soulbind\Flarum\Tests\VectorChecks;
 
 /*
@@ -61,6 +62,7 @@ use Soulbind\Flarum\Tests\VectorChecks;
 $suites = [
     'cross-language vectors' => [VectorChecks::class, __DIR__ . '/GoldenVectorTest.php'],
     'decision cache and fail mode' => [CacheChecks::class, __DIR__ . '/DecisionCacheTest.php'],
+    'client: signing, outages and refusals' => [ClientChecks::class, __DIR__ . '/SoulbindClientTest.php'],
 ];
 
 echo 'soulbind checks (', $hostile ? 'HOSTILE charset' : 'ordinary', ")\n";
@@ -75,8 +77,15 @@ foreach ($suites as $suiteName => [$class, $phpunitFile]) {
 
     $reflection = new ReflectionClass($class);
     $checks = [];
-    foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC | ReflectionMethod::IS_STATIC)
-        as $method) {
+    // isPublic() AND isStatic(), tested separately and deliberately.
+    // getMethods() takes its filter as a bitmask that ORs: passing
+    // IS_PUBLIC | IS_STATIC returns everything public OR static, which
+    // includes the private static helpers these classes use to build
+    // fixtures. The first version did that and tried to call one.
+    foreach ($reflection->getMethods() as $method) {
+        if (!$method->isPublic() || !$method->isStatic()) {
+            continue;
+        }
         $type = $method->getReturnType();
         if ($type instanceof ReflectionNamedType && $type->getName() === 'array') {
             $checks[] = $method->getName();

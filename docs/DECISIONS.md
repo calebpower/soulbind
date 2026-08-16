@@ -1991,3 +1991,56 @@ not exist.
 *Alternative:* let PHPUnit be the only home for non-vector tests and accept they
 do not run here. Rejected — that is a suite nobody on this machine can run,
 which is indistinguishable from a suite that passes.
+
+### 7.10 — The client keeps the refusal/outage distinction, and a seam to prove it
+
+`Transport` is an interface so that signing, envelope parsing, the
+refusal-versus-outage distinction, cache population and the fail-mode fallback
+are all testable without a socket. A test that needs a network is a test that
+does not get run, and these are the rules least affordable to leave unrun.
+
+The distinction, stated identically to the other side: a **refusal** is core
+answering "no" — final, never softened by a cached answer or a fail mode. An
+**outage** is core not answering — cache, then fail mode. Collapsing them turns
+"you may not" into "try again later", and turns a misconfigured credential into
+an intermittent fault nobody can reproduce.
+
+What the checks pin, each mutation-verified:
+
+- A refusal does not consult the cache **even when a live cached allow exists**,
+  does not reach the fail mode **even when the fail mode is OPEN**, keeps core's
+  own reason rather than flattening to a generic denial, and is not cached
+  against the subject.
+- Anything that is not a protocol envelope — a proxy error page, an empty body,
+  a JSON array, truncated JSON, a bare string, JSON without `ok` — is an
+  **outage**. Core never said no, because core never saw it. Reading a captive
+  portal as a policy decision is how an outage becomes a permanent denial.
+- Each of those is paired with its obverse: a well-formed envelope must still
+  parse, and a well-formed refusal must still be a refusal. Without the pair, a
+  client that reported everything as an outage would satisfy the whole list.
+- The signature must **verify over the bytes actually sent**, not merely be
+  present. A signature over the wrong body is a header that looks right in a log
+  and is refused by core.
+- Nonces must not repeat across 50 calls, using the real generator rather than
+  the injectable test one — a repeated nonce is refused as a replay, and a
+  predictable one is a replay window. `random_bytes`, never `uniqid`.
+
+One mutation initially survived: changing the TTL on the refusal decision from 0
+to 600. It survived because nothing stores a refusal, so the value was
+unobservable — an equivalent mutant by today's code, and a trap for tomorrow's.
+It is now asserted, with the reason written where somebody adding caching to a
+caller will read it, rather than left true by accident.
+
+### 7.11 — A bug in the check runner, found by the runner
+
+`ReflectionClass::getMethods(IS_PUBLIC | IS_STATIC)` does not mean "public and
+static". The filter is a bitmask that **ORs**: it returns everything public *or*
+static, which includes the private static helpers the check classes use to build
+fixtures. The runner duly tried to call one and died.
+
+Worth recording because of the direction it failed in. It failed loudly, on the
+first check class that had a private static helper returning an array — but the
+same mistake in a *guard* would have failed silently, quietly widening what the
+guard enumerated. The fix tests `isPublic()` and `isStatic()` separately, and the
+comment says why rather than leaving the next reader to rediscover the bitmask
+semantics.
