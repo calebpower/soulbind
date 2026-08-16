@@ -2044,3 +2044,77 @@ same mistake in a *guard* would have failed silently, quietly widening what the
 guard enumerated. The fix tests `isPublic()` and `isStatic()` separately, and the
 comment says why rather than leaving the next reader to rediscover the bitmask
 semantics.
+
+### 7.12 — The webhook endpoint, and the two rules that read backwards
+
+This endpoint is the only part of the connector an unauthenticated caller can
+reach, so it mirrors the other side's request verifier in the same order:
+presence, clock, replay, signature.
+
+Replay protection is **two halves and needs both**. The timestamp window bounds
+how long a captured delivery stays interesting; the nonce store stops it being
+used twice inside that window. Either alone is not replay protection.
+
+Two decisions look wrong at a glance and are not:
+
+**The nonce is recorded before the signature is checked.** Recording only
+*verified* nonces would let somebody replay a captured delivery as often as they
+liked — the signature is valid on a replay, that is what makes it a replay, and
+nothing would remember the first one. Recording unverified nonces is safe here
+only because the store is bounded and full means *refuse*, never evict: evicting
+the oldest entry to make room is how a replay gets in.
+
+**A replayed delivery answers 200, not 4xx.** The delivery it duplicates was
+already accepted, so there is nothing for an at-least-once sender to usefully
+retry. Answering 4xx would make a correct sender look permanently broken to its
+own operator. Nothing this endpoint refuses is a 5xx at all — a refused webhook
+is the endpoint working, and 5xx would make core retry a delivery that will
+never be accepted, forever.
+
+Two defects were caught while writing it, both in code that had just been
+written and neither by a behavioural test:
+
+- `RequestSigner::sign` **throws** on a nonce carrying the field separator. The
+  nonce comes from an attacker-controlled header, so uncaught that is a 500
+  anybody can trigger by sending a newline. Now caught and answered `malformed`.
+- An **empty secret** also throws. An extension that 500s until somebody fills
+  in a setting looks broken rather than unconfigured, so an unconfigured endpoint
+  now answers `not-configured` and accepts nothing.
+
+The timestamp header is parsed with a strict integer pattern, not `is_numeric`
+and not a cast. `is_numeric` accepts `1.7e9` and `0x654`; a cast reads
+`1700000000abc` as a valid timestamp. Each would then land *inside* the window.
+Both are in the corpus, and both mutations are caught.
+
+Twelve mutations, all caught — including the window closing at only one end, the
+nonce recorded after the signature, and the store growing without bound.
+
+### 7.13 — A guard for the one thing no test can see
+
+Swapping `hash_equals` for `===` changes **no observable behaviour**. Every
+assertion in the webhook suite passes either way. What changes is that `===`
+short-circuits on the first differing byte, so how long it takes leaks how much
+of a guess was right — and a leak nobody can observe from outside is exactly the
+kind that survives a test suite indefinitely.
+
+So it is asserted against the *source*, the same reasoning as the other side's
+static guards: when a property cannot be checked by running the code, check the
+code. `WebhookChecks::secretsAreComparedInConstantTime` scans `src/` for equality
+operators applied to secret-shaped variable names.
+
+**Narrowings, stated.** It reads `src/` only, and flags only operands *named*
+like secrets — `signature`, `expected`, `secret`, `credential`, `hmac`, `digest`,
+`token`. A secret in a variable called something else is not caught. Comparisons
+against a literal `null` or `''` are exempt, because those test presence, not
+content, and refusing an absent signature is behaviour this code must keep. The
+exemption is those two literals and nothing else, so comparing a secret against
+any actual value still fires.
+
+It is a backstop for the obvious mistake, not a proof of absence, and the gap is
+written down rather than implied. The guard also fails if it scans zero files —
+a guard that silently matches nothing reads as coverage.
+
+Mutation-checked in both directions: it fires on a real `!==` signature
+comparison, and the presence checks it must tolerate do not trip it. The first
+version *did* trip on them, which is how the exemption came to be written
+narrowly instead of as a blanket skip.

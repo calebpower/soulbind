@@ -46,6 +46,33 @@ denies, and the message tells the truth: the system is at fault, not the person.
 Asserted by a test here, and exercised under injected transport faults by the
 browser tier.
 
+## What is here
+
+| Part | What it does |
+|---|---|
+| `src/Protocol/` | Link-code normalisation and HMAC signing, re-implemented. Held to the game side by the golden vectors |
+| `src/Policy/` | `Decision` and `Effect` as this side sees them |
+| `src/Client/` | The protocol client, the decision cache and the fail mode. `Transport` is an interface so none of it needs a socket to test |
+| `src/Webhook/` | The inbound webhook: signature, clock and replay checks, and the nonce store behind them |
+
+### The rules that are shared, not merely similar
+
+A forum and a game server that disagree about what an outage means is one person
+let in on one and turned away on the other, at the same moment, for the same
+reason. So these are restated here deliberately, and each is asserted:
+
+- **A refusal is not an outage.** Core answering "no" is final: it never
+  consults the cache and never reaches the fail mode. Core *not answering* falls
+  back to the cache, then the fail mode. Collapsing the two turns "you may not"
+  into "try again later".
+- **Anything that is not a protocol envelope is an outage.** A proxy error page
+  is not a policy decision.
+- **The fail mode defaults to closed**, and only an exact `open` opens it. A typo
+  must never be the thing that opens a gate.
+- **A fail-mode denial blames the system.** Somebody refused because a server
+  they have never heard of is unreachable should not be told they are not
+  allowed.
+
 ## Building and testing just this module
 
 The whole suite — the cross-language vectors and this module's own unit checks —

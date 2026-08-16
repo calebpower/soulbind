@@ -48,6 +48,7 @@ require __DIR__ . '/autoload.php';
 
 use Soulbind\Flarum\Tests\CacheChecks;
 use Soulbind\Flarum\Tests\ClientChecks;
+use Soulbind\Flarum\Tests\WebhookChecks;
 use Soulbind\Flarum\Tests\VectorChecks;
 
 /*
@@ -63,6 +64,7 @@ $suites = [
     'cross-language vectors' => [VectorChecks::class, __DIR__ . '/GoldenVectorTest.php'],
     'decision cache and fail mode' => [CacheChecks::class, __DIR__ . '/DecisionCacheTest.php'],
     'client: signing, outages and refusals' => [ClientChecks::class, __DIR__ . '/SoulbindClientTest.php'],
+    'inbound webhook' => [WebhookChecks::class, __DIR__ . '/WebhookTest.php'],
 ];
 
 echo 'soulbind checks (', $hostile ? 'HOSTILE charset' : 'ordinary', ")\n";
