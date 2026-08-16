@@ -264,8 +264,13 @@ composer_in_site() {
         -v "$SITE":/site \
         -v "$REPO/connector-flarum":/extension:ro \
         -w /site -e COMPOSER_HOME=/tmp/composer \
-        "$COMPOSER_IMAGE" composer "$@" --no-interaction --no-progress
+        "$COMPOSER_IMAGE" composer "$@" --no-interaction
 }
+
+# --no-progress is NOT appended here. `composer config` rejects it outright --
+# "The --no-progress option does not exist" -- so a helper that adds it to every
+# subcommand works for install and require and breaks for config. Passed at the
+# call sites that accept it instead.
 
 SITE_LOCK="$REPO/harness/flarum/site-composer.lock"
 
@@ -287,7 +292,7 @@ fi
 # Flarum or any of its dependencies in, and the forum under test would quietly
 # stop being the forum people run.
 composer_in_site config repositories.soulbind '{"type":"path","url":"/extension","options":{"symlink":false}}'
-composer_in_site require "soulbind/flarum-connector:*@dev" --no-plugins
+composer_in_site require "soulbind/flarum-connector:*@dev" --no-plugins --no-progress
 
 # out/ carries RESULTS, and only small ones: reaper rsyncs it back, and the
 # first version put the whole site under it -- so the sync raced composer
