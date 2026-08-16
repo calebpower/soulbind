@@ -63,6 +63,16 @@ public final class ScriptedSurface implements ChatSurface {
     /** Roles this surface refuses to grant, so failure is expressible. */
     private final Set<String> unavailableRoles = new LinkedHashSet<>();
 
+    /**
+     * Roles whose grant THROWS, which is different from refusing.
+     *
+     * <p>A real client library raises on a network error or an expired token,
+     * and a connector that has only ever met a polite `false` handles that
+     * badly. Distinct from {@code unavailableRoles} because the two travel
+     * different paths: a refusal is an answer, an exception is not.
+     */
+    private final Set<String> throwingRoles = new LinkedHashSet<>();
+
     @Override
     public void reply(Invocation invocation, String message, boolean ephemeral) {
         sent.add(new Sent(invocation.invoker().platformId(), message, ephemeral));
@@ -71,6 +81,10 @@ public final class ScriptedSurface implements ChatSurface {
     @Override
     public boolean grantRole(String platformId, String role) {
         grantCalls.add(platformId + " " + role);
+        if (throwingRoles.contains(role)) {
+            throw new IllegalStateException(
+                    "the platform client raised while granting '" + role + "' (simulated)");
+        }
         if (unavailableRoles.contains(role)) {
             // A platform can refuse: the role was deleted, the bot lost its
             // permission, the account left. Expressible, because a connector
@@ -151,6 +165,17 @@ public final class ScriptedSurface implements ChatSurface {
 
     public ScriptedSurface makeRoleAvailable(String role) {
         unavailableRoles.remove(role);
+        return this;
+    }
+
+    /** Makes granting this role raise, as a client library does on a bad day. */
+    public ScriptedSurface makeRoleThrow(String role) {
+        throwingRoles.add(role);
+        return this;
+    }
+
+    public ScriptedSurface stopThrowing(String role) {
+        throwingRoles.remove(role);
         return this;
     }
 

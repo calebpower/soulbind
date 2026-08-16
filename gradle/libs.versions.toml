@@ -22,6 +22,7 @@ logback = "1.5.15"
 junit = "5.11.4"
 toml = "1.1.1"
 velocity = "3.5.1"
+jda = "5.6.1"
 
 [libraries]
 # --- HTTP + WebSocket (Apache-2.0; Jetty beneath it is EPL-2.0/Apache-2.0
@@ -51,6 +52,12 @@ mariadb-jdbc = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = 
 # runtime, and bundling it would ship a second copy for the classloader to
 # disagree about.
 velocity-api = { module = "com.velocitypowered:velocity-api", version.ref = "velocity" }
+
+# --- Chat platform client (Apache-2.0) ---
+# JDA. Used only by connector-discord, and only behind the ChatSurface seam --
+# the connector's logic never names a JDA type, which is what lets the scripted
+# surface exercise all of it.
+jda = { module = "net.dv8tion:JDA", version.ref = "jda" }
 
 # --- Config (Apache-2.0) ---
 toml = { module = "org.tomlj:tomlj", version.ref = "toml" }
