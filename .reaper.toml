@@ -87,6 +87,58 @@ podman run --rm -v "$PWD":/work -w /work "$PHP" \
 podman run --rm -v "$PWD":/work -w /work "$PHP" \
   php connector-flarum/tests/run-checks.php --hostile
 
+# ---------------------------------------------------------------------------
+# The PHPUnit entry point, in the container that can run it.
+#
+# PHPUnit 11 needs ext-xmlwriter, which the workstation's PHP does not have and
+# which cannot be installed without touching the system PHP -- outside the
+# directive that everything created stays inside this repository. The official
+# php image ships it.
+#
+# So nothing on the workstation is weakened and no platform requirement is
+# ignored. The dependency-free runner above proves the checks pass; this proves
+# the SECOND entry point runs them too, which is the claim run-checks.php makes
+# about itself and which otherwise nothing verifies.
+#
+# Composer comes from its own pinned image rather than by fetching an installer
+# script at run time. Downloading and executing a bootstrap over the network,
+# unverified, inside a build is exactly the supply-chain shortcut a pinned
+# digest exists to avoid -- and it would sit inside the step that is meant to
+# raise confidence.
+#
+# ext-xmlwriter is asserted rather than assumed: if a future image drops it,
+# this must fail loudly rather than quietly skipping the suite and leaving the
+# green above looking like full coverage.
+# ---------------------------------------------------------------------------
+COMPOSER=docker.io/library/composer@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040
+
+echo "run: PHPUnit entry point"
+# The lock file is a deliverable of this step until one is committed.
+#
+# Everything else this repository depends on is pinned -- image digests, jar
+# checksums -- for the reason stated at the top of this file: a build that
+# silently changes underneath itself is a build whose green means nothing. A
+# PHP dependency tree resolved fresh on every run is the same hole, and the
+# first run reported it plainly: "No composer.lock file present."
+#
+# So the lock is copied OUT, to be reviewed and committed, after which
+# `composer install` installs from it rather than resolving again.
+mkdir -p out
+podman run --rm -v "$PWD":/work -w /work/connector-flarum \
+  -e COMPOSER_HOME=/tmp/composer \
+  "$COMPOSER" composer install --no-interaction --no-progress --no-plugins
+cp connector-flarum/composer.lock out/composer.lock
+
+podman run --rm -v "$PWD":/work -w /work/connector-flarum "$PHP" sh -c '
+  set -e
+  php -m | grep -qx xmlwriter || {
+    echo "the php image no longer ships ext-xmlwriter; PHPUnit cannot run" >&2
+    exit 1
+  }
+  vendor/bin/phpunit --configuration phpunit.xml
+  vendor/bin/phpunit --configuration phpunit-hostile.xml
+'
+
 # A run must not inherit a container the previous run left behind: it would be
 # serving the previous run's schema, and a green result would be about data
 # nobody in this session created.
@@ -144,6 +196,11 @@ images = [
     # Needs only mbstring, hash and json, all of which the official image ships;
     # notably NOT ext-xmlwriter, because the vector runner does not use PHPUnit.
     "docker.io/library/php@sha256:f78661b492226388a7057679cc731c3e43bc92ba66cd49a8cfe12374a56bee9f",
+    # composer 2.10, resolved 2026-08-16. Its own image rather than an installer
+    # script fetched at run time: downloading and executing an unverified
+    # bootstrap inside the step meant to raise confidence is the shortcut a
+    # pinned digest exists to avoid.
+    "docker.io/library/composer@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040",
 ]
 
 [sync]

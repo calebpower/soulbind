@@ -160,8 +160,9 @@ final class WebhookTest extends TestCase
             'a secret comparison short-circuits, leaking how much of a guess was right'
         );
     }
+
     #[Test]
-    #[DisplayName('reading a delivery's identities is total and bounded')]
+    #[DisplayName('reading the identities in a delivery is total and bounded')]
     public function payloadReadingIsTotal(): void
     {
         $this->assertNoFailures(

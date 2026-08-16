@@ -104,6 +104,29 @@ foreach ($suites as $suiteName => [$class, $phpunitFile]) {
     $phpunit = is_file($phpunitFile) ? file_get_contents($phpunitFile) : '';
     if ($phpunit === '') {
         $unwired[] = 'no PHPUnit counterpart at ' . basename($phpunitFile);
+    } else {
+        /*
+         * The counterpart must PARSE, not merely contain the right words.
+         *
+         * This runner reads the PHPUnit files as text to check the wiring, and
+         * text is all it was reading: a counterpart with a syntax error in it
+         * satisfied every string search while being unloadable. That happened --
+         * an unescaped apostrophe in a display name -- and nothing here noticed,
+         * because nothing here ever asked PHP to look at the file. The suite was
+         * reported green by the one runner that could run, and the entry point it
+         * claimed was wired could not start.
+         *
+         * `php -l` is cheap and is the whole fix. Without it, "both entry points
+         * invoke every check" means "one entry point invokes them and the other
+         * mentions them in a comment-shaped way".
+         */
+        $lint = [];
+        $status = 0;
+        exec('php -l ' . escapeshellarg($phpunitFile) . ' 2>&1', $lint, $status);
+        if ($status !== 0) {
+            $unwired[] = basename($phpunitFile) . ' does not parse, so it cannot run any '
+                . 'check it appears to reference: ' . trim(implode(' ', $lint));
+        }
     }
 
     sort($checks);
