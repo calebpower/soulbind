@@ -18,7 +18,7 @@ Last updated: 2026-08-15, Phase 4 in progress.
 | 4 | Events and effectors | **Complete** — gate passed: a connector down for 100 mutations receives all 100, in order, applied once by the effector's own reckoning |
 | 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
 | 6 | connector-discord | **In progress** — seam, scripted surface, connector, role effector and the client-library implementation landed; scripted-surface link flow green in the stack. The manual smoke against a real server is outstanding and is named as evidence, not a tier |
-| 7 | connector-flarum | **In progress** — protocol re-implementation, the shared vector checks and their two entry points, and the cross-language run wired into `reaper test`. Found and fixed a real link-code defect present in **both** languages (see below). Webhook receiver, settings UI, register/post gates and the T5 injection suite outstanding |
+| 7 | connector-flarum | **In progress** — protocol re-implementation, decision cache with a shared-cache store, client, inbound webhook, register/post gates, host wiring and the admin settings page. 50 checks, both charsets, both entry points. Found and fixed a real link-code defect present in **both** languages (see below). The T5 browser tier and the live link against a real core are outstanding |
 | 8 | connector-plan + full-stack battery | Not started |
 | 9 | Simulated users | Not started |
 | 10 | Hardening and release | Not started |
@@ -178,6 +178,39 @@ To run it: register a bot, invite it to a throwaway server with role-management
 permission, put the token in `SOULBIND_PLATFORM_TOKEN`, point
 `soulbind-discord.toml` at a core, and run `/link` and `/whoami`. Record what
 happened here.
+
+## Phase 7 so far
+
+| Piece | State |
+|---|---|
+| `src/Protocol/` | Link-code normalisation and HMAC signing, held to the game side by the golden vectors |
+| `src/Client/` | Protocol client, decision cache, fail mode, shared-cache store |
+| `src/Webhook/` | Signature, clock and replay checks, plus the nonce store |
+| `src/Gate/` | Register and post gates, with no forum in them |
+| `src/Listener/`, `src/Controller/`, `src/Provider/` | Host wiring, deliberately thin |
+| `js/` | The admin settings page — the only JavaScript, and it decides nothing |
+| **T5 browser tier** | **Not built.** Needs a running forum, which needs MariaDB, PHP and a web server — none of which run on this workstation |
+| **Live link against a real core** | **Not done.** Same dependency |
+
+**50 checks**, run from two entry points and asserted to be run from both: the
+dependency-free `run-checks.php`, and PHPUnit inside a pinned container. Both
+run twice, once under a non-UTF-8 internal encoding.
+
+Mutation counts for this phase, all applied and all caught: 10 folding, 10
+signer, 10 cache, 10 client, 12 webhook, 13 gate, 8 store.
+
+### What the remaining two gate items need
+
+The Phase 7 gate asks for the T5 injection suite and a forum account linking
+against a real core. Both need a forum actually running: MariaDB, PHP-FPM or an
+equivalent, and Flarum installed. None of that runs on this workstation — there
+is no MariaDB server and no PHP web server here, which is the same constraint
+that put the second storage backend in a session rather than locally.
+
+So it lands the same way: a stage in the reaper run verb, with digest-pinned
+images, alongside the database that is already there. That is Phase 8's shape
+arriving early for one connector, exactly as the storage backend did in Phase 1
+— recorded as a departure rather than done quietly.
 
 ## The defect Phase 7 found in shipped code, on both sides
 

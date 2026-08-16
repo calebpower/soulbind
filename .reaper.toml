@@ -113,7 +113,7 @@ podman run --rm -v "$PWD":/work -w /work "$PHP" \
 COMPOSER=docker.io/library/composer@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040
 
 echo "run: PHPUnit entry point"
-# The lock file is a deliverable of this step until one is committed.
+# Installed from the COMMITTED lock, and the lock is validated first.
 #
 # Everything else this repository depends on is pinned -- image digests, jar
 # checksums -- for the reason stated at the top of this file: a build that
@@ -121,13 +121,16 @@ echo "run: PHPUnit entry point"
 # PHP dependency tree resolved fresh on every run is the same hole, and the
 # first run reported it plainly: "No composer.lock file present."
 #
-# So the lock is copied OUT, to be reviewed and committed, after which
-# `composer install` installs from it rather than resolving again.
-mkdir -p out
+# `validate --check-lock` first, because `install` only WARNS when the lock has
+# drifted from composer.json and then installs the old tree anyway -- a warning
+# in the middle of a long log is a warning nobody reads, and the run would be
+# testing dependencies that no longer match what the extension declares.
+podman run --rm -v "$PWD":/work -w /work/connector-flarum \
+  -e COMPOSER_HOME=/tmp/composer \
+  "$COMPOSER" composer validate --no-check-publish --no-check-all --check-lock
 podman run --rm -v "$PWD":/work -w /work/connector-flarum \
   -e COMPOSER_HOME=/tmp/composer \
   "$COMPOSER" composer install --no-interaction --no-progress --no-plugins
-cp connector-flarum/composer.lock out/composer.lock
 
 podman run --rm -v "$PWD":/work -w /work/connector-flarum "$PHP" sh -c '
   set -e
