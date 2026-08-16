@@ -1,0 +1,18 @@
+{
+  "id": "soulbind",
+  "name": "soulbind",
+  "version": "0.1.0",
+  "description": "Cross-platform account linking",
+  "authors": ["Caleb L. Power"],
+  "dependencies": [
+    {
+      "id": "luckperms",
+      "optional": true
+    },
+    {
+      "id": "floodgate",
+      "optional": true
+    }
+  ],
+  "main": "dev.soulbind.connector.velocity.SoulbindVelocityPlugin"
+}

@@ -46,4 +46,13 @@ dependencies {
     runtimeOnly(libs.mariadb.jdbc)
 
     testImplementation(libs.sqlite.jdbc)
+
+    // TEST ONLY, and deliberately here rather than in the connector.
+    //
+    // The claim being tested is that the SDK and core agree over the real
+    // transport -- signing, envelopes, refusals, the lot. It lives in core's
+    // tests because core owns the embeddable server the test needs; putting it
+    // in a connector would make every connector depend on core to run its own
+    // tests, which is the inversion the seam exists to prevent.
+    testImplementation(project(":connector-sdk"))
 }

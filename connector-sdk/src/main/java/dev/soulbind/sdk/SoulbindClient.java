@@ -69,7 +69,14 @@ public final class SoulbindClient implements AutoCloseable {
 
     /** The outcome of a call: an answer, a refusal, or an outage. */
     public sealed interface Outcome {
-        record Ok(JsonNode payload) implements Outcome {}
+        /**
+         * Core answered.
+         *
+         * <p>Carries a {@link Payload}, not a JSON tree: the SDK hands
+         * connectors values, so Jackson stays an implementation detail here
+         * rather than becoming part of every connector's contract.
+         */
+        record Ok(Payload payload) implements Outcome {}
 
         /** Core answered, and the answer is no. */
         record Refused(ErrorCode code, String message) implements Outcome {}
@@ -116,7 +123,7 @@ public final class SoulbindClient implements AutoCloseable {
                 return new Outcome.Unreachable("the response was not a protocol envelope");
             }
             if (root.get(Wire.OK).asBoolean()) {
-                return new Outcome.Ok(root.get(Wire.PAYLOAD));
+                return new Outcome.Ok(new Payload(root.get(Wire.PAYLOAD)));
             }
             JsonNode error = root.get(Wire.ERROR);
             ErrorCode code = error == null
@@ -171,19 +178,19 @@ public final class SoulbindClient implements AutoCloseable {
         return cache.whenUnreachable(gate, ref, clock.instant());
     }
 
-    private Decision toDecision(JsonNode payload) {
-        Effect effect = Effect.fromConfigName(payload.path("effect").asText())
+    private Decision toDecision(Payload payload) {
+        Effect effect = Effect.fromConfigName(payload.text("effect"))
                 // An unreadable effect denies. A decision this build cannot
                 // parse must not open a gate.
                 .orElse(Effect.DENY);
 
-        List<String> missing = new ArrayList<>();
-        payload.path("missingKinds").forEach(n -> missing.add(n.asText()));
+        List<String> missing = payload.texts("missingKinds");
 
         Decision.Reason reason;
         try {
+            String raw = payload.text("reason");
             reason = Decision.Reason.valueOf(
-                    payload.path("reason").asText("default")
+                    (raw.isEmpty() ? "default" : raw)
                             .toUpperCase(java.util.Locale.ROOT).replace('-', '_'));
         } catch (IllegalArgumentException e) {
             reason = Decision.Reason.DEFAULT;
@@ -192,8 +199,8 @@ public final class SoulbindClient implements AutoCloseable {
         return new Decision(
                 effect,
                 reason,
-                payload.path("detail").asText(""),
-                payload.path("ttlSeconds").asInt(0),
+                payload.text("detail"),
+                (int) payload.number("ttlSeconds"),
                 missing);
     }
 

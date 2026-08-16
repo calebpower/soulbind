@@ -1509,3 +1509,65 @@ way to discover the plugin was missing.
 A grant that throws is reported, not propagated. A player who linked
 successfully should not see an error because a permissions plugin was briefly
 unhappy: the link happened, and the group is a consequence that can be retried.
+
+### 5.6 — The SDK returns values, not a JSON tree
+
+`Outcome.Ok` first carried a `JsonNode`. It did not compile in a connector,
+because Jackson is an `implementation` dependency of the SDK precisely so it
+does not leak — and the first connector to read a payload found that out.
+
+The fix was not to make Jackson `api`. That would put it in every connector's
+compile classpath and make swapping the parser a breaking change to all of them,
+for a reason none of them cares about. `Payload` exposes `text`, `number`,
+`flag`, `size`, `texts` and `items`, and Jackson stays inside.
+
+Missing fields return empty or zero rather than throwing: a connector reading a
+field a newer core stopped sending should degrade, not die on a rolling upgrade.
+
+### 5.7 — The plugin class is deliberately thin
+
+Every decision it could make is made in a class with no Velocity types —
+`JoinGate`, `LinkCommandLogic`, `GroupEffector`, `BedrockIdentity` — because
+those are testable in milliseconds and the plugin is not. What is left is
+wiring: an event becomes a call, a verdict becomes a kick, a command becomes a
+message.
+
+**If a behaviour worth asserting appears in that file, it is in the wrong file.**
+
+It refuses to run half-configured: no config, no enforcement, and an error
+rather than defaults. A plugin that starts with defaults and enforces nothing
+looks exactly like a plugin that is working.
+
+The gate runs at login rather than at server connection, so a denied player
+never reaches a backend and no backend has to know the gate exists.
+
+### 5.8 — Nothing crossed the client/server seam until now
+
+Every suite tested one side. The SDK's ran above an in-memory transport; core's
+ran against a hand-built HTTP client. Both were right, and neither proved the
+two **agree** — that signing produces what verification expects, that a refusal
+core emits is one the SDK recognises, that a TTL survives the round trip.
+
+`SdkAgainstCoreTest` runs the real SDK against an embedded core over the real
+transport. It lives in core's tests because core owns the embeddable server;
+putting it in a connector would make every connector depend on core to run its
+own tests, which is the inversion the seam prevents.
+
+It covers what neither side could alone: a drifted clock reported as a refusal
+rather than an outage (the fix is a clock, not a cable), a wrong credential
+never opening a gate, and a server that genuinely stops being read as an outage
+rather than a decision.
+
+*Mutation-checked:* the signature covering a different body than was sent
+(5 failures), a constant nonce, and an unreachable core answering allow. All
+caught.
+
+### 5.9 — Two guards fired during this phase, both correctly
+
+The **platform vocabulary guard** caught `minecraft.join` as a gate name in a
+core test — borrowed from the connector that motivated the test, which is
+exactly the leak it exists to stop. The **one-TOML-parser guard** stayed green
+because the loader reaches connectors through the SDK as `api` while tomlj
+remains `implementation` inside `config`.
+
+Neither needed me to remember the rule.
