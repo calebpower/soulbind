@@ -1653,3 +1653,66 @@ this repository — repairing it means touching `/usr/local/lib/node_modules`.
 `yarn` is installed and works, so the harness uses it and commits a
 `yarn.lock`. Recorded because `npm --version` answers perfectly well, so the
 breakage is invisible until something tries to install.
+
+## Phase 6 — connector-discord
+
+### 6.1 — The seam is `ChatSurface`, not the platform's wire protocol
+
+Two implementations: the real client library, and a scripted one the battery
+drives. The connector's logic — validating, calling core, deciding what to say,
+granting a role — runs identically against both, so all of it is exercised
+without the platform.
+
+**Protocol-faithful fakery is out of scope**, and the reason is worth stating:
+faking a gateway means maintaining a second implementation of somebody else's
+product. It rots the moment they change it, and it tests nothing this connector
+owns.
+
+`ScriptedSurface` lives in the connector's **main** source set, not its tests,
+because the full-stack battery drives it from another process. It is a test
+double the way an in-memory database is — a real implementation with a different
+backing store — and it imports the connector's real logic rather than
+re-implementing any of it.
+
+### 6.2 — Two gates, and they are not the same gate
+
+The **capability** says what this connector's credential may ask core for. The
+**platform permission** says which humans may ask this connector. A connector
+holding `config-management` would otherwise let any member of a chat server
+rewrite policy — the capability model being correct and the deployment being
+wrong.
+
+The platform check runs **before** core is asked. Asking first and refusing on
+the answer would let an unprivileged member probe policy by reading refusals,
+and would spend a round trip doing it. A test asserts core is never called.
+
+An administrator is still subject to the capability gate. Both, not either: a
+server administrator cannot grant this connector something core did not.
+
+### 6.3 — Every reply is private, and the code most of all
+
+A link code in a public channel is a code anybody can redeem, and the person who
+asked would not know somebody else took it. A test walks every registered
+command and asserts nothing it says is public.
+
+### 6.4 — A contract that contradicted itself, found by a mutation
+
+`grantRole`'s javadoc said it returns false for "already had it" **as well as**
+failure, "because the desired state holds either way". That is self-contradictory
+— on failure it does not hold.
+
+Worse, it made the connector's own idempotence check unobservable: the scripted
+surface deduplicated underneath it via `Set.add`, so removing the check changed
+nothing any test could see. The mutation passed.
+
+The contract now says what a real platform offers: **true if the role is held
+afterwards**, regardless of whether this call changed it. Only genuine failure is
+false.
+
+And the test counts **calls**, not resulting state. Idempotence here is about not
+asking the platform twice; the state is identical either way, which is precisely
+why state cannot show it.
+
+*Mutation-checked:* the code shown publicly, the platform permission removed,
+role application made non-idempotent, and `/whoami` claiming everything is
+verified. All caught — the third only after the contract was fixed.
