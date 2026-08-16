@@ -1,14 +1,15 @@
 {
-  "name": "@soulbind/flarum-connector",
-  "private": true,
-  "license": "Apache-2.0",
-  "devDependencies": {
-    "flarum-webpack-config": "^2.0.3",
-    "webpack": "^5.94.0",
-    "webpack-cli": "^5.1.4"
-  },
-  "scripts": {
-    "build": "webpack --mode production",
-    "dev": "webpack --mode development --watch"
-  }
+    "name": "@soulbind/flarum-connector",
+    "private": true,
+    "license": "Apache-2.0",
+    "devDependencies": {
+        "flarum-webpack-config": "^2.0.2",
+        "webpack": "^5.94.0",
+        "webpack-cli": "^5.1.4"
+    },
+    "scripts": {
+        "build": "webpack --mode production",
+        "dev": "webpack --mode development --watch"
+    },
+    "_note_version": "flarum-webpack-config 2.x, not 3.x: 3.x targets Flarum 2, and this extension is pinned to Flarum 1.8.19. ^2.0.3 was written here first and does not exist -- the 2.x line stops at 2.0.2, which npm reported as ETARGET rather than silently resolving something close."
 }
