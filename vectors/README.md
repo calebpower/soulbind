@@ -3,8 +3,33 @@
 Generated, committed golden vectors. The oracle proving the Java and PHP
 implementations of the protocol agree.
 
-> **Status: empty.** Vectors arrive with the surface they pin — link-code
-> normalisation in Phase 2, request signing in Phase 1/2.
+> **Status: two files, consumed from Java.** The PHP consumer arrives with the
+> forum connector; until then these prove one side against a third-party oracle
+> rather than two sides against each other, and that is worth saying plainly.
+
+| File | Rows | Pins |
+|---|---|---|
+| `link-code-normalisation.tsv` | 44 | raw input to normalised form, or rejection |
+| `hmac-signing.tsv` | 13 | key, timestamp, nonce and body to signature |
+
+## Format
+
+Tab-separated, one case per line, `#` for comments. `\uXXXX` escapes anything a
+line-oriented file cannot carry — and, deliberately, anything **invisible**: a
+literal zero-width space in a vector file is indistinguishable from a typo, and
+the next person to edit the file would delete it by accident.
+
+The literal `NULL` means "absent" or "rejected", stated rather than inferred
+from emptiness. An empty string is a legitimate value in both files, and
+conflating the two would silently weaken every empty-input case.
+
+## Where the signatures came from
+
+Python's `hmac`, cross-checked against `openssl dgst -sha256 -hmac`. Neither
+implementation of the protocol produced them. That matters: a vector file
+generated from the Java side would prove PHP agrees with Java, which is a
+weaker claim than both agreeing with a third party — and it would silently
+absorb a Java-side mistake as the new expectation.
 
 ## What they pin
 

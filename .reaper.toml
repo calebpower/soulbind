@@ -116,15 +116,24 @@ images = [
 ]
 
 [sync]
-# Build output, dependency caches and results. `out/` is where results come
-# back OUT of the guest, so syncing it in would be backwards.
+# Patterns are UNANCHORED where they need to match at any depth.
+#
+# These were originally written anchored -- "/build/", "/.gradle/" -- which
+# matches only the repository root. Every module's build output was therefore
+# being copied into the session: megabytes of class files, and worse, a moving
+# target. A sync racing a local Gradle build failed with
+# `file has vanished: core/build/tmp/compileJava/.../Main.class.uniqueId1`,
+# because rsync was reading a directory Gradle was rewriting underneath it.
+#
+# "build/" without a leading slash matches a directory of that name anywhere,
+# which is what was meant. "/out/" stays anchored on purpose: it is where
+# results come back OUT of the guest, so syncing it in would be backwards, and
+# only the root one is that.
 exclude = [
-    "/build/",
-    "/.gradle/",
-    "/build-logic/build/",
-    "/build-logic/.gradle/",
-    "/node_modules/",
-    "/vendor/",
+    "build/",
+    ".gradle/",
+    "node_modules/",
+    "vendor/",
     "/out/",
 ]
 

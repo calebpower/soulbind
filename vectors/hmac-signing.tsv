@@ -1,0 +1,61 @@
+# HMAC request-signing vectors, v1.
+#
+# GENERATED AND COMMITTED. Signatures below were produced by Python's hmac --
+# an oracle outside the JVM and outside PHP -- and cross-checked against
+# `openssl dgst -sha256 -hmac`. Both implementations of this protocol are
+# checked AGAINST this file; the file is not regenerated from either of them.
+#
+# Generating at test time would prove both sides agree with the generator,
+# which is one implementation wearing a hat. A committed file is a third party,
+# and a change to it shows up as a diff in review.
+#
+# Format: <key>TAB<timestamp>TAB<nonce>TAB<body>TAB<signature>
+#   body       the literal NULL means absent, which canonicalises to empty --
+#              never to the four characters "null"
+#   signature  lowercase hex, because PHP's hash_hmac returns lowercase and
+#              "whichever case the library happens to produce" is not a contract
+#
+# The canonical form is <timestamp> LF <nonce> LF <body>, encoded UTF-8.
+# Every part of that is contract: the separator cannot appear in a timestamp or
+# a nonce, so no field boundary can be shifted, and the body is last so it may
+# contain the separator freely.
+
+
+# the canonical example, also in docs/protocol.md
+soulbind-test-key	1700000000	abc123	{"a":1}	8d6c67e7d2420e18bb54aa175c4b381a661b82bd4668200d4a7f87a0f7bdbe80
+
+# epoch zero, empty body
+soulbind-test-key	0	n		253697196dcfa50539236659074d8da8f770fcfccbcfed8be225fd616d8c9227
+
+# absent body canonicalises as empty, never as the string null
+soulbind-test-key	1	n	NULL	2d9041c707f941016346299eaef7b5b75aa1aa048c8ab86442f636c544fac37b
+
+# single-character key
+k	1700000000	nonce	body	b8ca270a72212c92cb322a4658165b1fe26d671410b518f552c9de6cffc2c39b
+
+# one byte of body changes the whole signature
+soulbind-test-key	1700000000	abc123	{"a":2}	fab82605565c3fa98d53982abf10824f108768d95faaae86d99cded91551b562
+
+# one second changes it too
+soulbind-test-key	1700000001	abc123	{"a":1}	19fc120d0b3a0ab7be9c7b5813317e418b43f486a62456fea231fa528372544f
+
+# and so does the nonce
+soulbind-test-key	1700000000	abc124	{"a":1}	52fa44c6a33b982bd9ee6751dee56840dd8a33f9e9757169b95ea28d5a311ee5
+
+# and the key
+other-key	1700000000	abc123	{"a":1}	e5daf670ddd6318bcc5b1fb59b7ab2eafc1f873c9b6393f7d8b9be5791008f61
+
+# non-ASCII body: UTF-8, not the platform default
+soulbind-test-key	1700000000	n	caf\u00E9 \u65E5\u672C	0625b0c6d90cd4fb058834817fbaf995d4d337db60c793b9e208dc4f0c40c372
+
+# non-ASCII KEY: the key is bytes, and they are UTF-8 too
+k\u00E9y	1700000000	n	body	c89050a6eddca051adfe46093f8b05e2382f9923030adb57473ed8e377e81aed
+
+# the body may contain newlines; it is last, so no boundary moves
+soulbind-test-key	1700000000	n	line1\nline2	573f488f5dd57a04931e3455d4d1ee079648fb0c0af9f1c1522b497f0312f588
+
+# a timestamp beyond 32 bits
+soulbind-test-key	9999999999	n	body	958099025ad99cbb2362cf78e983d79c0401ca77c546b97cdd6095a99718faf0
+
+# non-ASCII nonce
+soulbind-test-key	1700000000	\u00E9	body	c9afde689c3d8ed76900a8c63ab47569155d76262fce661daa1028d63aaf1ffb

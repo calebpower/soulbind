@@ -19,12 +19,23 @@ package dev.soulbind.core.transport;
 import dev.soulbind.core.registry.Authorizer.Operation;
 import dev.soulbind.core.audit.AuditEntry;
 import dev.soulbind.core.audit.AuditQuery;
+import dev.soulbind.core.identity.LinkCodeRecord;
+import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
+import dev.soulbind.core.storage.IdentityRepository;
+import dev.soulbind.protocol.AttestRequest;
 import dev.soulbind.protocol.AuditEntryView;
 import dev.soulbind.protocol.AuditPushRequest;
 import dev.soulbind.protocol.AuditQueryRequest;
 import dev.soulbind.protocol.Capability;
+import dev.soulbind.protocol.CodeIssueRequest;
+import dev.soulbind.protocol.CodeIssueResponse;
+import dev.soulbind.protocol.CodeRedeemRequest;
+import dev.soulbind.protocol.CodeRedeemResponse;
+import dev.soulbind.protocol.IdentityView;
+import dev.soulbind.protocol.SubjectInspectRequest;
+import dev.soulbind.protocol.UnlinkRequest;
 import dev.soulbind.protocol.ErrorCode;
 import dev.soulbind.protocol.HelloRequest;
 import dev.soulbind.protocol.HelloResponse;
@@ -55,6 +66,8 @@ public final class CoreHandlers {
     public static Map<Operation, Dispatcher.Handler> build(
             ConnectorRepository connectors,
             AuditRepository audit,
+            IdentityRepository identities,
+            LinkingService linking,
             Codec codec,
             Clock clock,
             int signatureWindowSeconds) {
@@ -169,7 +182,132 @@ public final class CoreHandlers {
                     entries.stream().map(CoreHandlers::toView).toList()));
         });
 
+        handlers.put(Operation.CODE_ISSUE, (connector, payload) -> {
+            var request = codec.bind(payload, CodeIssueRequest.class);
+            if (request.isEmpty() || blank(request.get().platformKind())
+                    || blank(request.get().platformId())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST,
+                        "a code is issued for a platform account: give kind and id");
+            }
+            LinkCodeRecord issued = linking.issue(
+                    connector.id(),
+                    request.get().platformKind(),
+                    request.get().platformId(),
+                    request.get().display());
+
+            return WireResponse.ok(new CodeIssueResponse(
+                    issued.code(), issued.expiresAt().getEpochSecond()));
+        });
+
+        handlers.put(Operation.CODE_REDEEM, (connector, payload) -> {
+            var request = codec.bind(payload, CodeRedeemRequest.class);
+            if (request.isEmpty() || blank(request.get().platformKind())
+                    || blank(request.get().platformId())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST,
+                        "a redeem needs the code and the account redeeming it");
+            }
+
+            LinkingService.Result result = linking.redeem(
+                    connector.id(),
+                    request.get().code(),
+                    request.get().platformKind(),
+                    request.get().platformId(),
+                    request.get().display());
+
+            if (result instanceof LinkingService.Result.Denied denied) {
+                // The refusal reason travels as the message, and the code is
+                // INVALID_REQUEST rather than a bespoke one per refusal: the
+                // caller's action is the same in every case -- tell the person
+                // -- and a protocol code per refusal would be a vocabulary the
+                // PHP side has to mirror for no gain.
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST,
+                        denied.refusal().name().toLowerCase(java.util.Locale.ROOT)
+                                .replace('_', '-') + ": " + denied.detail());
+            }
+
+            LinkingService.Result.Linked linked = (LinkingService.Result.Linked) result;
+            return WireResponse.ok(new CodeRedeemResponse(
+                    linked.subject().id(), viewsOf(identities, linked.subject().id())));
+        });
+
+        handlers.put(Operation.ATTEST, (connector, payload) -> {
+            var request = codec.bind(payload, AttestRequest.class);
+            if (request.isEmpty() || blank(request.get().platformKind())
+                    || blank(request.get().platformId())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "attest names a platform account");
+            }
+            var attested = linking.attest(
+                    connector.id(),
+                    request.get().platformKind(),
+                    request.get().platformId(),
+                    request.get().display(),
+                    request.get().proofMethod());
+
+            return WireResponse.ok(new IdentityView(
+                    attested.platformKind(),
+                    attested.platformId(),
+                    attested.display(),
+                    attested.flags(),
+                    attested.proofMethod(),
+                    attested.verifiedAt() == null ? null : attested.verifiedAt().getEpochSecond(),
+                    attested.createdAt().getEpochSecond()));
+        });
+
+        handlers.put(Operation.IDENTITY_UNLINK, (connector, payload) -> {
+            var request = codec.bind(payload, UnlinkRequest.class);
+            if (request.isEmpty() || blank(request.get().platformKind())
+                    || blank(request.get().platformId())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "unlink names a platform account");
+            }
+            boolean removed = linking.unlink(
+                    connector.id(), request.get().platformKind(), request.get().platformId());
+            return WireResponse.ok(Map.of("removed", removed));
+        });
+
+        handlers.put(Operation.SUBJECT_INSPECT, (connector, payload) -> {
+            var request = codec.bind(payload, SubjectInspectRequest.class);
+            if (request.isEmpty() || blank(request.get().platformKind())
+                    || blank(request.get().platformId())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "inspect names a platform account");
+            }
+            var subject = identities.subjectOf(
+                    request.get().platformKind(), request.get().platformId());
+            if (subject.isEmpty()) {
+                return WireResponse.ok(Map.of("linked", false));
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("linked", true);
+            body.put("subjectId", subject.get().id());
+            body.put("status", subject.get().status().name()
+                    .toLowerCase(java.util.Locale.ROOT));
+            body.put("identities", viewsOf(identities, subject.get().id()));
+            return WireResponse.ok(body);
+        });
+
         return Map.copyOf(handlers);
+    }
+
+    private static boolean blank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private static List<IdentityView> viewsOf(IdentityRepository identities, String subjectId) {
+        return identities.identitiesOf(subjectId).stream()
+                .map(i -> new IdentityView(
+                        i.platformKind(),
+                        i.platformId(),
+                        i.display(),
+                        i.flags(),
+                        i.proofMethod(),
+                        i.verifiedAt() == null ? null : i.verifiedAt().getEpochSecond(),
+                        i.createdAt().getEpochSecond()))
+                .toList();
     }
 
     private static AuditEntryView toView(AuditEntry entry) {
@@ -191,6 +329,11 @@ public final class CoreHandlers {
                 Operation.HEARTBEAT,
                 Operation.CONNECTOR_LIST,
                 Operation.AUDIT_PUSH,
-                Operation.AUDIT_QUERY);
+                Operation.AUDIT_QUERY,
+                Operation.CODE_ISSUE,
+                Operation.CODE_REDEEM,
+                Operation.ATTEST,
+                Operation.IDENTITY_UNLINK,
+                Operation.SUBJECT_INSPECT);
     }
 }

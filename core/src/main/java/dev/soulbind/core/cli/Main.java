@@ -20,6 +20,7 @@ import dev.soulbind.config.Config;
 import dev.soulbind.config.ConfigException;
 import dev.soulbind.core.CoreConfig;
 import dev.soulbind.core.CoreVersion;
+import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.registry.Authenticator;
 import dev.soulbind.core.storage.Storage;
 import dev.soulbind.core.transport.Codec;
@@ -142,7 +143,16 @@ public final class Main {
             Dispatcher dispatcher = new Dispatcher(
                     authenticator,
                     CoreHandlers.build(
-                            storage.connectors(), storage.audit(), codec, clock,
+                            storage.connectors(),
+                            storage.audit(),
+                            storage.identities(),
+                            new LinkingService(
+                                    storage.identities(), storage.linkCodes(),
+                                    storage.platformKinds(), storage.audit(), clock,
+                                    Duration.ofSeconds(
+                                            CoreConfig.linkCodeTtlSeconds(config))),
+                            codec,
+                            clock,
                             (int) window.toSeconds()));
 
             try (TransportServer server = new TransportServer(

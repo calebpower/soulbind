@@ -1,0 +1,95 @@
+# Link-code normalisation vectors, v1.
+#
+# GENERATED AND COMMITTED. Do not edit by hand to make a test pass -- regenerate
+# deliberately and review the diff. See README.md in this directory.
+#
+# Format: <raw>TAB<expected>
+#   raw       what a person typed. \uXXXX escapes anything a line-oriented file
+#             cannot carry -- and, deliberately, anything INVISIBLE: a literal
+#             zero-width space in this file would be indistinguishable from a
+#             typo, and the next person to edit it would delete it by accident.
+#   expected  the normalised form, or the literal NULL for "rejected"
+#
+# Rejection is never repair. A code containing a character outside the alphabet
+# is a typo; guessing which character was meant would silently redeem a
+# DIFFERENT code and link the wrong account, with no error anybody can see.
+#
+# The alphabet is 23456789BCDFGHJKMNPQRSTVWXYZ: no 0/O, no 1/l/I, and no vowels
+# at all -- which keeps look-alikes apart and keeps short codes from spelling
+# words.
+
+# --- already normal --------------------------------------------------------
+BCDFGHJK	BCDFGHJK
+23456789	23456789
+ZZZZZZZZ	ZZZZZZZZ
+
+# --- case ------------------------------------------------------------------
+bcdfghjk	BCDFGHJK
+BcDfGhJk	BCDFGHJK
+zzzzzzzz	ZZZZZZZZ
+
+# --- separators people insert for readability ------------------------------
+BCDF-GHJK	BCDFGHJK
+BCDF_GHJK	BCDFGHJK
+BCDF.GHJK	BCDFGHJK
+BCDF:GHJK	BCDFGHJK
+BCDF,GHJK	BCDFGHJK
+B-C-D-F-G-H-J-K	BCDFGHJK
+
+# --- whitespace ------------------------------------------------------------
+\u0020BCDFGHJK\u0020	BCDFGHJK
+BCDF\u0020GHJK	BCDFGHJK
+\tBCDFGHJK\t	BCDFGHJK
+BCDF\tGHJK	BCDFGHJK
+\u000BBCDFGHJK	BCDFGHJK
+
+# --- the invisibles a copy-paste drags along -------------------------------
+# U+00A0 no-break space, U+200B zero-width space, U+FEFF byte-order mark.
+# These three produce the "but I typed it correctly" reports.
+\u00A0BCDFGHJK	BCDFGHJK
+BCDF\u200BGHJK	BCDFGHJK
+\uFEFFBCDFGHJK	BCDFGHJK
+\u00A0\u200B\uFEFFBCDFGHJK	BCDFGHJK
+
+# --- characters the alphabet deliberately excludes -------------------------
+# Rejected, NOT mapped to their look-alikes.
+0CDFGHJK	NULL
+OCDFGHJK	NULL
+1CDFGHJK	NULL
+ICDFGHJK	NULL
+lCDFGHJK	NULL
+ACDFGHJK	NULL
+ECDFGHJK	NULL
+UCDFGHJK	NULL
+
+# --- nothing at all --------------------------------------------------------
+	NULL
+\u0020	NULL
+\t	NULL
+-	NULL
+\u00A0	NULL
+\u200B	NULL
+
+# --- non-ASCII -------------------------------------------------------------
+BCDFGHJ\u00E9	NULL
+\u65E5\u672C	NULL
+BCDFGHJ\u0130	NULL
+
+# --- the Turkish dotless-i trap --------------------------------------------
+# Under a Turkish default locale, String.toUpperCase maps 'i' to U+0130.
+# Both forms are rejected, and for the same reason: neither is in the alphabet.
+# If normalisation ever became locale-sensitive, these two rows would start
+# disagreeing with each other on a Turkish server.
+i	NULL
+\u0131	NULL
+
+# --- punctuation -----------------------------------------------------------
+BCDF!GHJ	NULL
+BCDF@GHJ	NULL
+
+# --- length is not normalisation's business --------------------------------
+# A short or long string still normalises; whether anybody ISSUED it is a
+# lookup, not a format question. Conflating them makes a typo report "wrong
+# length" when the real answer is "no such code".
+B	B
+BCDFGHJKBCDFGHJKBCDFGHJK	BCDFGHJKBCDFGHJKBCDFGHJK

@@ -92,6 +92,17 @@ public final class CoreConfig {
             "protocol.signaturewindowseconds", Type.INTEGER,
             "how many seconds a signed request stays acceptable");
 
+    /**
+     * How long a link code stays redeemable.
+     *
+     * <p>Bounded at both ends at load time. Too short and a person cannot get
+     * from one platform to the other before it dies; too long and a code
+     * overheard in a voice call is still good tomorrow.
+     */
+    public static final ConfigKey LINK_CODE_TTL_SECONDS = ConfigKey.optional(
+            "linking.codettlseconds", Type.INTEGER,
+            "how many seconds a link code stays redeemable");
+
     /** The whole schema. */
     public static final ConfigSchema SCHEMA = ConfigSchema.of(
             SERVER_HOST,
@@ -100,7 +111,8 @@ public final class CoreConfig {
             STORAGE_URL,
             STORAGE_USER,
             STORAGE_PASSWORD,
-            SIGNATURE_WINDOW_SECONDS);
+            SIGNATURE_WINDOW_SECONDS,
+            LINK_CODE_TTL_SECONDS);
 
     /** Loads core's configuration from a file, with the process environment. */
     public static Config load(Path file) {
@@ -122,6 +134,11 @@ public final class CoreConfig {
     /** The signature window, or the default, in seconds. */
     public static int signatureWindowSeconds(Config config) {
         return config.findInt(SIGNATURE_WINDOW_SECONDS).orElse(300);
+    }
+
+    /** The link code lifetime, or the default, in seconds. */
+    public static int linkCodeTtlSeconds(Config config) {
+        return config.findInt(LINK_CODE_TTL_SECONDS).orElse(600);
     }
 
     /**
@@ -147,6 +164,14 @@ public final class CoreConfig {
                     + ". Zero refuses every request including correct ones; an unbounded "
                     + "window makes replay protection depend entirely on the nonce store "
                     + "never losing an entry.");
+        }
+
+        Optional<Integer> ttl = config.findInt(LINK_CODE_TTL_SECONDS);
+        if (ttl.isPresent() && (ttl.get() < 30 || ttl.get() > 86400)) {
+            problems.add("linking.codettlseconds must be between 30 and 86400, was " + ttl.get()
+                    + ". Below 30 a person cannot get from one platform to the other before "
+                    + "the code dies; above a day, a code overheard in a voice call is still "
+                    + "good tomorrow.");
         }
 
         return problems;

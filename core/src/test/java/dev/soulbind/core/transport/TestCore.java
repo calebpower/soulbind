@@ -74,7 +74,15 @@ final class TestCore implements AutoCloseable {
         this.dispatcher = new Dispatcher(
                 authenticator,
                 CoreHandlers.build(
-                        storage.connectors(), storage.audit(), codec, clock,
+                        storage.connectors(),
+                        storage.audit(),
+                        storage.identities(),
+                        new dev.soulbind.core.identity.LinkingService(
+                                storage.identities(), storage.linkCodes(),
+                                storage.platformKinds(), storage.audit(), clock,
+                                Duration.ofMinutes(10)),
+                        codec,
+                        clock,
                         (int) window.toSeconds()));
 
         this.server = new TransportServer(
@@ -105,6 +113,24 @@ final class TestCore implements AutoCloseable {
                 + ",\"" + Wire.OP + "\":\"" + op + "\""
                 + ",\"" + Wire.ID + "\":\"" + UUID.randomUUID() + "\""
                 + ",\"" + Wire.PAYLOAD + "\":" + payloadJson + "}";
+    }
+
+    /**
+     * Registers a SECOND connector on this core, with its own credential.
+     *
+     * <p>The gate asks for two connectors completing a link. One credential
+     * holding both capabilities would prove the linking logic works while
+     * asserting nothing about the property the capability model exists for.
+     */
+    String registerAnother(String name, Set<Capability> capabilities) {
+        Credentials.Minted minted = Credentials.mint();
+        storage.connectors().register(name, minted.hash(), capabilities);
+        return minted.plaintext();
+    }
+
+    /** Posts a signed request as some other connector's credential. */
+    HttpResponse<String> postSignedAs(String token, String body, Instant now) throws Exception {
+        return postSigned(body, now, token, UUID.randomUUID().toString());
     }
 
     /** Posts a correctly signed request and returns the raw response body. */

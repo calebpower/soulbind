@@ -3,7 +3,7 @@
 Where the work actually stands. **This document is trusted over the
 specification** (`soulbind-plan.md`) and over the README whenever they disagree.
 
-Last updated: 2026-08-15, Phase 1 in progress.
+Last updated: 2026-08-15, Phase 2 in progress.
 
 ---
 
@@ -12,8 +12,8 @@ Last updated: 2026-08-15, Phase 1 in progress.
 | Phase | What it is | State |
 |---|---|---|
 | 0 | Skeleton and guards | **Complete** — gate passed |
-| 1 | Core skeleton: storage, config, registry, audit | **In progress** — storage seam, registry, authorization matrix and HMAC signing landed; config loader, hello/heartbeat, admin bootstrap and fuzz harness outstanding |
-| 2 | Identity graph and linking | Not started |
+| 1 | Core skeleton: storage, config, registry, audit | **Complete** — gate passed |
+| 2 | Identity graph and linking | **In progress** — subjects, identities, link codes, attest, unlink and the golden vectors landed |
 | 3 | Policy engine and decisions | Not started |
 | 4 | Events and effectors | Not started |
 | 5 | connector-velocity | Not started |
@@ -26,7 +26,7 @@ Last updated: 2026-08-15, Phase 1 in progress.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 449 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
+ordinary one and `charsetHostilityTest` — across 482 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
 
 Real behaviour exists now, though nothing links anything yet — that is Phase 2.
 A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite

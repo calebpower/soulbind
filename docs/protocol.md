@@ -248,11 +248,90 @@ before that skew starts having its signed requests refused as stale.
 
 Symmetric by construction. A `code-display` connector requests a code for an
 account it can authenticate locally; the person types it into any `code-entry`
-connector; core transactionally validates TTL and single-use, resolves or
-creates the subject, binds both identities, records proof methods, appends
-audit, and emits events.
+connector. Either side can be display or entry, and **core never knows the
+pairing** — it sees a code issued for one account and later redeemed by
+another, and both sides are the same shape.
 
-Either side can be display or entry. **Core never knows the pairing.**
+That symmetry is not a convenience. It is what stops whichever platform was
+implemented first from becoming the de-facto root of identity.
+
+### The flow
+
+1. `code.issue` mints a code bound to `(platform_kind, platform_id)`. The
+   connector vouches for the account locally; core does not verify it and could
+   not, having no way to authenticate a platform account itself.
+2. The person types it into any `code-entry` connector, which calls
+   `code.redeem` with its own account context.
+3. Core normalises, checks, **claims**, and only then links.
+
+The code is normalised **once, in core**. A connector normalising first and core
+normalising again would be two chances to disagree about what a typed code
+means.
+
+### Single use
+
+One statement carries the decision:
+
+```sql
+UPDATE link_code SET redeemed_at = ?, redeemed_by_connector = ?
+ WHERE code = ? AND redeemed_at IS NULL
+```
+
+One row updated means this caller claimed it; zero means somebody else already
+had. No read-then-write, no lock, and no dependence on an isolation level that
+differs between backends — the version that worked in testing would otherwise be
+the version that failed in deployment.
+
+**Expiry is deliberately not part of that predicate.** A caller redeeming an
+expired code is told it expired, not told it was already used: different
+problems with different fixes, and collapsing them sends the person to ask the
+wrong question. An expired code is also not consumed, so the reason stays
+truthful on the next attempt.
+
+### Refusals
+
+| Refusal | Means |
+|---|---|
+| `unknown-code` | No such code — including one that failed normalisation |
+| `expired` | Issued, but its lifetime has passed |
+| `already-redeemed` | Somebody claimed it, possibly this caller twice |
+| `same-account` | The redeeming account is the one it was issued for |
+| `already-linked` | Both accounts already belong to people |
+
+A code is **rejected, never repaired**. Mapping `O` to `0` would silently redeem
+a *different* code and link the wrong account, with no error anybody could see.
+
+`same-account` exists because linking an account to itself would produce a
+subject with one identity and the appearance of a completed link — the person
+believes they are linked and no gate agrees.
+
+There is **no merge**. Two accounts that already belong to different people is a
+refusal, not a guess: merging needs a rule for every conflicting field, and the
+first time it ran on the wrong pair it would be unrecoverable.
+
+### Unlink
+
+Hard with respect to policy — the identity row is deleted, and a decision asked
+one transaction later sees it gone. Soft with respect to audit — the rows naming
+it remain forever, because what happened still happened.
+
+Re-linking the same account later creates a **new** identity. A resurrected row
+would silently carry its old verification date, and policy asking "how long has
+this been proven" would get an answer about an account that had been unlinked in
+between.
+
+### Attest
+
+`attest` is how an `identity-provider` connector says "I proved this account by
+a means of my own". The proof *method* is recorded, not merely a boolean, so a
+gate can accept a link code for one thing and demand something stronger for
+another. An account nobody has seen before gets a subject of its own — one
+identity is a person known on one platform, which is the honest representation
+of what was asserted.
+
+**The code itself is never written to the audit log.** Until it is redeemed or
+expires it is a live secret, and an audit log readable by anyone holding
+`config-management` would otherwise be a list of working codes.
 
 ## Audit
 
