@@ -1142,17 +1142,49 @@ log "accounts exist exactly where they should"
 # So the passes are counted against the file. If somebody adds a test with a new
 # tag, or misspells an existing one, the totals disagree and this says so.
 EXPECTED_SPECS=$(grep -cE "^test\(" "$REPO/harness/flarum/browser/tests/gate.spec.js")
-ACTUAL_SPECS=0
-for r in "$RUN"/playwright-*.json; do
-    [ -f "$r" ] || continue
-    n=$(grep -o '"status":"passed"' "$r" | wc -l | tr -d ' ')
-    ACTUAL_SPECS=$((ACTUAL_SPECS + n))
-done
 
-if [ "$ACTUAL_SPECS" -ne "$EXPECTED_SPECS" ]; then
-    log "the browser tier ran $ACTUAL_SPECS specs but the file declares $EXPECTED_SPECS."
+# Counted by PARSING the reports, not by grepping them.
+#
+# The first version grepped for '"status":"passed"'. Playwright writes pretty
+# JSON, so the file says '"status": "passed"' with a space, and the count was
+# always zero -- a check that could only ever fail, reporting a coverage gap
+# that did not exist while the four passes underneath it were green.
+ACTUAL_SPECS=$(python3 - "$RUN" <<'PY'
+import glob, json, sys
+
+total = 0
+for path in sorted(glob.glob(sys.argv[1] + "/playwright-*.json")):
+    try:
+        with open(path) as handle:
+            report = json.load(handle)
+    except (OSError, ValueError):
+        # A report that cannot be read is not a report. Counting it as zero is
+        # right: the check below will notice the shortfall and say so.
+        continue
+
+    def walk(suite):
+        count = 0
+        for spec in suite.get("specs", []):
+            for test in spec.get("tests", []):
+                for result in test.get("results", []):
+                    if result.get("status") in ("passed", "expected"):
+                        count += 1
+        for child in suite.get("suites", []):
+            count += walk(child)
+        return count
+
+    for suite in report.get("suites", []):
+        total += walk(suite)
+
+print(total)
+PY
+)
+
+if [ "${ACTUAL_SPECS:-0}" -ne "$EXPECTED_SPECS" ]; then
+    log "the browser tier ran ${ACTUAL_SPECS:-0} specs but the file declares $EXPECTED_SPECS."
     log "a spec that belongs to no --grep pass never runs, and playwright reports"
     log "'0 tests' as a success -- so the pass prints green and the gap is invisible."
+    log "reports found: $(ls "$RUN"/playwright-*.json 2>/dev/null | wc -l | tr -d ' ')"
     exit 1
 fi
 log "browser tier green: $ACTUAL_SPECS of $EXPECTED_SPECS specs ran"
