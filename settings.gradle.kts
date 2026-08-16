@@ -17,6 +17,19 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         mavenCentral()
+
+        // The proxy API is not on Maven Central and will not be. This is the
+        // only reason a second repository exists, and it is scoped by content
+        // filter so it can never satisfy anything else -- a typo'd coordinate
+        // resolving from an unexpected host is how a supply chain gets a new
+        // participant nobody chose.
+        maven {
+            name = "papermc"
+            url = uri("https://repo.papermc.io/repository/maven-public/")
+            content {
+                includeGroup("com.velocitypowered")
+            }
+        }
     }
 }
 
