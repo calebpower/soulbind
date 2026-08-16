@@ -94,6 +94,7 @@ copy of the rule.
 | `hello` | *(any registered)* |
 | `heartbeat` | *(any registered)* |
 | `event.subscribe` | *(any registered)* |
+| `event.ack` | *(any registered)* |
 | `attest` | `identity-provider` |
 | `code.issue` | `code-display` |
 | `code.redeem` | `code-entry` |
@@ -116,10 +117,15 @@ credential is refused before this table is consulted, and a suspended connector
 is refused every operation including `heartbeat` — suspension that still allows
 a heartbeat is suspension in name only.
 
-`effector` grants no request operation of its own. An effector *receives* events
-and acknowledges them; the acknowledgement operation is defined with the event
-transport. A test asserts that this is the only capability in that position, so
-an ungated capability cannot appear by accident.
+`event.ack` is unprivileged like the subscribe it pairs with: a connector can
+only move its **own** cursor, because the connector id comes from the credential
+and never from the payload, so there is nothing here another capability would
+protect.
+
+`effector` therefore still grants no request operation of its own — it describes
+a connector that *consumes* events, and consuming is not a request. A test
+asserts it is the only capability in that position, so an ungated capability
+cannot appear by accident.
 
 Refusals name their reason (`unknown-credential`, `suspended`,
 `missing-capability`) and, for the last, the capability that was missing — an
@@ -418,6 +424,50 @@ in a fail-mode must never be the thing that opens a gate.
 
 ## Events
 
-At-least-once, idempotency-keyed, with per-connector cursors so a connector that
-was down receives what it missed, in order, on reconnect. Effectors must be
-idempotent; the SDK enforces key-based dedup.
+**At-least-once, and said plainly.** Exactly-once across a network does not
+exist; what exists is at-least-once plus an idempotency key. Being honest about
+which one is on offer is how a connector author learns they must dedup — and the
+SDK enforces it rather than trusting them to remember.
+
+### The outbox
+
+An event is written **in the same transaction as the change that caused it**.
+Calling a subscriber inline instead would make every mutation's latency depend
+on the slowest subscriber, and an event emitted by a call that failed is an
+event nobody hears about. There is no delete: an event removed is an event a
+connector that was down will never receive.
+
+### Cursors
+
+One per connector, not a global position — a shared one would mean whichever
+subscriber was fastest decided what the others never saw.
+
+**A cursor advances on acknowledgement, never on send.** Advancing on send turns
+a delivery lost in flight into an event nobody will ever receive, which is the
+whole failure the outbox exists to prevent. Acknowledgement is cumulative: a
+connector that applied 1..50 says `50` once, and a cumulative acknowledgement
+cannot leave a hole the way a per-event scheme can.
+
+A cursor never moves backwards. Re-delivery is survivable — that is what the
+keys are for — but a buggy acknowledgement replaying the entire history is a
+very different amount of work arriving without warning.
+
+### Event types, v1
+
+| Type | Emitted when |
+|---|---|
+| `identity.linked` | Two platform accounts became one subject |
+| `identity.unlinked` | An identity was removed from its subject |
+| `identity.verified` | An identity established proof |
+| `subject.requirements-met` | A subject now satisfies a gate it previously did not |
+| `subject.requirements-lost` | A subject stopped satisfying a gate |
+| `rule.changed` | A rule changed, so cached decisions for its gate are suspect |
+| `config.changed` | Runtime configuration changed |
+| `connector.registered` | A connector registered |
+
+`subject.requirements-met` is emitted **per gate**, not once per subject: an
+effector granting a role needs to know which gate opened, and telling it only
+that something changed would make it re-evaluate everything on every link.
+
+Every type here appears in `EventType` and vice versa — a guard asserts it, for
+the same reason as the operations table.

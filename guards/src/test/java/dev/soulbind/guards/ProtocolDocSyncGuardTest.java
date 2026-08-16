@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.core.registry.Authorizer;
 import dev.soulbind.protocol.Capability;
+import dev.soulbind.protocol.EventType;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -65,6 +66,10 @@ class ProtocolDocSyncGuardTest {
     private static final Pattern CAPABILITY_ROW =
             Pattern.compile("^\\|\\s*`([a-z-]+)`\\s*\\|\\s*[^|]+\\|\\s*$");
 
+    /** An event-table row: {@code | `type` | prose |}. */
+    private static final Pattern EVENT_ROW =
+            Pattern.compile("^\\|\\s*`([a-z][a-z0-9.-]*)`\\s*\\|\\s*[^|]+\\|\\s*$");
+
     private static final String OPERATIONS_HEADING = "## Operations";
     private static final String CAPABILITIES_HEADING = "## Capabilities";
 
@@ -101,6 +106,30 @@ class ProtocolDocSyncGuardTest {
                 "the capability table and the Capability enum disagree. Both are read as the "
                         + "vocabulary of the protocol, so a difference means one of them is "
                         + "lying to somebody.");
+    }
+
+    @Test
+    @DisplayName("every event type appears in the document, and every documented type exists")
+    void eventTypesMatchTheDocument() {
+        // T3's "every-event-documented-and-consumed". An event type nobody
+        // documented is a side effect nobody can audit -- events are the one
+        // place a connector acts on something core said happened, so an
+        // undocumented one is a change to the world that no reader can trace.
+        Set<String> documented =
+                parseEvents(SourceTree.repoRoot().resolve("docs/protocol.md"));
+
+        Set<String> declared = new TreeSet<>();
+        for (EventType type : EventType.values()) {
+            declared.add(type.wireName());
+        }
+
+        assertEquals(
+                declared,
+                new TreeSet<>(documented),
+                "docs/protocol.md's event table and the EventType enum disagree. A connector "
+                        + "author reads that table to decide what to handle; a type missing "
+                        + "from it is a type nobody will handle, and one that is only in it is "
+                        + "a handler waiting for something that never arrives.");
     }
 
     @Test
@@ -196,6 +225,17 @@ class ProtocolDocSyncGuardTest {
             Matcher m = ROW.matcher(line.strip());
             if (m.matches()) {
                 out.put(m.group(1), Optional.ofNullable(m.group(2)));
+            }
+        }
+        return out;
+    }
+
+    private static Set<String> parseEvents(Path doc) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String line : sectionOf(doc, "## Events")) {
+            Matcher m = EVENT_ROW.matcher(line.strip());
+            if (m.matches()) {
+                out.add(m.group(1));
             }
         }
         return out;

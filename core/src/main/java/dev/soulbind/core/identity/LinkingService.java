@@ -17,10 +17,12 @@
 package dev.soulbind.core.identity;
 
 import dev.soulbind.core.audit.AuditEntry;
+import dev.soulbind.core.events.EventEmitter;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.IdentityRepository;
 import dev.soulbind.core.storage.LinkCodeRepository;
 import dev.soulbind.core.storage.PlatformKindRepository;
+import dev.soulbind.protocol.EventType;
 import dev.soulbind.protocol.LinkCode;
 import java.time.Clock;
 import java.time.Duration;
@@ -64,6 +66,7 @@ public final class LinkingService {
         record Denied(Refusal refusal, String detail) implements Result {}
     }
 
+    private final EventEmitter events;
     private final IdentityRepository identities;
     private final LinkCodeRepository codes;
     private final PlatformKindRepository kinds;
@@ -72,12 +75,14 @@ public final class LinkingService {
     private final Duration ttl;
 
     public LinkingService(
+            EventEmitter events,
             IdentityRepository identities,
             LinkCodeRepository codes,
             PlatformKindRepository kinds,
             AuditRepository audit,
             Clock clock,
             Duration ttl) {
+        this.events = events;
         this.identities = identities;
         this.codes = codes;
         this.kinds = kinds;
@@ -235,6 +240,17 @@ public final class LinkingService {
                         "issuedFor", issuedIdentity.ref(),
                         "proofMethod", "link-code")));
 
+        // Emitted AFTER the audit row and after the binds, in the same call
+        // path as the change itself. An event written somewhere else would
+        // eventually describe a change that did not happen, or miss one that
+        // did.
+        events.emit(
+                EventType.IDENTITY_LINKED,
+                subject.id(),
+                redeemedIdentity.ref(),
+                null,
+                Map.of("issuedFor", issuedIdentity.ref(), "proofMethod", "link-code"));
+
         return new Result.Linked(subject, issuedIdentity, redeemedIdentity);
     }
 
@@ -286,6 +302,13 @@ public final class LinkingService {
                 null,
                 Map.of("proofMethod", method)));
 
+        events.emit(
+                EventType.IDENTITY_VERIFIED,
+                identity.subjectId(),
+                identity.ref(),
+                null,
+                Map.of("proofMethod", method));
+
         return identity;
     }
 
@@ -310,6 +333,11 @@ public final class LinkingService {
                     platformKind + ":" + platformId,
                     null,
                     Map.of()));
+
+            events.emit(
+                    EventType.IDENTITY_UNLINKED,
+                    owner.map(Subject::id).orElse(null),
+                    platformKind + ":" + platformId);
         }
         return removed;
     }

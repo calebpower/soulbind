@@ -61,6 +61,11 @@ class AuthorizationMatrixTest {
                 put(Operation.HELLO, Optional.empty());
                 put(Operation.HEARTBEAT, Optional.empty());
                 put(Operation.EVENT_SUBSCRIBE, Optional.empty());
+                // Unprivileged, and deliberately so: a connector can only move
+                // its OWN cursor, because the id comes from the credential and
+                // never from the payload. There is nothing here a capability
+                // would protect.
+                put(Operation.EVENT_ACK, Optional.empty());
 
                 put(Operation.ATTEST, Optional.of(Capability.IDENTITY_PROVIDER));
                 put(Operation.CODE_ISSUE, Optional.of(Capability.CODE_DISPLAY));
@@ -210,7 +215,8 @@ class AuthorizationMatrixTest {
     @DisplayName("exactly the intended operations are unprivileged")
     void unprivilegedSetIsExact() {
         assertEquals(
-                Set.of(Operation.HELLO, Operation.HEARTBEAT, Operation.EVENT_SUBSCRIBE),
+                Set.of(Operation.HELLO, Operation.HEARTBEAT, Operation.EVENT_SUBSCRIBE,
+                        Operation.EVENT_ACK),
                 Authorizer.unprivilegedOperations(),
                 "an operation silently becoming unprivileged is the most expensive possible "
                         + "authorization mistake");

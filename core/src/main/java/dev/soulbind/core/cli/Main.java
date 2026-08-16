@@ -20,6 +20,7 @@ import dev.soulbind.config.Config;
 import dev.soulbind.config.ConfigException;
 import dev.soulbind.core.CoreConfig;
 import dev.soulbind.core.CoreVersion;
+import dev.soulbind.core.events.EventEmitter;
 import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.registry.Authenticator;
 import dev.soulbind.core.storage.Storage;
@@ -147,7 +148,9 @@ public final class Main {
                             storage.audit(),
                             storage.identities(),
                             storage.policy(),
+                            storage.events(),
                             new LinkingService(
+                                    new EventEmitter(storage.events(), clock),
                                     storage.identities(), storage.linkCodes(),
                                     storage.platformKinds(), storage.audit(), clock,
                                     Duration.ofSeconds(

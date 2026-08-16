@@ -41,6 +41,16 @@ public final class Authorizer {
         HEARTBEAT(null),
         EVENT_SUBSCRIBE(null),
 
+        /**
+         * Acknowledge events applied.
+         *
+         * <p>Unprivileged like the subscribe it pairs with. A connector can only
+         * move its OWN cursor -- the id comes from the credential, never from
+         * the payload -- so there is nothing here another capability would
+         * protect.
+         */
+        EVENT_ACK(null),
+
         ATTEST(Capability.IDENTITY_PROVIDER),
         CODE_ISSUE(Capability.CODE_DISPLAY),
         CODE_REDEEM(Capability.CODE_ENTRY),

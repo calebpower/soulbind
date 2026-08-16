@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.core.audit.AuditQuery;
+import dev.soulbind.core.events.EventEmitter;
 import dev.soulbind.core.storage.Backend;
 import dev.soulbind.core.storage.Storage;
 import dev.soulbind.core.storage.StorageBackends;
@@ -115,6 +116,7 @@ class LinkingServiceTest {
         return new Fixture(
                 storage,
                 new LinkingService(
+                        new EventEmitter(storage.events(), clock),
                         storage.identities(), storage.linkCodes(), storage.platformKinds(),
                         storage.audit(), clock, TTL),
                 clock);

@@ -19,12 +19,14 @@ package dev.soulbind.core.transport;
 import dev.soulbind.core.registry.Authorizer.Operation;
 import dev.soulbind.core.audit.AuditEntry;
 import dev.soulbind.core.audit.AuditQuery;
+import dev.soulbind.core.events.EventRecord;
 import dev.soulbind.core.identity.Identity;
 import dev.soulbind.core.identity.LinkCodeRecord;
 import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
 import dev.soulbind.core.storage.IdentityRepository;
+import dev.soulbind.core.storage.EventRepository;
 import dev.soulbind.core.storage.PolicyRepository;
 import dev.soulbind.protocol.AttestRequest;
 import dev.soulbind.protocol.AuditEntryView;
@@ -40,6 +42,10 @@ import dev.soulbind.protocol.CodeRedeemRequest;
 import dev.soulbind.protocol.CodeRedeemResponse;
 import dev.soulbind.protocol.DecideRequest;
 import dev.soulbind.protocol.DecideResponse;
+import dev.soulbind.protocol.EventAckRequest;
+import dev.soulbind.protocol.EventPollRequest;
+import dev.soulbind.protocol.EventPollResponse;
+import dev.soulbind.protocol.EventView;
 import dev.soulbind.protocol.IdentityView;
 import dev.soulbind.protocol.SubjectInspectRequest;
 import dev.soulbind.protocol.UnlinkRequest;
@@ -76,6 +82,7 @@ public final class CoreHandlers {
             AuditRepository audit,
             IdentityRepository identities,
             PolicyRepository policy,
+            EventRepository events,
             LinkingService linking,
             Codec codec,
             Clock clock,
@@ -352,7 +359,85 @@ public final class CoreHandlers {
                     decision.missingKinds()));
         });
 
+        handlers.put(Operation.EVENT_SUBSCRIBE, (connector, payload) -> {
+            var request = codec.bind(payload, EventPollRequest.class);
+            if (request.isEmpty()) {
+                return WireResponse.error(ErrorCode.MALFORMED, "poll request could not be read");
+            }
+
+            long from = request.get().after() == null
+                    ? events.cursorOf(connector.id())
+                    : Math.max(0L, request.get().after());
+
+            int limit = effectivePageSize(request.get().limit());
+
+            List<EventRecord> page = events.after(from, limit);
+
+            // The cursor is NOT advanced here. Advancing on send would turn a
+            // delivery lost in flight into an event nobody ever receives, which
+            // is the whole failure the outbox exists to prevent.
+            return WireResponse.ok(new EventPollResponse(
+                    page.stream().map(CoreHandlers::toView).toList(),
+                    events.cursorOf(connector.id()),
+                    events.highestSequence()));
+        });
+
+        handlers.put(Operation.EVENT_ACK, (connector, payload) -> {
+            var request = codec.bind(payload, EventAckRequest.class);
+            if (request.isEmpty()) {
+                return WireResponse.error(ErrorCode.MALFORMED, "ack could not be read");
+            }
+            long position = events.acknowledge(
+                    connector.id(), request.get().through(), clock.instant());
+            return WireResponse.ok(Map.of("cursor", position));
+        });
+
         return Map.copyOf(handlers);
+    }
+
+    /** Events per page when a caller does not say. */
+    private static final int DEFAULT_EVENT_PAGE = 100;
+
+    /**
+     * The ceiling, whatever a caller asks for.
+     *
+     * <p>An unbounded page against a long-lived outbox is a way to exhaust the
+     * server's memory from an authenticated endpoint -- the same reasoning as
+     * the audit query limit, and the same answer.
+     */
+    private static final int MAX_EVENT_PAGE = 1000;
+
+    /**
+     * The page size actually used.
+     *
+     * <p>Extracted so the ceiling is observable without creating a thousand
+     * events to press against it. A mutation removing the clamp passed every
+     * delivery test, because those ask for more than exists and the ceiling
+     * never binds — the bound was only reachable at a scale no test wanted to
+     * build.
+     */
+    static int effectivePageSize(Integer requested) {
+        if (requested == null) {
+            return DEFAULT_EVENT_PAGE;
+        }
+        return Math.min(MAX_EVENT_PAGE, Math.max(1, requested));
+    }
+
+    /** The ceiling, exposed for the test that asserts it binds. */
+    static int maxEventPage() {
+        return MAX_EVENT_PAGE;
+    }
+
+    private static EventView toView(EventRecord event) {
+        return new EventView(
+                event.sequence(),
+                event.type().wireName(),
+                event.subjectId(),
+                event.identityRef(),
+                event.gate(),
+                event.payload(),
+                event.idempotencyKey(),
+                event.createdAt().getEpochSecond());
     }
 
     private static boolean blank(String s) {
@@ -396,6 +481,8 @@ public final class CoreHandlers {
                 Operation.CODE_REDEEM,
                 Operation.ATTEST,
                 Operation.DECIDE,
+                Operation.EVENT_SUBSCRIBE,
+                Operation.EVENT_ACK,
                 Operation.IDENTITY_UNLINK,
                 Operation.SUBJECT_INSPECT);
     }

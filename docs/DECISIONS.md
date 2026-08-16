@@ -1188,3 +1188,89 @@ mismatches.
 
 Asserting stability instead would have been asserting that editing a rule does
 nothing.
+
+## Phase 4 — events and effectors
+
+### 4.1 — An outbox, written in the same transaction as the change
+
+Calling a subscriber inline would make every mutation's latency depend on the
+slowest subscriber, and an event emitted by a call that failed is an event
+nobody hears about. Writing it beside the change is what makes "the change
+happened but nobody heard" impossible.
+
+There is **no delete**. An event removed is an event a connector that was down
+will never receive, and "it was probably fine" is not checkable afterwards.
+
+### 4.2 — At-least-once, said plainly
+
+Exactly-once across a network does not exist. What exists is at-least-once plus
+an idempotency key, and being honest about which is on offer is how a connector
+author learns they must dedup. The key is stable across redeliveries and across
+subscribers — if it were regenerated per delivery it would dedup nothing while
+looking, from the transport's side, exactly like a correct system.
+
+The gate is asserted **by reading the effector's state back**, never by counting
+deliveries. A count proves what the transport did; the state proves what
+happened to the world. Under at-least-once, the count is the wrong number to
+assert anyway.
+
+### 4.3 — The cursor advances on acknowledgement, never on send
+
+Advancing on send turns a delivery lost in flight into an event nobody will ever
+receive — the whole failure the outbox exists to prevent. Acknowledgement is
+cumulative, because a cumulative one cannot leave a hole the way a per-event
+scheme can, and it never moves backwards: replay is survivable, but a buggy
+acknowledgement replaying the entire history is a very different amount of work
+arriving without warning.
+
+Cursors are per connector. A shared position would mean whichever subscriber was
+fastest decided what the others never saw.
+
+`event.ack` is unprivileged, because a connector can only move its own cursor —
+the id comes from the credential, never the payload.
+
+### 4.4 — The sequence allocator, adopted before it was needed
+
+Events allocate sequences by `UPDATE ... SET next_seq = next_seq + 1`, the same
+mechanism audit uses. Adopted here from the start rather than after a
+multi-writer backend produced 45 distinct sequences out of 200 — which is what
+happened the first time, for audit, in Phase 1.
+
+### 4.5 — An unknown event type throws rather than being skipped
+
+A row this build cannot deliver is a version mismatch. Skipping it would deliver
+everything around it and hide the gap, and a subscriber has no way to notice.
+Refusing makes the mismatch visible.
+
+### 4.6 — The event doc-sync guard
+
+Every `EventType` constant appears in `docs/protocol.md`'s event table and vice
+versa. Events are the one place a connector acts on something core said
+happened, so an undocumented one is a side effect nobody can audit — and a
+documented one that does not exist is a handler waiting for something that never
+arrives.
+
+The operations guard caught `event.ack` the moment it was added, and the
+authorization matrix caught it separately: I had added an operation without
+deciding its authorization in the contract. Both did exactly what they were
+built for.
+
+*Mutation-checked:* an event type added but undocumented, and a documented type
+that does not exist. Both caught.
+
+### 4.7 — A ceiling that no test could reach
+
+**Found by mutation-checking.** Removing the page-size clamp passed every
+delivery test, because they ask for more events than exist — the ceiling never
+binds at test scale, and pressing against it through the wire would mean
+creating a thousand events to prove one integer.
+
+The clamp is now a small extracted function asserted directly, at the boundary
+and past it. The general shape is worth remembering: a bound that only matters
+at production scale is a bound no integration test will exercise, and it needs
+to be reachable some other way.
+
+*Mutation-checked:* cursor advanced on send, idempotency key regenerated per
+delivery, cursor allowed to move backwards, events delivered newest first, and
+the ceiling removed. All five caught — the last only after the clamp was made
+observable.
