@@ -814,6 +814,58 @@ case "$WEBHOOK_STATUS" in
         webhook_failed "unexpected webhook status $WEBHOOK_STATUS" ;;
 esac
 
+# --- does the gate resolve, and answer? -------------------------------------
+#
+# Every service this extension registers, built from Flarum's container and
+# actually called. Before any browser, and unconditionally.
+#
+# This exists because a binding that cannot resolve is invisible from outside:
+# the provider asked for Psr\SimpleCache\CacheInterface, which Flarum does not
+# bind, so every gate check threw BindingResolutionException, which Flarum
+# reported as a generic 500, which the page rendered as "Oops! Something went
+# wrong." Four iterations went into that -- three of them narrowing what I could
+# not see rather than what was wrong.
+#
+# A container that cannot build the thing under test is not a subtle failure. It
+# only looked subtle because nothing asked the container to build it.
+log "smoke: the gate resolves from Flarum's container and answers"
+
+GATE_PROBE="$RUN/gate-probe.txt"
+podman exec "$WEB_C" php -r '
+    require "/site/vendor/autoload.php";
+    $site = require "/site/site.php";
+    $c = $site->bootApp()->getContainer();
+    try {
+        foreach ([
+            Soulbind\Flarum\Settings\ConnectorSettings::class,
+            Soulbind\Flarum\Client\DecisionCache::class,
+            Soulbind\Flarum\Client\SoulbindClient::class,
+            Soulbind\Flarum\Gate\AccessGate::class,
+            Soulbind\Flarum\Webhook\WebhookVerifier::class,
+        ] as $class) {
+            $c->make($class);
+            echo "resolved ", $class, "\n";
+        }
+        $outcome = $c->make(Soulbind\Flarum\Gate\AccessGate::class)
+            ->checkRegistration("probe@example.com");
+        echo "GATE ANSWERED allowed=", $outcome->allowed ? "yes" : "no",
+             " reason=", $outcome->reason, "\n";
+    } catch (Throwable $e) {
+        echo "THREW ", get_class($e), ": ", $e->getMessage(), "\n";
+        echo "  at ", $e->getFile(), ":", $e->getLine(), "\n";
+    }
+' > "$GATE_PROBE" 2>&1 || true
+
+sed 's/^/  /' "$GATE_PROBE" | head -12
+
+if ! grep -q "GATE ANSWERED" "$GATE_PROBE"; then
+    log "the gate could not be built or could not answer."
+    log "Every browser assertion after this would be about an extension that"
+    log "throws before it decides anything, and would report it as a UI fault."
+    exit 1
+fi
+log "the gate builds and answers"
+
 # --- what does the API actually return when the gate refuses? ---------------
 #
 # A browser shows what Flarum CHOSE to render. This shows what Flarum sent, which

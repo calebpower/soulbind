@@ -20,50 +20,49 @@ declare(strict_types=1);
 
 namespace Soulbind\Flarum\Webhook;
 
-use Psr\SimpleCache\CacheInterface;
-use Psr\SimpleCache\InvalidArgumentException;
+use Illuminate\Contracts\Cache\Repository;
+use Throwable;
 
 /**
- * Nonces in the host's shared cache.
+ * Nonces in the host's cache.
  *
- * The replay guard needs storage that outlives a request, and PHP gives it
- * none of its own.
+ * The replay guard needs storage that outlives a request, and PHP gives it none
+ * of its own.
+ *
+ * **Atomic**, via the host cache's {@code add()}, which writes only if the key
+ * is absent and reports whether it did. That is the operation this class has
+ * always wanted: an earlier version used PSR-16, which offers no such method, so
+ * it did {@code has()} then {@code set()} and documented the race it could not
+ * close. Moving to the host's own contract closed it, which is a better outcome
+ * than the standard interface would have allowed.
  *
  * **Fails CLOSED.** Every path that cannot prove a nonce is new returns false,
- * which the verifier reads as a replay and refuses. That is the opposite of the
- * decision cache's failure direction, and deliberately: a decision cache that
- * cannot answer degrades to asking core, while a replay guard that cannot
- * answer degrades to having no replay guard.
+ * and the verifier reads that as a replay and refuses. That is the opposite of
+ * the decision cache's failure direction, deliberately: a decision cache that
+ * cannot answer degrades to asking core, while a replay guard that cannot answer
+ * degrades to having no replay guard.
  */
 final class CacheNonceStore implements NonceStore
 {
     private const PREFIX = 'soulbind.nonce.';
 
-    public function __construct(private readonly CacheInterface $cache)
+    public function __construct(private readonly Repository $cache)
     {
     }
 
     public function recordIfNew(string $nonce, int $now, int $ttlSeconds): bool
     {
-        $key = self::PREFIX . hash('sha256', $nonce);
-
         try {
-            if ($this->cache->has($key)) {
-                return false;
-            }
-            // NOT atomic, and PSR-16 offers nothing that is.
-            //
-            // Two identical deliveries arriving in the same instant could both
-            // pass this. The window is milliseconds wide and requires the
-            // attacker to have a valid signed delivery already -- so the residual
-            // risk is a duplicate cache invalidation, which is idempotent and
-            // costs one extra decide.
-            //
-            // Written down rather than glossed: if this endpoint ever does
-            // something that is NOT idempotent, this line stops being adequate
-            // and needs a store with an atomic add.
-            return $this->cache->set($key, '1', $ttlSeconds);
-        } catch (InvalidArgumentException) {
+            // add() is write-if-absent, and returns whether it wrote. Two
+            // identical deliveries arriving in the same instant cannot both be
+            // told they are new -- which is precisely the replay this exists to
+            // stop, and precisely what has()-then-set() could not promise.
+            return (bool) $this->cache->add(
+                self::PREFIX . hash('sha256', $nonce),
+                '1',
+                $ttlSeconds
+            );
+        } catch (Throwable) {
             return false;
         }
     }

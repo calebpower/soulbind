@@ -2405,3 +2405,44 @@ class-not-found: `GateRefused` implements a Flarum interface, and the
 dependency-free runner exists precisely to work on a machine with PHP and
 nothing else. Loading Flarum to check one string would have made the entire
 suite unrunnable there.
+
+### 7.23 — A binding the host does not provide, and the four iterations it cost
+
+`SoulbindProvider` asked the container for `Psr\SimpleCache\CacheInterface`.
+Flarum does not bind it. Every gate check therefore threw
+`BindingResolutionException`, Flarum reported that as a generic 500, and the page
+rendered "Oops! Something went wrong. Please reload the page and try again."
+
+PSR-16 was chosen *because* it is the standard interface. A standard the host
+does not implement is worth nothing, and the seam that actually matters here is
+`DecisionStore` — this connector's own, which keeps the rules testable without
+any cache at all. The stores now take `Illuminate\Contracts\Cache\Repository`,
+which Flarum provides.
+
+**That swap closed a gap I had documented as unclosable.** 7.18 recorded that
+PSR-16 offers no atomic add, so the nonce store did `has()` then `set()` and
+could, in a millisecond-wide window, let two identical deliveries both pass. The
+host contract has `add()` — write-if-absent, reporting whether it wrote — which
+is exactly the operation that guard always wanted. The race is gone, and the
+caveat in 7.18 no longer applies.
+
+**What it cost, and why.** Four iterations, three of them spent narrowing what I
+could not see rather than what was wrong:
+
+1. I read `code: "unknown"` as "`GateRefused` is not registered" and changed the
+   registration. Flarum's `Registry` calls `getType()` on any `KnownError`, so a
+   `GateRefused` would have carried its own code regardless — "unknown" meant the
+   exception was something else entirely, and I had assumed its identity.
+2. The log dump tailed `flarum.log`; the file is `flarum-YYYY-MM-DD.log`. It
+   printed nothing, and nothing is indistinguishable from healthy.
+3. Only when the harness resolved the gate from the container *in process* did
+   the exception name itself.
+
+The `ErrorHandling` registration from 7.22 is still correct and still needed —
+without it a refusal maps to 500 rather than 403 — it simply was not what stood
+between the person and their reason.
+
+**The guard.** The stack now resolves every service this extension registers,
+from Flarum's own container, and calls the gate, before any browser starts. A
+container that cannot build the thing under test is not a subtle failure; it only
+looked subtle because nothing had asked the container to build it.

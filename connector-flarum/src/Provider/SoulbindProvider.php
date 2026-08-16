@@ -22,14 +22,14 @@ namespace Soulbind\Flarum\Provider;
 
 use Flarum\Foundation\AbstractServiceProvider;
 use Flarum\Settings\SettingsRepositoryInterface;
-use Psr\SimpleCache\CacheInterface;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Soulbind\Flarum\Client\CurlTransport;
 use Soulbind\Flarum\Client\DecisionCache;
 use Soulbind\Flarum\Client\SoulbindClient;
 use Soulbind\Flarum\Gate\AccessGate;
 use Soulbind\Flarum\Settings\ConnectorSettings;
 use Soulbind\Flarum\Settings\HostSettings;
-use Soulbind\Flarum\Store\Psr16DecisionStore;
+use Soulbind\Flarum\Store\FlarumCacheDecisionStore;
 use Soulbind\Flarum\Webhook\CacheNonceStore;
 use Soulbind\Flarum\Webhook\WebhookVerifier;
 
@@ -60,7 +60,7 @@ final class SoulbindProvider extends AbstractServiceProvider
                 // The host's cache, so decisions survive between requests. PHP
                 // has no process to keep them in, and a cache that does not
                 // survive is a cache that never helps.
-                new Psr16DecisionStore($container->make(CacheInterface::class))
+                new FlarumCacheDecisionStore($container->make(CacheRepository::class))
             );
         });
 
@@ -85,7 +85,7 @@ final class SoulbindProvider extends AbstractServiceProvider
             $settings = $container->make(ConnectorSettings::class);
             return new WebhookVerifier(
                 $settings->webhookSecret(),
-                new CacheNonceStore($container->make(CacheInterface::class))
+                new CacheNonceStore($container->make(CacheRepository::class))
             );
         });
     }
