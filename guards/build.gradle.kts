@@ -23,7 +23,7 @@ dependencies {
 // ReleaseLevelGuardTest's expected table, and vice versa; a module in one and
 // not the other is a module that quietly left coverage.
 val inspectedModules = listOf(
-    ":protocol", ":config", ":core", ":connector-sdk",
+    ":protocol", ":config", ":policy", ":core", ":connector-sdk",
     ":connector-discord", ":connector-velocity", ":connector-plan",
 )
 

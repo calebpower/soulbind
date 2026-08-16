@@ -25,6 +25,7 @@ rootProject.name = "soulbind"
 include(
     "protocol",
     "config",
+    "policy",
     "core",
     "connector-sdk",
     "connector-discord",

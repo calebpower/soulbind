@@ -1049,3 +1049,104 @@ no dependence on a JDK formatting detail this code has no business relying on.
 Recorded because the mutation did its job in an unusual way — it did not find a
 defect in the code, it found a defect in the *reasoning*, which would have
 misled the next person to touch it.
+
+## Phase 3 — policy engine and decisions
+
+### 3.1 — The evaluator is a module with no dependencies
+
+Its dependency block is empty, and that is the design. Evaluation is a pure
+function of `(snapshot, rules, overrides, clock)`; it has no storage, no
+transport, no JSON and no logging, so there is nothing for a dependency to be
+*for*.
+
+That emptiness is what makes the Tier 4 matrix exhaustive rather than
+representative: 253 rows call the function directly and run in milliseconds. A
+dependency appearing here is the signal that I/O has crept in.
+
+### 3.2 — Precedence, and the apparent contradiction in it
+
+Overrides beat rules; deny beats allow; no rule means allow; grace is checked
+after establishing that requirements are unmet.
+
+**Deny beats allow** because wrongly denying costs a complaint and wrongly
+allowing costs the thing the gate existed to prevent. Both orderings of the
+override list are tested, because a precedence that depended on list order would
+be reproducible only by accident.
+
+**No rule means allow** because a gate nobody configured is a gate nobody asked
+for — denying would mean every new gate silently locks out everybody the moment
+a connector declares it. This sits beside the *opposite* default in the SDK,
+where an unreachable core denies. They are not contradictory: here there is
+nothing to enforce, there enforcement has failed.
+
+**Grace after requirements** because a subject who already satisfies the rule
+should be allowed for that reason, not for a window that happens to still be
+running. "Allowed, grace" and "allowed, requirements met" describe different
+futures, and the decision log is read by people deciding what happens next.
+
+### 3.3 — A grace decision cannot be cached past the end of grace
+
+Otherwise a connector caches "allow, because grace" for sixty seconds, grace
+lapses ten seconds in, and the gate stays open for the remaining fifty. It would
+be advisory rather than enforced, and only intermittently — worse than absent,
+because somebody would have tested it and seen it work.
+
+The TTL is clamped to the remaining grace, and a TTL of zero means "do not cache
+this", which the SDK honours by evicting rather than storing.
+
+### 3.4 — "Linked" means two identities, not one
+
+A subject with a single identity is a person known on one platform — which is
+what an attestation produces. Calling that linked would let a gate demanding a
+link be satisfied by the very account asking.
+
+### 3.5 — An override needs a reason and exactly one target
+
+No reason, no override: one nobody can review will outlive whoever added it.
+Naming both a subject and an identity makes it ambiguous which was followed;
+naming neither makes it apply to everybody. Both are refused at construction,
+where the mistake is cheap.
+
+Expired overrides are ignored *inside* the engine rather than filtered by the
+caller, so a caller that forgets cannot accidentally honour a lapsed one.
+
+*Mutation-checked:* deny no longer beating allow, expired overrides honoured,
+the grace boundary flipped, the grace TTL unclamped, one identity counting as
+linked, grace removed entirely, and an unconfigured gate denying everybody. All
+seven caught.
+
+### 3.6 — Fail-closed is the default, and a typo cannot open a gate
+
+`DecisionCache.FailMode.fromConfigName` maps **only** the exact word `open` to
+`OPEN`. Everything else — a typo, an empty string, `yes`, `true`, `1`, null —
+becomes `CLOSED`. A mistake in a fail-mode must never be the thing that opens a
+gate, and a thrown exception would be a start-up failure an operator fixes by
+guessing.
+
+Fail-open remains spellable, because some gates genuinely should not lock a
+community out of its own forum over a network blip. The point is that it is
+chosen rather than inherited.
+
+The user-facing message blames **the system**: somebody refused because a server
+they have never heard of is unreachable should not be told they are not allowed.
+A test asserts the message does not read as a refusal of the person.
+
+Denials are cached too. Caching only allowances would mean an outage silently
+upgrades every recent denial to whatever the fail mode says — and under
+fail-open, that is an upgrade to allow.
+
+### 3.7 — Latency is measured, printed, and deliberately not gating
+
+**p99 = 2.5µs** over 200,000 calls against the specification's 50ms target
+(p50 396ns, p99.9 8.9µs). Recorded in STATUS.md.
+
+Its own Gradle task, not part of `check`. The specification says the figure is
+informational, and a number that fails a build is a number somebody will loosen
+until it stops failing. The assertion that remains is a 50ms ceiling — loose
+enough that crossing it means something is doing I/O, not that the machine was
+busy.
+
+The measurement warms up first, because measuring a cold JIT measures the JIT,
+and it uses a realistic override distribution rather than the empty list —
+measuring only the fast path and calling it the budget would be the easy
+mistake.

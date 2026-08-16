@@ -3,7 +3,7 @@
 Where the work actually stands. **This document is trusted over the
 specification** (`soulbind-plan.md`) and over the README whenever they disagree.
 
-Last updated: 2026-08-15, Phase 2 in progress.
+Last updated: 2026-08-15, Phase 3 in progress.
 
 ---
 
@@ -14,7 +14,7 @@ Last updated: 2026-08-15, Phase 2 in progress.
 | 0 | Skeleton and guards | **Complete** — gate passed |
 | 1 | Core skeleton: storage, config, registry, audit | **Complete** — gate passed |
 | 2 | Identity graph and linking | **Complete** — gate passed: two connectors link in both directions, exactly-one-redeem proven under concurrency on both backends, vectors consumed under the hostile charset |
-| 3 | Policy engine and decisions | Not started |
+| 3 | Policy engine and decisions | **In progress** — evaluator, matrix, SDK fail-closed and the latency figure landed; the `decide` operation outstanding |
 | 4 | Events and effectors | Not started |
 | 5 | connector-velocity | Not started |
 | 6 | connector-discord | Not started |
@@ -26,7 +26,7 @@ Last updated: 2026-08-15, Phase 2 in progress.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 503 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
+ordinary one and `charsetHostilityTest` — across 781 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
 
 Real behaviour exists now, though nothing links anything yet — that is Phase 2.
 A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite
@@ -121,6 +121,27 @@ registered connector can hello + heartbeat over both transports.*
 Outstanding Phase 1 deliverables: WebSocket and webhook/poll transports, `hello`/heartbeat, audit query API, `soulbind-admin`
 bootstrap, `soulbind doctor`, T2 DTO wire conformance, the audit-immutability
 guard, T6 migration idempotence on both backends, and the T7 fuzz harness.
+
+## Decision latency
+
+Measured by `./gradlew :policy:latencyTest`, informational per the
+specification's §14 Phase 3 gate.
+
+| | |
+|---|---|
+| p50 | 396 ns |
+| p99 | **2,535 ns (0.003 ms)** |
+| p99.9 | 8,921 ns |
+| max | 247,005 ns |
+
+Against a target of p99 < 50 ms in-process. The margin is four orders of
+magnitude, which is what a pure function with no I/O should look like — the
+number is worth recording precisely because a future regression would show up
+as a change of scale rather than a percentage.
+
+Warmed up before measuring, and measured over a realistic override distribution
+rather than the empty list: measuring only the fast path and calling it the
+budget would be the easy mistake.
 
 ## Guards in force
 

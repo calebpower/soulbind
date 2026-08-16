@@ -71,6 +71,14 @@ tasks.withType<Test>().configureEach {
         if (testTaskName != "fuzzTest") {
             excludeTags("fuzz")
         }
+        // Latency is a MEASUREMENT, not a check. Running it on every compile
+        // makes every compile slower for no signal, and a measurement inside a
+        // pass/fail suite eventually gets a tight assertion bolted on and
+        // becomes flaky. It runs under `latencyTest`, and its number goes in
+        // STATUS.md.
+        if (testTaskName != "latencyTest") {
+            excludeTags("latency")
+        }
     }
 
     // Every randomised tier prints its seed and accepts it back. Wiring the
@@ -147,6 +155,29 @@ val fuzzTest = tasks.register<Test>("fuzzTest") {
         showStandardStreams = true
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+// The latency measurement.
+//
+// Its own task, and deliberately NOT wired into `check`: it is informational
+// per the specification, and a number that fails a build is a number somebody
+// will loosen until it stops failing. Run it when the figure matters, and
+// record what it said.
+val latencyTest = tasks.register<Test>("latencyTest") {
+    description = "Measures decision latency and prints the distribution. Informational."
+    group = "verification"
+
+    val testSourceSet = project.extensions.getByType<SourceSetContainer>().named("test").get()
+    testClassesDirs = testSourceSet.output.classesDirs
+    classpath = testSourceSet.runtimeClasspath
+
+    useJUnitPlatform { includeTags("latency") }
+    outputs.upToDateWhen { false }
+
+    testLogging {
+        showStandardStreams = true
+        events("failed")
     }
 }
 

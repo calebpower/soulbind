@@ -56,6 +56,7 @@ class ReleaseLevelGuardTest {
     private static final Map<String, Integer> EXPECTED_RELEASE = new LinkedHashMap<>() {{
         put("protocol", 21);           // depended on by the plugins
         put("config", 21);             // shared loader; the lower floor is the one that holds
+        put("policy", 21);             // the SDK caches decisions and needs these types
         put("connector-sdk", 21);      // depended on by the plugins
         put("connector-velocity", 21); // loads inside a proxy JVM
         put("connector-plan", 21);     // loads inside a server JVM
