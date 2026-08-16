@@ -441,8 +441,19 @@ if ($path !== '/' && is_file(__DIR__ . '/public' . $path)) {
 require __DIR__ . '/public/index.php';
 PHPR
 
+# PHP_CLI_SERVER_WORKERS, because php -S serves ONE connection at a time.
+#
+# curl is happy with that: it asks for one thing and waits. A browser is not --
+# it opens several keep-alive connections at once, and a single-worker server
+# holds them, so the page stalls with its scripts still pending. The symptom is
+# a Playwright timeout waiting for a button, which points at the selector and
+# not at the server.
+#
+# Still not a production topology, and still not pretending to be: this is a
+# harness, and the difference from nginx is stated rather than papered over.
 podman run -d --name "$WEB_C" --network "$NET" \
     -p "${FORUM_PORT}:${FORUM_PORT}" \
+    -e PHP_CLI_SERVER_WORKERS=8 \
     -v "$SITE":/site -w /site \
     "$FORUM_IMAGE" php -S "0.0.0.0:${FORUM_PORT}" router.php >/dev/null
 
@@ -646,6 +657,51 @@ if grep -qi "fatal error\|stack trace" "$SMOKE_BODY"; then
 fi
 
 log "the forum renders with the extension enabled"
+
+# --- can the page's own assets load? ----------------------------------------
+#
+# Flarum's front page is a shell that boots a JavaScript application. If its
+# bundles do not serve, the HTML still arrives, still contains the forum title,
+# and still answers 200 -- so every check above passes and the browser sits
+# waiting sixty seconds for a button that will never be rendered.
+#
+# That is what happened. Diagnosing it through a Playwright timeout costs a
+# minute per attempt and points at the selector rather than at the server.
+# Fetching the assets the page asks for costs a second and names the real fault.
+log "smoke: the page's own assets serve"
+
+ASSET_FAILURES=0
+ASSET_COUNT=0
+for url in $(grep -oE '(src|href)="[^"]*\.(js|css)[^"]*"' "$SMOKE_BODY" \
+             | sed -E 's/^(src|href)="//; s/"$//' | sort -u); do
+    case "$url" in
+        http*) full="$url" ;;
+        /*)    full="${FORUM_URL}${url}" ;;
+        *)     full="${FORUM_URL}/${url}" ;;
+    esac
+    ASSET_COUNT=$((ASSET_COUNT + 1))
+    status=$(curl -s -o /dev/null -w '%{http_code}' "$full" || echo 000)
+    if [ "$status" != "200" ]; then
+        log "  asset $status $full"
+        ASSET_FAILURES=$((ASSET_FAILURES + 1))
+    fi
+done
+
+if [ "$ASSET_COUNT" -eq 0 ]; then
+    log "the page references no scripts or stylesheets at all."
+    log "Flarum's front page boots a JavaScript application; a shell with no bundle"
+    log "means the assets were never published, and no browser test can pass."
+    head -60 "$SMOKE_BODY" || true
+    exit 1
+fi
+
+if [ "$ASSET_FAILURES" -ne 0 ]; then
+    log "$ASSET_FAILURES of $ASSET_COUNT assets did not serve; the SPA cannot boot"
+    podman logs "$WEB_C" 2>&1 | tail -30 || true
+    exit 1
+fi
+log "all $ASSET_COUNT referenced assets serve"
+
 
 
 # The webhook endpoint must exist and must REFUSE an unsigned request. If it
