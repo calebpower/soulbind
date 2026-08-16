@@ -216,9 +216,22 @@ test('@link a member links this account by entering a code from another platform
     await fillStable(login, 'password', 'harness-admin-password');
     await login.getByRole('button', { name: /log in/i }).click();
 
+    // Logged in BEFORE going anywhere. /settings redirects away for a guest, so
+    // a failed login and a missing panel look identical -- and the panel is the
+    // thing under test, while the login is scaffolding.
+    await expect(page.locator('#header-secondary'), 'the admin login did not take')
+      .toContainText(/admin/i, { timeout: 30_000 });
+
     await page.goto('/settings');
+
+    // The settings page itself first. If this is missing the navigation failed,
+    // which is a different fault from the panel not rendering on it.
+    await expect(page.locator('.SettingsPage'), 'the settings page did not load')
+      .toBeVisible({ timeout: 30_000 });
+
     const panel = page.locator('.SoulbindPanel');
-    await expect(panel).toBeVisible({ timeout: 30_000 });
+    await expect(panel, 'the settings page loaded but this extension added nothing to it')
+      .toBeVisible({ timeout: 30_000 });
 
     // Not linked yet, and the panel must say so rather than showing the
     // unavailable state -- which would mean it never reached core.
