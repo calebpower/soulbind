@@ -820,15 +820,30 @@ esac
 # is where the reason either survives or is dropped -- and it costs a curl rather
 # than a sixteen-second browser timeout.
 #
-# The rule is set to deny first, so this is the refusal path on purpose.
+# It carries a session and a CSRF token, because Flarum refuses API writes
+# without them. The first version posted bare and got csrf_token_mismatch, which
+# is Flarum working correctly and the probe being wrong -- and would have read as
+# "the gate did not refuse" if I had trusted the status alone.
 log "smoke: the refusal the API actually returns"
 "$REPO/harness/fullstack/set-rule.sh" \
     "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" forum-register true deny >/dev/null
 
+JAR="$RUN/cookies.txt"
+rm -f "$JAR"
+CSRF_PAGE="$RUN/csrf-page.html"
+curl -s -c "$JAR" -o "$CSRF_PAGE" "$FORUM_URL/"
+CSRF=$(sed -n 's/.*"csrfToken":"\([^"]*\)".*/\1/p' "$CSRF_PAGE" | head -1)
+
+if [ -z "$CSRF" ]; then
+    log "could not read a CSRF token from the front page; the probe cannot post"
+    exit 1
+fi
+
 REFUSAL_BODY="$RUN/api-refusal.json"
-REFUSAL_STATUS=$(curl -s -o "$REFUSAL_BODY" -w '%{http_code}' \
+REFUSAL_STATUS=$(curl -s -b "$JAR" -o "$REFUSAL_BODY" -w '%{http_code}' \
     -X POST "$FORUM_URL/api/users" \
     -H 'Content-Type: application/json' \
+    -H "X-CSRF-Token: $CSRF" \
     -d '{"data":{"attributes":{"username":"smokeprobe","email":"smokeprobe@example.com","password":"a-long-enough-password"}}}' \
     || echo 000)
 
@@ -838,8 +853,13 @@ log "  body: $(head -c 400 "$REFUSAL_BODY" 2>/dev/null)"
 case "$REFUSAL_STATUS" in
     403) log "  the refusal is mapped to 403" ;;
     500) log "  the refusal is still a generic 500 -- the type is not registered" ;;
-    2*)  log "  the registration was ACCEPTED while the gate denies"; exit 1 ;;
-    *)   log "  unexpected status" ;;
+    2*)
+        log "  the registration was ACCEPTED while the gate denies. Nothing about"
+        log "  message formatting excuses this: the gate did not hold."
+        exit 1 ;;
+    *)
+        log "  unexpected status -- the probe reached something other than the gate"
+        exit 1 ;;
 esac
 
 # The reason has to be IN there. A 403 whose body says nothing leaves the person
