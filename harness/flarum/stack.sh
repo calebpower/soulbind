@@ -769,6 +769,21 @@ log "stack is up and the extension is live"
 # mis-tagged spec fails loudly rather than passing in the wrong world.
 log "browser tier"
 
+# Rules arrive over the PROTOCOL, through the shared script.
+#
+# Core has no `rule` CLI verb, deliberately -- its own help says every other
+# operation is reachable through an admin credential, "not a second management
+# surface with rules that drift from the first". I wrote `core_cli rule set`
+# anyway, and it told me: unknown verb: rule.
+#
+# harness/fullstack/set-rule.sh already did this, signed correctly, for Phase 5.
+# It is now parameterised rather than copied: one implementation of the signing,
+# and its three-argument form still behaves exactly as it did.
+set_rule() {
+    "$REPO/harness/fullstack/set-rule.sh" \
+        "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" forum-register "$1" "$2" "$3"
+}
+
 browser() {
     podman run --rm --network host \
         -v "$REPO/harness/flarum/browser":/suite -w /suite \
@@ -804,25 +819,24 @@ else
 fi
 
 log "pass 1 of 4: an unlinked account is refused, in core's own words"
-core_cli rule set --gate forum-register --require-kinds game \
-    --default-effect deny --detail "Link a game account before registering."
+set_rule true deny "Link a game account before registering."
 browser npx playwright test --grep "@refused"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-1.json" 2>/dev/null || true
 
 log "pass 2 of 4: the rule allows, and the account is admitted"
-core_cli rule set --gate forum-register --default-effect allow
+set_rule false allow ""
 browser npx playwright test --grep "@admitted"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-2.json" 2>/dev/null || true
 
 log "pass 3 of 4: core is stopped, and the gate must hold"
-core_cli rule set --gate forum-register --require-kinds game --default-effect deny
+set_rule true deny "Link a game account before registering."
 stop_core
 browser npx playwright test --grep "@outage"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-3.json" 2>/dev/null || true
 
 log "pass 4 of 4: core returns, and nothing needs cleaning up after it"
 start_core
-core_cli rule set --gate forum-register --default-effect allow
+set_rule false allow ""
 browser npx playwright test --grep "@recovery"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-4.json" 2>/dev/null || true
 
