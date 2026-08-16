@@ -1274,3 +1274,59 @@ to be reachable some other way.
 delivery, cursor allowed to move backwards, events delivered newest first, and
 the ceiling removed. All five caught — the last only after the clamp was made
 observable.
+
+### 4.8 — Two insert-if-absent races, and a 5xx that should have been impossible
+
+**Found by the T8 rule-mutation race against a real multi-writer backend.** The
+test failed with a Jackson parse error on a response body beginning `Server` —
+an HTTP 500 error page, not a protocol response.
+
+Three defects, one visible symptom.
+
+**`platformKind.seen` and `gate.seen` were SELECT-then-INSERT.** Two callers see
+"not present" and both insert. Invisible for two phases, because SQLite's
+single-writer executor serialises every write; the first time eight threads
+called `decide` concurrently against MariaDB, one lost on the primary key.
+
+**The dispatcher let the resulting exception escape to Javalin**, which rendered
+an HTML error page. The no-5xx property was asserted by the fuzz oracle and
+enforced nowhere — the fuzzer never made a handler throw, so the gap held.
+Nothing escapes now: a handler failure becomes an `internal` refusal in a
+well-formed envelope, with the cause logged rather than sent, because an
+internal failure that tells a peer why is an information disclosure. An `Error`
+still propagates — catching `Throwable` would turn a dying JVM into a stream of
+polite denials.
+
+**The obvious fix for the race did not work portably.** Catching the exception
+and testing for a uniqueness violation fails because one driver reports SQLState
+class 23 and the other reports `null`, putting the detail in a vendor result
+code. Matching on either would put dialect knowledge in the seam — which is
+what the seam exists to prevent.
+
+`Jdbc.ensureExists` asserts the **outcome** instead of classifying the error:
+attempt the insert, and if it fails, ask whether the row is there now. If it is,
+the thing the caller wanted is true, whoever made it true — which is exactly
+what "ensure it exists" means. If not, the failure was something else and is
+rethrown.
+
+The regression test asserts the transport property directly, with a handler that
+throws, so it does not need MariaDB to hold. Reproducing the original conditions
+would have; asserting the property does not.
+
+### 4.9 — The SDK dedups, rather than documenting that connectors should
+
+A rule enforced by a paragraph is a rule that holds until somebody is in a
+hurry. `IdempotentApplier` records the key **before** running the effect and
+removes it again **if the effect throws** — recording after would let a crash
+between effect and record cause a re-apply, and not removing on failure would
+mark an effect applied that never happened and swallow the retry.
+
+**It evicts rather than refusing**, which is the opposite of the replay-nonce
+store, deliberately. There, forgetting a nonce means failing to detect a replay
+— a security control, so it fails closed. Here, forgetting a key means applying
+an idempotent effect twice, which is harmless by definition, since that is what
+makes it worth deduping. Refusing to apply events because a cache filled would
+be an outage caused by bookkeeping.
+
+Eviction is access-ordered, so a connector being hammered with one repeated
+redelivery keeps that key live — which is exactly the case the dedup is for.

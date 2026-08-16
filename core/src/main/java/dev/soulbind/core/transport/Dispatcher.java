@@ -41,6 +41,9 @@ import java.util.Optional;
  */
 public final class Dispatcher {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(Dispatcher.class);
+
     /** One operation's implementation. */
     @FunctionalInterface
     public interface Handler {
@@ -107,7 +110,26 @@ public final class Dispatcher {
             return WireResponse.error(
                     ErrorCode.INTERNAL, "operation not available in this build");
         }
-        return handler.handle(connector.get(), payload);
+        try {
+            return handler.handle(connector.get(), payload);
+        } catch (RuntimeException e) {
+            // NOTHING escapes to the transport. An exception reaching Javalin
+            // becomes an HTTP 500 with an error page in the body -- which the
+            // fuzz oracle forbids outright, and which hands a caller something
+            // it cannot parse as a protocol response.
+            //
+            // Found by the T8 race against a real multi-writer backend: a
+            // uniqueness violation in a handler surfaced as a 500 whose body
+            // began "Server". The violation itself is fixed at its cause, but
+            // the transport should never have been able to leak one.
+            //
+            // The message is deliberately not the exception's. An internal
+            // failure that leaks its cause to a peer is an information
+            // disclosure; the detail belongs in the server's own logs.
+            LOG.error("operation {} failed", operation.get().wireName(), e);
+            return WireResponse.error(
+                    ErrorCode.INTERNAL, "this operation failed; the failure has been logged");
+        }
     }
 
     /**

@@ -60,6 +60,41 @@ final class Jdbc {
         this.writeExecutor = writeExecutor;
     }
 
+    /**
+     * Ensures a row exists, tolerating a concurrent insert of the same key.
+     *
+     * <p>A SELECT-then-INSERT races: two callers see "not present" and both
+     * insert, and on a multi-writer backend one gets a constraint violation
+     * that escapes as a 5xx. That defect was invisible for two phases, because
+     * the single-writer backend serialises every write.
+     *
+     * <p>The obvious fix — catch the exception and check whether it is a
+     * uniqueness violation — does not work portably. One driver reports
+     * SQLState class 23; the other reports {@code null} and puts the detail in
+     * a vendor result code. Matching on either would put dialect knowledge in
+     * the seam.
+     *
+     * <p>So this asserts the OUTCOME instead of classifying the error: attempt
+     * the insert, and if it fails, ask whether the row is there now. If it is,
+     * the thing the caller wanted is true, whoever made it true — which is
+     * exactly what "ensure it exists" means. If it is not, the failure was
+     * something else and is rethrown.
+     *
+     * @param insert the insert to attempt
+     * @param exists whether the row is present
+     */
+    static void ensureExists(Work<Void> insert, Work<Boolean> exists, Connection c)
+            throws SQLException {
+        try {
+            insert.apply(c);
+        } catch (SQLException e) {
+            if (!Boolean.TRUE.equals(exists.apply(c))) {
+                throw e;
+            }
+            // Somebody else got there first. That is the desired end state.
+        }
+    }
+
     /** Runs read-only work. Never serialised: concurrent readers are fine on both backends. */
     <T> T read(String what, Work<T> work) {
         try (Connection c = dataSource.getConnection()) {

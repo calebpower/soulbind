@@ -17,6 +17,7 @@
 package dev.soulbind.core.storage;
 
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,27 +40,31 @@ final class JdbcPlatformKindRepository implements PlatformKindRepository {
             return;
         }
         jdbc.write("platformKind.seen", c -> {
-            // Insert-if-absent expressed portably rather than with either
-            // dialect's upsert syntax. A dialect-specific INSERT here would be
-            // the first crack in the storage seam, and the seam is worth more
-            // than the round trip this costs.
-            try (PreparedStatement check =
-                    c.prepareStatement("SELECT 1 FROM platform_kind WHERE kind = ?")) {
-                check.setString(1, kind);
-                try (ResultSet rs = check.executeQuery()) {
-                    if (rs.next()) {
+            // Insert, and if that fails, ask whether the kind is known now.
+            // See Jdbc.ensureExists for why this shape rather than catching a
+            // uniqueness violation by its error code.
+            Jdbc.ensureExists(
+                    conn -> {
+                        try (PreparedStatement ps = conn.prepareStatement(
+                                "INSERT INTO platform_kind (kind, registered_by, first_seen_at)"
+                                        + " VALUES (?, ?, ?)")) {
+                            ps.setString(1, kind);
+                            ps.setString(2, registeredBy);
+                            ps.setLong(3, Instant.now().toEpochMilli());
+                            ps.executeUpdate();
+                        }
                         return null;
-                    }
-                }
-            }
-            try (PreparedStatement ps = c.prepareStatement(
-                    "INSERT INTO platform_kind (kind, registered_by, first_seen_at)"
-                            + " VALUES (?, ?, ?)")) {
-                ps.setString(1, kind);
-                ps.setString(2, registeredBy);
-                ps.setLong(3, Instant.now().toEpochMilli());
-                ps.executeUpdate();
-            }
+                    },
+                    conn -> {
+                        try (PreparedStatement ps = conn.prepareStatement(
+                                "SELECT 1 FROM platform_kind WHERE kind = ?")) {
+                            ps.setString(1, kind);
+                            try (ResultSet rs = ps.executeQuery()) {
+                                return rs.next();
+                            }
+                        }
+                    },
+                    c);
             return null;
         });
     }

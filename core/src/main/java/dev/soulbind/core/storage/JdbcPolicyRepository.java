@@ -44,24 +44,32 @@ final class JdbcPolicyRepository implements PolicyRepository {
     @Override
     public void gateSeen(String gateName, String registeredBy, String description) {
         jdbc.write("gate.seen", c -> {
-            try (PreparedStatement exists =
-                    c.prepareStatement("SELECT 1 FROM gate WHERE name = ?")) {
-                exists.setString(1, gateName);
-                try (ResultSet rs = exists.executeQuery()) {
-                    if (rs.next()) {
+            // Same shape and same reason as platform kinds: a SELECT-then-INSERT
+            // races, and eight connectors calling `decide` at once against a
+            // multi-writer backend turned that race into a 500.
+            Jdbc.ensureExists(
+                    conn -> {
+                        try (PreparedStatement ps = conn.prepareStatement(
+                                "INSERT INTO gate (name, registered_by, description,"
+                                        + " first_seen_at) VALUES (?, ?, ?, ?)")) {
+                            ps.setString(1, gateName);
+                            ps.setString(2, registeredBy);
+                            ps.setString(3, description);
+                            ps.setLong(4, Instant.now().toEpochMilli());
+                            ps.executeUpdate();
+                        }
                         return null;
-                    }
-                }
-            }
-            try (PreparedStatement ps = c.prepareStatement(
-                    "INSERT INTO gate (name, registered_by, description, first_seen_at)"
-                            + " VALUES (?, ?, ?, ?)")) {
-                ps.setString(1, gateName);
-                ps.setString(2, registeredBy);
-                ps.setString(3, description);
-                ps.setLong(4, Instant.now().toEpochMilli());
-                ps.executeUpdate();
-            }
+                    },
+                    conn -> {
+                        try (PreparedStatement ps =
+                                conn.prepareStatement("SELECT 1 FROM gate WHERE name = ?")) {
+                            ps.setString(1, gateName);
+                            try (ResultSet rs = ps.executeQuery()) {
+                                return rs.next();
+                            }
+                        }
+                    },
+                    c);
             return null;
         });
     }
