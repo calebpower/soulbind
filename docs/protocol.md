@@ -97,6 +97,7 @@ copy of the rule.
 | `event.ack` | *(any registered)* |
 | `attest` | `identity-provider` |
 | `code.issue` | `code-display` |
+| `identity.describe` | `code-display` |
 | `code.redeem` | `code-entry` |
 | `decide` | `enforcement-point` |
 | `audit.push` | `audit-source` |
@@ -394,6 +395,22 @@ An unconfigured gate allows, because a gate nobody configured is a gate nobody
 asked for. Note that a **connector** whose core is unreachable *denies* — those
 look contradictory and are not: here there is nothing to enforce, there
 enforcement has failed.
+
+### `identity.describe` versus `subject.inspect`
+
+They return the same thing and differ only in who may ask.
+
+`subject.inspect` needs `config-management`: it is an operator looking at
+anybody. `identity.describe` needs only `code-display`, because it answers
+"what is this account linked to" for a connector asking on behalf of the person
+in front of it.
+
+That distinction exists because the alternative is worse. A chat surface needs
+to answer "what am I linked to", and granting it `config-management` to do so
+would let it rewrite every rule — the capability model being correct and the
+deployment being wrong. A connector that may mint a link code for an account
+already vouches for that account, and already learns its graph the moment a link
+completes; this grants no reach it did not have.
 
 ### What "verified" means
 

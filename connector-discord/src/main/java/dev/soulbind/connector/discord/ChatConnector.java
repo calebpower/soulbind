@@ -112,7 +112,7 @@ public final class ChatConnector {
     }
 
     private void handleWhoami(ChatSurface.Invocation invocation) {
-        SoulbindClient.Outcome outcome = client.call("subject.inspect", new InspectBody(
+        SoulbindClient.Outcome outcome = client.call("identity.describe", new InspectBody(
                 platformKind, invocation.invoker().platformId()));
 
         if (!(outcome instanceof SoulbindClient.Outcome.Ok ok)) {

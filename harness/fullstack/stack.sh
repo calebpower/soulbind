@@ -100,7 +100,8 @@ mkdir -p "$RUN/paper" "$RUN/proxy/plugins" "$RUN/core"
 
 # --- core -------------------------------------------------------------------
 log "building"
-(cd "$REPO" && ./gradlew --quiet :core:installDist :connector-velocity:jar)
+(cd "$REPO" && ./gradlew --quiet :core:installDist :connector-velocity:jar \
+    :connector-discord:installDist)
 
 cat > "$RUN/core/soulbind.toml" <<TOML
 [server]
@@ -131,6 +132,13 @@ PROXY_CRED=$("$CORE_CLI" register --name proxy --quiet \
 # the run before this one failed here, correctly, for missing enforcement-point.
 HARNESS_CRED=$("$CORE_CLI" register --name harness --quiet \
     --capabilities code-entry,config-management,enforcement-point \
+    --config "$RUN/core/soulbind.toml")
+
+# The chat connector gets its OWN credential and its own capabilities, because
+# it is a separate principal. Sharing the harness's would prove the flow works
+# for something holding every capability, which is not what a deployment runs.
+CHAT_CRED=$("$CORE_CLI" register --name chat --quiet \
+    --capabilities code-display,code-entry \
     --config "$RUN/core/soulbind.toml")
 
 if [ -z "$PROXY_CRED" ] || [ -z "$HARNESS_CRED" ]; then
@@ -244,5 +252,47 @@ log "running the player-driver smoke"
     --entry-credential "$HARNESS_CRED" \
     --mc-version "$MC_PROTOCOL" \
     --kick-contains "link your account")
+
+# --- the chat side, through the REAL connector ---------------------------
+# A second link, game to chat, redeemed by the actual ChatConnector over the
+# scripted surface rather than by a hand-written HTTP request. That is the
+# difference between proving core works and proving this connector does.
+log "linking game to chat through the real chat connector"
+
+CHAT_DRIVER="$REPO/connector-discord/build/install/connector-discord/bin/scripted-driver"
+CORE_URL="http://127.0.0.1:$CORE_PORT"
+
+# A code, issued by the chat connector for a chat account.
+CHAT_REPLY=$(SOULBIND_DRIVER_KIND=chat "$CHAT_DRIVER" \
+    "$CORE_URL" "$CHAT_CRED" "chat-account-1" link 2>/dev/null | head -1) || {
+    log "the chat connector could not issue a code"
+    exit 1
+}
+CHAT_CODE=$(printf '%s' "$CHAT_REPLY" | sed -n 's/.*code is \([23456789BCDFGHJKMNPQRSTVWXYZ]*\).*/\1/p')
+
+if [ -z "$CHAT_CODE" ]; then
+    log "no code in the chat connector's reply: $CHAT_REPLY"
+    exit 1
+fi
+log "chat connector issued $CHAT_CODE"
+
+# Redeemed by the harness standing in for a third platform, so the chat account
+# ends up in a subject with something else -- which is what makes the next
+# assertion about /whoami meaningful.
+"$HERE/redeem.sh" "$CORE_URL" "$HARNESS_CRED" "$CHAT_CODE" third "third-account-1"
+
+# And the connector can now describe the link it just made.
+WHOAMI=$(SOULBIND_DRIVER_KIND=chat "$CHAT_DRIVER" \
+    "$CORE_URL" "$CHAT_CRED" "chat-account-1" whoami 2>/dev/null | head -1)
+
+case "$WHOAMI" in
+    *"linked to"*)
+        log "chat connector reports the link: $WHOAMI"
+        ;;
+    *)
+        log "the chat connector does not see the link it just made: $WHOAMI"
+        exit 1
+        ;;
+esac
 
 log "smoke passed"

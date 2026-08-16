@@ -1716,3 +1716,47 @@ why state cannot show it.
 *Mutation-checked:* the code shown publicly, the platform permission removed,
 role application made non-idempotent, and `/whoami` claiming everything is
 verified. All caught — the third only after the contract was fixed.
+
+### 6.5 — `/whoami` needed an admin capability, and the stack found it
+
+Running both connectors against one core exposed a real gap in the capability
+table: `subject.inspect` is the only way to answer "what is this account linked
+to", and the specification puts it under `config-management`.
+
+That means a chat surface answering `/whoami` — a person asking about **their
+own** account — would need the capability that rewrites every rule. The
+capability model being correct and the deployment being wrong, which is exactly
+the failure this connector's two-gate design exists to describe.
+
+`identity.describe` requires only `code-display` and returns the same thing.
+The distinction is who may ask, not what comes back:
+
+- `subject.inspect` — an operator, looking at anybody.
+- `identity.describe` — a connector, asking for the person in front of it.
+
+`code-display` is the right bar because a connector that may mint a link code
+for an account **already vouches for it**, and already learns its graph the
+moment a link completes. This grants no reach it did not have; it removes the
+need to obtain far more.
+
+An addition rather than a change: `subject.inspect` keeps its admin capability,
+and no existing rule moved.
+
+### 6.6 — The stack runs both connectors against one core
+
+The chat side of the battery drives the **real** `ChatConnector` over the
+scripted surface, not a hand-written HTTP request. That is the difference
+between proving core works and proving the connector does — the run exercises
+its command handling, its refusal wording and its privacy rule in the same pass.
+
+It holds its **own** credential with its own capabilities. Sharing the harness's
+would prove the flow works for something holding everything, which is not what a
+deployment runs — and it was that separation that surfaced the `/whoami` gap.
+
+The driver asserts its own privacy rule before exiting: every reply ephemeral,
+or a non-zero exit. Left to the caller, that is a check somebody eventually
+forgets, and a code shown publicly is a code anybody can redeem.
+
+Its stdout is the message and nothing else, the same discipline as
+`register --quiet` — a driver meant to be scripted cannot share a stream between
+its output and its commentary.

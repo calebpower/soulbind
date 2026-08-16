@@ -17,7 +17,7 @@ Last updated: 2026-08-15, Phase 4 in progress.
 | 3 | Policy engine and decisions | **Complete** — gate passed |
 | 4 | Events and effectors | **Complete** — gate passed: a connector down for 100 mutations receives all 100, in order, applied once by the effector's own reckoning |
 | 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
-| 6 | connector-discord | **In progress** — ChatSurface seam, scripted surface, connector logic and role effector landed; the client-library implementation and the manual smoke outstanding |
+| 6 | connector-discord | **In progress** — seam, scripted surface, connector, role effector and the client-library implementation landed; scripted-surface link flow green in the stack. The manual smoke against a real server is outstanding and is named as evidence, not a tier |
 | 7 | connector-flarum | Not started |
 | 8 | connector-plan + full-stack battery | Not started |
 | 9 | Simulated users | Not started |

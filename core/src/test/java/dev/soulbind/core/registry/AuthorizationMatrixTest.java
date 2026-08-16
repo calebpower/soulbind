@@ -69,6 +69,11 @@ class AuthorizationMatrixTest {
 
                 put(Operation.ATTEST, Optional.of(Capability.IDENTITY_PROVIDER));
                 put(Operation.CODE_ISSUE, Optional.of(Capability.CODE_DISPLAY));
+                // Self-service, not administrative. A connector that may mint a
+                // code for an account already vouches for it; requiring
+                // config-management to answer "what am I linked to" would mean
+                // every chat surface could rewrite policy.
+                put(Operation.IDENTITY_DESCRIBE, Optional.of(Capability.CODE_DISPLAY));
                 put(Operation.CODE_REDEEM, Optional.of(Capability.CODE_ENTRY));
                 put(Operation.DECIDE, Optional.of(Capability.ENFORCEMENT_POINT));
                 put(Operation.AUDIT_PUSH, Optional.of(Capability.AUDIT_SOURCE));

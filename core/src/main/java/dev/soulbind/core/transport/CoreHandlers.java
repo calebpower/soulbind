@@ -539,6 +539,29 @@ public final class CoreHandlers {
             return WireResponse.ok(Map.of("key", request.get().key()));
         });
 
+        handlers.put(Operation.IDENTITY_DESCRIBE, (connector, payload) -> {
+            var request = codec.bind(payload, SubjectInspectRequest.class);
+            if (request.isEmpty() || blank(request.get().platformKind())
+                    || blank(request.get().platformId())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "describe names a platform account");
+            }
+            // Identical shape to subject.inspect, deliberately: the DIFFERENCE
+            // is which capability reaches it, not what it returns. A connector
+            // asking about an account it vouches for learns nothing it would not
+            // learn when a link completes.
+            var subject = identities.subjectOf(
+                    request.get().platformKind(), request.get().platformId());
+            if (subject.isEmpty()) {
+                return WireResponse.ok(Map.of("linked", false));
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("linked", true);
+            body.put("subjectId", subject.get().id());
+            body.put("identities", viewsOf(identities, subject.get().id()));
+            return WireResponse.ok(body);
+        });
+
         return Map.copyOf(handlers);
     }
 

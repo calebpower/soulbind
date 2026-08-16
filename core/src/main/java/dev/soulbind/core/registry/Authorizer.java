@@ -53,6 +53,22 @@ public final class Authorizer {
 
         ATTEST(Capability.IDENTITY_PROVIDER),
         CODE_ISSUE(Capability.CODE_DISPLAY),
+
+        /**
+         * Describe the link state of an account this connector vouches for.
+         *
+         * <p>Distinct from {@code subject.inspect}, which is an ADMIN operation
+         * over anybody. This answers "what is this account linked to" for a
+         * connector asking on behalf of the person in front of it -- a
+         * self-service question every chat surface needs and no operator should
+         * have to grant `config-management` for.
+         *
+         * <p>Requires {@code code-display}: a connector that may mint a link
+         * code for an account already vouches for it, and already learns the
+         * graph the moment a link completes. This grants no reach it did not
+         * have; it removes the need to obtain far more.
+         */
+        IDENTITY_DESCRIBE(Capability.CODE_DISPLAY),
         CODE_REDEEM(Capability.CODE_ENTRY),
         DECIDE(Capability.ENFORCEMENT_POINT),
         AUDIT_PUSH(Capability.AUDIT_SOURCE),
