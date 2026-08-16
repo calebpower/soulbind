@@ -113,10 +113,10 @@ final class Jdbc {
      */
     <T> T write(String what, Work<T> work) {
         if (writeExecutor == null) {
-            return inTransaction(what, work);
+            return withRetry(what, work);
         }
         try {
-            return writeExecutor.submit(() -> inTransaction(what, work)).get();
+            return writeExecutor.submit(() -> withRetry(what, work)).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new StorageException(what + " interrupted", e);
@@ -127,6 +127,74 @@ final class Jdbc {
             }
             throw new StorageException(what + " failed", cause);
         }
+    }
+
+    /**
+     * How many times to re-run a transaction the engine rolled back.
+     *
+     * <p>Bounded. An unbounded retry turns a persistent deadlock into a hang,
+     * which is harder to diagnose than the failure it replaced.
+     */
+    private static final int MAX_ATTEMPTS = 4;
+
+    /**
+     * Runs a transaction, retrying if the engine rolls it back as a deadlock.
+     *
+     * <p>A deadlock is not a defect in the caller and not a defect here. It is
+     * how a multi-writer engine resolves two transactions that took locks in
+     * incompatible orders, and its documented remedy is to run the transaction
+     * again. Surfacing it to a connector as a hard failure pushes an engine
+     * implementation detail all the way to somebody trying to link an account.
+     *
+     * <p>Retrying is safe <b>by construction</b>: the engine rolled the whole
+     * transaction back, so re-running starts from the same state the first
+     * attempt saw. That is exactly the property that makes a retry sound here
+     * and unsound almost everywhere else.
+     *
+     * <p>Detected by {@link SQLTransactionRollbackException} — the JDBC standard
+     * type for serialisation failures, SQLState class 40 — rather than by a
+     * vendor error number, which would put dialect knowledge in the seam.
+     *
+     * <p>Found by the concurrency contract suite on a real multi-writer backend:
+     * twelve threads acknowledging the same cursor deadlocked, and the caller
+     * got an exception. SQLite cannot produce this at all — it serialises write
+     * transactions — so the retry is dead code on one backend and load-bearing
+     * on the other.
+     */
+    private <T> T withRetry(String what, Work<T> work) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                return inTransaction(what, work);
+            } catch (StorageException e) {
+                if (!isRetryable(e)) {
+                    throw e;
+                }
+                last = e;
+                // A short, growing pause. Retrying instantly re-creates the same
+                // interleaving that deadlocked, and two transactions racing back
+                // into each other is how a retry loop becomes a livelock.
+                try {
+                    Thread.sleep(attempt * 5L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+        throw new StorageException(
+                what + " deadlocked " + MAX_ATTEMPTS + " times and was not retried further",
+                last);
+    }
+
+    /** Whether the engine rolled this back as a serialisation failure. */
+    private static boolean isRetryable(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.sql.SQLTransactionRollbackException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private <T> T inTransaction(String what, Work<T> work) {
