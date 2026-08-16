@@ -56,13 +56,38 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-wait_for() {
-    what=$1; shift
-    tries=$1; shift
+# Is something listening on a port?
+#
+# A socket connect, NOT `curl -sf`. curl fails on any non-2xx, and core answers
+# GET / with a status that is not 2xx -- so a curl readiness probe waits the full
+# timeout against a core that came up fine, which is exactly what the first run
+# did.
+#
+# Worse, the same mistake in the STOP direction reports success immediately: a
+# curl that fails because core is refusing GET / is indistinguishable from a curl
+# that fails because core is gone. The outage pass would then have run against a
+# core that was still answering, and asserted a fail-closed message that never
+# appears.
+#
+# Not /dev/tcp either: that is a bash feature, and this runs under the system sh.
+# python3 is present on the guest and asks the same question everywhere.
+port_open() {
+    python3 -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(1)
+sys.exit(0 if s.connect_ex(('127.0.0.1', $1)) == 0 else 1)
+" 2>/dev/null
+}
+
+wait_for_port() {
+    what=$1
+    port=$2
+    seconds=$3
     i=0
-    while [ "$i" -lt "$tries" ]; do
-        if "$@" >/dev/null 2>&1; then
-            log "$what ready after ${i}s"
+    while [ "$i" -lt "$seconds" ]; do
+        if port_open "$port"; then
+            log "$what is listening on $port (${i}s)"
             return 0
         fi
         i=$((i + 1))
@@ -71,10 +96,28 @@ wait_for() {
     # Loudly, and with the logs. A stack that half-came-up and was tested anyway
     # produces a failure report about soulbind describing somebody else's
     # problem.
-    log "$what did not come up in ${tries}s; refusing to test against it"
+    log "$what did not listen on $port within ${seconds}s; refusing to test against it"
     podman logs "$DB_C" 2>&1 | tail -20 || true
-    podman logs "$WEB_C" 2>&1 | tail -40 || true
     podman logs "$CORE_C" 2>&1 | tail -30 || true
+    podman logs "$WEB_C" 2>&1 | tail -40 || true
+    return 1
+}
+
+wait_for_url() {
+    what=$1
+    url=$2
+    seconds=$3
+    i=0
+    while [ "$i" -lt "$seconds" ]; do
+        if curl -sf -o /dev/null "$url"; then
+            log "$what answered $url (${i}s)"
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    log "$what did not answer $url within ${seconds}s; refusing to test against it"
+    podman logs "$WEB_C" 2>&1 | tail -40 || true
     return 1
 }
 
@@ -98,8 +141,13 @@ podman run -d --name "$DB_C" --network "$NET" \
 
 # mariadbd accepts TCP before it is ready to serve, so starting the install on
 # container-start produces a flaky failure that reads as a soulbind defect.
-wait_for "mariadb" 90 \
-    podman exec "$DB_C" mariadb-admin ping -h 127.0.0.1 -u"$DB_USER" -p"$DB_PASS" --silent
+i=0
+while [ "$i" -lt 90 ]; do
+    podman exec "$DB_C" mariadb-admin ping -h 127.0.0.1 -u"$DB_USER" -p"$DB_PASS" --silent >/dev/null 2>&1 && break
+    i=$((i + 1)); sleep 1
+done
+[ "$i" -lt 90 ] || { log "mariadb did not become ready in 90s"; podman logs "$DB_C" 2>&1 | tail -20; exit 1; }
+log "mariadb ready after ${i}s"
 
 # --- core -------------------------------------------------------------------
 #
@@ -170,7 +218,7 @@ start_core() {
         "$FLARUM_TOOLCHAIN_IMAGE" \
         /work/core/build/install/core/bin/core serve --config /state/soulbind.toml \
         >/dev/null
-    wait_for "core" 90 curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/"
+    wait_for_port core "$CORE_PORT" 90
 }
 
 stop_core() {
@@ -179,10 +227,10 @@ stop_core() {
     # races the shutdown, and a test that reached a dying core would prove
     # nothing about the outage path while looking like it had.
     i=0
-    while [ "$i" -lt 30 ] && curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/" 2>/dev/null; do
+    while [ "$i" -lt 30 ] && port_open "$CORE_PORT"; do
         i=$((i + 1)); sleep 1
     done
-    if curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/" 2>/dev/null; then
+    if port_open "$CORE_PORT"; then
         log "core did not stop; the outage pass would test the wrong world"
         exit 1
     fi
@@ -302,7 +350,7 @@ podman run -d --name "$WEB_C" --network "$NET" \
       php -S 0.0.0.0:${FORUM_PORT} router.php
     " >/dev/null
 
-wait_for "the forum" 90 curl -sf -o /dev/null "$FORUM_URL/"
+wait_for_url "the forum" "$FORUM_URL/" 120
 
 log "forum is up on $FORUM_PORT"
 log "core credential for the forum is in $RUN/forum.credential"
