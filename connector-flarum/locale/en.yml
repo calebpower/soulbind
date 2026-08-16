@@ -1,4 +1,10 @@
-soulbind-flarum:
+# The namespace is the EXTENSION ID, which Flarum derives by stripping
+# `flarum-` from the package name: soulbind/flarum-connector -> soulbind-connector.
+#
+# It said soulbind-flarum, so every key the frontend asked for resolved to
+# nothing and the panel rendered its own key names at the member. The same trap
+# as the .for() call in the admin page, in a second file.
+soulbind-connector:
   admin:
     settings:
       title: soulbind

@@ -79,4 +79,13 @@ final class PackagingTest extends TestCase
             'the two connectors would read one config value as two different endpoints'
         );
     }
+    #[Test]
+    #[DisplayName('every translation key the frontend asks for exists')]
+    public function everyMessageKeyExists(): void
+    {
+        $this->assertNoFailures(
+            PackagingChecks::everyMessageKeyExists(),
+            'a member would read a translation key where a sentence should be'
+        );
+    }
 }

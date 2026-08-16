@@ -2591,3 +2591,46 @@ stays missing: nothing complains, and the page it belongs to simply does
 nothing. The harness now builds both bundles before staging the extension, and
 asserts each is non-empty, because webpack can exit 0 having produced nothing
 when its entry resolves to nothing.
+
+### 7.28 — The extension id trap, a third time, in the locale file
+
+The member panel rendered, reached core, and correctly reported "not linked" —
+and showed the member this:
+
+```
+soulbind-connector.forum.link.titlesoulbind-connector.forum.link.not_linked…
+```
+
+The locale file declared its namespace as `soulbind-flarum`. Flarum derives an
+extension's namespace from its id, which is `soulbind-connector`, so every key
+the frontend asked for resolved to nothing and Flarum rendered the key itself.
+
+**Third occurrence of one root cause.** The `.for()` call in the admin page, the
+id the harness enabled, and now the locale namespace. Each cost its own
+discovery; the first two are guarded and the third was not, so it waited until a
+browser put the key names on screen.
+
+The admin page had the same mismatch and would have shown raw keys too. Nobody
+had opened it, which is exactly how a settings page stays broken.
+
+**The guard** — the T3 message-key guard the plan asks for, extended to the
+extension. It asserts the namespace *is* the derived id, and that every key the
+frontend asks for exists in `locale/en.yml`. A missing key does not fail
+anything: Flarum renders it, so a member reads `…link.not_linked` where a
+sentence should be.
+
+Narrowings, stated:
+
+- Comments are stripped before scanning, because `js/src/forum/index.js` quotes
+  Flarum's own error switch — translator call and all — to explain why the bundle
+  exists. The first version read that quotation as a demand. **That is the same
+  mistake the admin-id check made against its own explanatory comment**, which I
+  had already fixed, reintroduced in a new guard three hundred lines away.
+- Only keys in this extension's namespace are checked. A `core.*` key belongs to
+  Flarum and legitimately is not in this file; demanding it would force somebody
+  to copy Flarum's translations in to silence a guard.
+- Template keys are checked by prefix, since the leaf is computed. A wrong prefix
+  is exactly the failure this was written for.
+- It fails if it finds no keys at all, so it cannot pass by matching nothing.
+
+Both mutations caught: a renamed key, and the wrong namespace.

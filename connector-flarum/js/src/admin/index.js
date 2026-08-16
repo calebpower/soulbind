@@ -30,7 +30,7 @@ import app from 'flarum/admin/app';
  * configured -- and PHP is the one that decides.
  */
 app.initializers.add('soulbind/flarum-connector', () => {
-  const t = (key) => app.translator.trans(`soulbind-flarum.admin.settings.${key}`);
+  const t = (key) => app.translator.trans(`soulbind-connector.admin.settings.${key}`);
 
   app.extensionData
     /*

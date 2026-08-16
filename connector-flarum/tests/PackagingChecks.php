@@ -196,6 +196,116 @@ final class PackagingChecks
         return $failures;
     }
 
+    /**
+     * Every translation key the frontend asks for must exist.
+     *
+     * This is the T3 message-key guard, extended to the extension as the plan
+     * asks. It exists because a missing key does not fail: Flarum renders the
+     * key itself, so a member sees
+     * `soulbind-connector.forum.link.not_linked` where a sentence should be.
+     *
+     * That happened, and it happened for a reason worth stating: the locale
+     * file declared the namespace `soulbind-flarum` while the frontend asked
+     * for `soulbind-connector`. The namespace is the EXTENSION ID, which Flarum
+     * derives by stripping `flarum-` from the package name -- the same trap that
+     * had already cost four iterations at the `.for()` call, in a second file,
+     * found only because a browser rendered the keys at me.
+     *
+     * @return list<string>
+     */
+    public static function everyMessageKeyExists(): array
+    {
+        $failures = [];
+
+        $locale = (string) file_get_contents(dirname(__DIR__) . '/locale/en.yml');
+        $namespace = self::flarumExtensionId(self::composerName());
+
+        // The namespace must BE the extension id, or every key beneath it is
+        // unreachable no matter how carefully it is spelled.
+        if (preg_match('/^' . preg_quote($namespace, '/') . ':\s*$/m', $locale) !== 1) {
+            $failures[] = "locale/en.yml does not declare the namespace '{$namespace}'. "
+                . 'Flarum derives that from the package name, and keys under any other '
+                . 'namespace resolve to nothing -- the frontend then renders the key itself '
+                . 'where a sentence should be.';
+        }
+
+        // Gather what the frontend asks for.
+        $asked = [];
+        foreach (['forum', 'admin'] as $side) {
+            foreach (glob(dirname(__DIR__) . "/js/src/{$side}/*.js") ?: [] as $file) {
+                $js = (string) file_get_contents($file);
+
+                // Comments stripped BEFORE matching.
+                //
+                // This file quotes Flarum's own error switch, translator call and
+                // all, to explain why the forum bundle exists -- and the first
+                // version of this guard read that quotation as a demand. It is the
+                // same mistake the admin-id check made against its own explanatory
+                // comment, reintroduced in a new guard three hundred lines away.
+                //
+                // A guard that cannot tell code from prose about the code gets
+                // silenced rather than obeyed.
+                $js = preg_replace('#/\*.*?\*/#s', '', $js) ?? $js;
+                $js = preg_replace('#^\s*//.*$#m', '', $js) ?? $js;
+
+                // Literal keys: trans('a.b.c')
+                if (preg_match_all("/trans\(\s*['\"]([a-z0-9_.-]+)['\"]/i", $js, $m)) {
+                    foreach ($m[1] as $key) {
+                        $asked[$key] = basename($file);
+                    }
+                }
+                // Template keys: trans(`ns.section.${key}`) -- the prefix is
+                // checkable even when the leaf is not, and a wrong prefix is
+                // exactly the failure this guard was written for.
+                if (preg_match_all('/trans\(\s*`([a-z0-9_.-]+)\$\{/i', $js, $m)) {
+                    foreach ($m[1] as $prefix) {
+                        $asked[rtrim($prefix, '.') . '.*'] = basename($file);
+                    }
+                }
+            }
+        }
+
+        if ($asked === []) {
+            $failures[] = 'no translation keys were found in the frontend at all. Either the '
+                . 'guard stopped matching, or the frontend stopped translating -- both are '
+                . 'worth knowing, and a silent pass is worth nothing.';
+        }
+
+        foreach ($asked as $key => $file) {
+            // Only keys in THIS extension's namespace. `core.*` belongs to
+            // Flarum and legitimately will not be in this file; demanding it
+            // here would force somebody to copy Flarum's translations in to
+            // silence a guard, which is worse than the guard not existing.
+            if (!str_starts_with($key, $namespace . '.')) {
+                continue;
+            }
+
+            $isPrefix = str_ends_with($key, '.*');
+            $path = explode('.', $isPrefix ? substr($key, 0, -2) : $key);
+
+            // Walk the YAML by indentation. A parser would be better and needs
+            // ext-yaml, which this runner deliberately does not require.
+            $depth = 0;
+            $found = true;
+            foreach ($path as $segment) {
+                $indent = str_repeat(' ', $depth * 2);
+                if (preg_match('/^' . $indent . preg_quote($segment, '/') . ':/m', $locale) !== 1) {
+                    $found = false;
+                    break;
+                }
+                $depth++;
+            }
+
+            if (!$found) {
+                $failures[] = "{$file} asks for '{$key}', which locale/en.yml does not define. "
+                    . 'A missing key does not fail: Flarum renders the key itself, so a member '
+                    . 'reads it instead of a sentence.';
+            }
+        }
+
+        return $failures;
+    }
+
     /** Flarum's own derivation, from `Flarum\Extension\Extension::assignId()`. */
     public static function flarumExtensionId(string $composerName): string
     {
