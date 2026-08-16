@@ -268,11 +268,12 @@ cat > "$RUN/forum/site/composer.json" <<JSON
     "type": "project",
     "require": {
         "flarum/core": "$FLARUM_VERSION",
-        "soulbind/flarum-connector": "*"
+        "soulbind/flarum-connector": "*@dev"
     },
     "repositories": [
         { "type": "path", "url": "/extension", "options": { "symlink": false } }
     ],
+    "_note_stability": "minimum-stability stays STABLE. Only the local path package is allowed to be dev, via the @dev on its constraint above -- it is a working tree with no version tag, so composer reads it as dev-main. Relaxing minimum-stability globally would let a dev release of Flarum or any of its 117 dependencies in, and the forum under test would stop being the forum people run.",
     "minimum-stability": "stable",
     "prefer-stable": true,
     "config": {
