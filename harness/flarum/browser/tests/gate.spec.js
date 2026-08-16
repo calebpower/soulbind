@@ -42,36 +42,59 @@ function uniqueName(prefix) {
   return `${prefix}${process.env.RUN_TAG || 'r'}${uniqueName.n}`;
 }
 
+/**
+ * Fills a field and makes sure it stayed filled.
+ *
+ * Flarum's forms are Mithril, which re-renders on input. A fill can land on an
+ * element that is replaced a moment later, and the value goes with it -- the
+ * symptom is a field that reads empty, or worse, holds the value meant for the
+ * field after it. Both happened here: a password that would not stick, and a
+ * username that ended up holding an email address.
+ *
+ * Retrying the FILL is the right response, and it is not a weakened assertion:
+ * the value must still be there afterwards, and the test still fails if it never
+ * sticks. What is being tolerated is a re-render, which is a real property of
+ * the UI rather than a defect this suite is meant to catch.
+ */
+async function fillStable(dialog, field, value) {
+  const input = dialog.locator(`input[name="${field}"]`);
+  await input.waitFor({ state: 'visible' });
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    await input.fill(value);
+    try {
+      await expect(input).toHaveValue(value, { timeout: 2_000 });
+      return;
+    } catch (e) {
+      if (attempt === 4) {
+        throw new Error(
+          `filling ${field} did not stick after ${attempt} attempts. The field exists and ` +
+            `accepts input, so the form is re-rendering faster than it can be filled, or ` +
+            `this is not the form these tests expect.`
+        );
+      }
+    }
+  }
+}
+
 async function register(page, name) {
   await page.goto('/');
   await page.getByRole('button', { name: /sign up/i }).click();
   const dialog = page.locator('.Modal');
 
-  // Fill and verify ONE FIELD AT A TIME.
-  //
-  // A batch fill followed by one assertion cannot say which fill misbehaved.
-  // The first version filled three fields and then checked two, and when the
-  // username came back holding an email address there was no way to tell
-  // whether the email fill had targeted the wrong input or the username fill
-  // had been overwritten -- so the report named a field that was a symptom.
-  //
-  // input[name=...] because Flarum's sign-up inputs carry name attributes and
-  // no <label>; a label lookup resolved username and email to the same input.
-  const fields = [
-    ['username', name],
-    ['email', `${name}@example.com`],
-    ['password', 'a-long-enough-password'],
-  ];
+  // input[name=...] because Flarum's sign-up inputs carry name attributes and no
+  // <label>; a label lookup resolved username and email to the same input.
+  await fillStable(dialog, 'username', name);
+  await fillStable(dialog, 'email', `${name}@example.com`);
+  await fillStable(dialog, 'password', 'a-long-enough-password');
 
-  for (const [field, value] of fields) {
-    const input = dialog.locator(`input[name="${field}"]`);
-    await input.fill(value);
-
-    // Immediately, so a misdirected fill is reported against the field that
-    // caused it rather than the field that shows the damage.
-    await expect(input, `filling ${field} did not stick — the form may not be the one this expects`)
-      .toHaveValue(value, { timeout: 5_000 });
-  }
+  // All three together, immediately before submitting. Each was verified when
+  // written, but a later re-render can still undo an earlier field -- and
+  // submitting a half-filled form produces a validation error that reads as a
+  // problem with the forum.
+  await expect(dialog.locator('input[name="username"]')).toHaveValue(name);
+  await expect(dialog.locator('input[name="email"]')).toHaveValue(`${name}@example.com`);
+  await expect(dialog.locator('input[name="password"]')).toHaveValue('a-long-enough-password');
 
   await dialog.getByRole('button', { name: /sign up/i }).click();
   return dialog;
