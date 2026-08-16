@@ -84,17 +84,61 @@ async function register(page, name) {
 
   // input[name=...] because Flarum's sign-up inputs carry name attributes and no
   // <label>; a label lookup resolved username and email to the same input.
-  await fillStable(dialog, 'username', name);
-  await fillStable(dialog, 'email', `${name}@example.com`);
-  await fillStable(dialog, 'password', 'a-long-enough-password');
+  const expected = {
+    username: name,
+    email: `${name}@example.com`,
+    password: 'a-long-enough-password',
+  };
+
+  for (const [field, value] of Object.entries(expected)) {
+    await fillStable(dialog, field, value);
+  }
 
   // All three together, immediately before submitting. Each was verified when
   // written, but a later re-render can still undo an earlier field -- and
   // submitting a half-filled form produces a validation error that reads as a
   // problem with the forum.
-  await expect(dialog.locator('input[name="username"]')).toHaveValue(name);
-  await expect(dialog.locator('input[name="email"]')).toHaveValue(`${name}@example.com`);
-  await expect(dialog.locator('input[name="password"]')).toHaveValue('a-long-enough-password');
+  //
+  // This REPAIRS drift rather than only reporting it. The previous version
+  // asserted the three values once, with no refill, and its own comment
+  // anticipated the exact failure it could not then survive: a re-render
+  // crossing a field boundary left the password sitting in the username box and
+  // reddened a whole reaper run.
+  //
+  // `retries: 0` in playwright.config.js is deliberate and stays. That policy
+  // exists so a *gate* cannot pass on the second attempt; this is the
+  // registration fixture, not the thing under test.
+  //
+  // Not a weakened assertion: every field must still hold its own value before
+  // anything is submitted, and this still fails if a value will not stick. What
+  // is tolerated is a re-render -- a property of Mithril, not a defect this
+  // suite exists to catch. Same reasoning as fillStable above.
+  for (let sweep = 1; sweep <= 3; sweep++) {
+    const wrong = [];
+    for (const [field, value] of Object.entries(expected)) {
+      if ((await dialog.locator(`input[name="${field}"]`).inputValue()) !== value) {
+        wrong.push(field);
+      }
+    }
+    if (wrong.length === 0) {
+      break;
+    }
+    if (sweep === 3) {
+      throw new Error(
+        `fields ${wrong.join(', ')} would not hold their values across ${sweep} sweeps. ` +
+          `The form is re-rendering faster than it can be filled, or this is not the form ` +
+          `these tests expect.`
+      );
+    }
+    for (const field of wrong) {
+      await fillStable(dialog, field, expected[field]);
+    }
+  }
+
+  // The final word, after any repair: nothing is submitted half-filled.
+  for (const [field, value] of Object.entries(expected)) {
+    await expect(dialog.locator(`input[name="${field}"]`)).toHaveValue(value);
+  }
 
   await dialog.getByRole('button', { name: /sign up/i }).click();
   return dialog;

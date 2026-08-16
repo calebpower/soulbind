@@ -29,7 +29,9 @@ import java.util.List;
  * @param linked players core confirmed are linked
  * @param unlinked players core confirmed are not
  * @param unknown players core could not be asked about
- * @param unlinkedNames the unlinked players, for the table, in the order given
+ * @param unlinkedNames the unlinked players, for the table, sorted -- the caller's
+ *     roster has no promised iteration order, and a table that reshuffles between
+ *     refreshes looks like data changing when nothing has
  */
 public record ServerLinkSummary(
         int linked, int unlinked, int unknown, List<String> unlinkedNames) {

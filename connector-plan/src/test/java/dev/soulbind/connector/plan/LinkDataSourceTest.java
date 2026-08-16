@@ -18,6 +18,8 @@ package dev.soulbind.connector.plan;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.sdk.DecisionCache;
@@ -27,6 +29,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -248,5 +256,323 @@ class LinkDataSourceTest {
         public Instant instant() {
             return now;
         }
+    }
+
+    // --- concurrency and growth ------------------------------------------------
+
+    @Test
+    @DisplayName("the cache survives concurrent readers, because Plan uses its own threads")
+    void concurrentReadersDoNotCorruptTheCache() throws Exception {
+        // PLAYER_LEAVE and SERVER_PERIODICAL are separate Plan events that can
+        // run at once. Against a plain LinkedHashMap this loses entries or spins
+        // on a corrupted chain; the failure surfaces far from the dashboard that
+        // caused it, which is why it is worth an explicit test.
+        InMemoryTransport transport = InMemoryTransport.always(ok(
+                "{\"linked\":true,\"subjectId\":\"s1\",\"identities\":["
+                        + "{\"platformKind\":\"game\",\"proofMethod\":\"code\","
+                        + "\"verifiedAtEpochSeconds\":100}]}"));
+        LinkDataSource source = source(transport);
+
+        // Every thread uses its OWN keys, so every single call is a cache
+        // MISS and therefore a structural write. The first version shared keys
+        // and warmed the cache in the first few iterations, after which almost
+        // every call was a read -- the race window barely opened and swapping
+        // ConcurrentHashMap back for a LinkedHashMap survived the test.
+        int threads = 8;
+        int perThread = 400;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Integer>> futures = new ArrayList<>();
+
+        for (int t = 0; t < threads; t++) {
+            final int id = t;
+            futures.add(pool.submit(() -> {
+                start.await();
+                int seen = 0;
+                for (int i = 0; i < perThread; i++) {
+                    if (source.player("t" + id + "-p" + i).linked()) {
+                        seen++;
+                    }
+                }
+                return seen;
+            }));
+        }
+        start.countDown();
+
+        int total = 0;
+        for (Future<Integer> f : futures) {
+            total += f.get(60, TimeUnit.SECONDS);
+        }
+        pool.shutdownNow();
+
+        assertEquals(
+                threads * perThread,
+                total,
+                "every read must return the linked answer");
+        // threads * perThread must stay BELOW LinkDataSource.SWEEP_THRESHOLD
+        // (4096), or the sweep fires mid-run and this count legitimately drops --
+        // turning a real assertion into a confusing failure about the wrong thing.
+        assertEquals(
+                threads * perThread,
+                source.cachedEntries(),
+                "one entry per distinct player. Under concurrent writes an unsynchronized map "
+                        + "loses entries during resize, so a count short of this is the race "
+                        + "showing up as missing data rather than as an exception");
+    }
+
+    @Test
+    @DisplayName("an expired entry is dropped even when the refresh cannot answer")
+    void expiredEntriesAreEvicted() {
+        // Deliberately NOT asserted by re-reading the same player while core is
+        // up: put() overwrites the key, so the size is 1 whether or not the
+        // expired entry was removed, and the assertion could never fail.
+        //
+        // The path where removal is observable is an expired entry whose refresh
+        // fails -- there is no put() to paper over it, so a stale entry that was
+        // never removed is still sitting in the map.
+        MutableClock clock = new MutableClock(NOW);
+        InMemoryTransport transport =
+                InMemoryTransport.always(ok("{\"linked\":false,\"identities\":[]}"));
+        LinkDataSource source = source(transport, false, clock);
+
+        source.player("p1");
+        assertEquals(1, source.cachedEntries());
+
+        clock.advance(Duration.ofSeconds(31));
+        transport.goDown();
+        source.player("p1");
+
+        assertEquals(
+                0,
+                source.cachedEntries(),
+                "checking expiry on read without ever removing leaves every player the server "
+                        + "has ever seen resident for the lifetime of the process");
+    }
+
+    // --- one render, one answer -------------------------------------------------
+
+    @Test
+    @DisplayName("the four server-wide numbers come from a single walk of the roster")
+    void summaryIsMemoisedWithinTheTtl() {
+        InMemoryTransport transport = InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}"));
+        LinkDataSource source = source(transport);
+        List<String> roster = List.of("p1", "p2", "p3");
+        Map<String, String> names = Map.of("p1", "A", "p2", "B", "p3", "C");
+
+        ServerLinkSummary first = source.summary(roster, names);
+        ServerLinkSummary second = source.summary(roster, names);
+
+        // assertSame, not assertEquals. player() already caches, so a re-walk
+        // costs no round trips and an equality check cannot tell the two apart
+        // -- it would pass with the memo removed. Identity is the thing the memo
+        // actually guarantees: Plan calls the four server-wide providers
+        // separately, and this is what makes all four read one snapshot rather
+        // than four moments that need not agree.
+        assertSame(
+                first,
+                second,
+                "the four server-wide providers that make up one render must see one answer; "
+                        + "without a memo each takes its own walk and the numbers they print "
+                        + "need not add up to the roster");
+    }
+
+    @Test
+    @DisplayName("an outage on one roster does not discard a good answer for another")
+    void anOutageElsewhereKeepsAValidSnapshot() {
+        // The rule is "do not cache an OUTAGE", not "throw away answers you
+        // already have". A still-valid, unexpired summary for a different roster
+        // says nothing about the roster core just failed to answer for, and
+        // discarding it only buys an extra walk -- against a core that is down,
+        // where every one of those calls must time out.
+        InMemoryTransport transport = InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}"));
+        LinkDataSource source = source(transport);
+        Map<String, String> names = Map.of("p1", "A", "p2", "B");
+
+        ServerLinkSummary first = source.summary(List.of("p1"), names);
+
+        transport.goDown();
+        assertEquals(1, source.summary(List.of("p2"), names).unknown());
+
+        assertSame(
+                first,
+                source.summary(List.of("p1"), names),
+                "the first roster's answer was still within its TTL and unaffected by a failure "
+                        + "to answer about somebody else");
+    }
+
+    @Test
+    @DisplayName("a player listed twice is still one player")
+    void aDuplicatedRosterEntryIsCountedOnce() {
+        LinkDataSource source = source(InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}")));
+
+        ServerLinkSummary summary = source.summary(
+                List.of("p1", "p2", "p1"), Map.of("p1", "Bob", "p2", "Alice"));
+
+        assertEquals(
+                2,
+                summary.total(),
+                "counting a repeated id twice makes the totals disagree with the roster, which "
+                        + "is the same complaint the separate unknown count exists to prevent");
+        assertEquals(List.of("Alice", "Bob"), summary.unlinkedNames(), "sorted by name, not by id");
+    }
+
+    @Test
+    @DisplayName("the memo survives a roster that merely reordered")
+    void memoIsNotOrderSensitive() {
+        // The caller builds the id list from a map's key set, which promises no
+        // iteration order. Keyed on the list as given, a roster that reordered
+        // between two of the four server-wide provider calls missed the memo --
+        // and the four numbers came from four moments again, which is the exact
+        // thing the memo exists to prevent.
+        InMemoryTransport transport = InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}"));
+        LinkDataSource source = source(transport);
+        Map<String, String> names = Map.of("p1", "A", "p2", "B", "p3", "C");
+
+        ServerLinkSummary first = source.summary(List.of("p1", "p2", "p3"), names);
+        ServerLinkSummary reordered = source.summary(List.of("p3", "p1", "p2"), names);
+
+        assertSame(
+                first,
+                reordered,
+                "the same players in a different order are the same question");
+    }
+
+    @Test
+    @DisplayName("a rename is not served from the memo")
+    void memoIsKeyedOnNamesToo() {
+        InMemoryTransport transport = InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}"));
+        LinkDataSource source = source(transport);
+        List<String> roster = List.of("p1");
+
+        assertEquals(List.of("Alice"), source.summary(roster, Map.of("p1", "Alice")).unlinkedNames());
+        assertEquals(
+                List.of("Alberta"),
+                source.summary(roster, Map.of("p1", "Alberta")).unlinkedNames(),
+                "the names are part of the answer, so a rename with an unchanged roster must "
+                        + "not be served the old table for a full TTL");
+    }
+
+    @Test
+    @DisplayName("an outage is not memoised either, so recovery is immediate")
+    void anOutageSummaryIsNotMemoised() {
+        InMemoryTransport transport = InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}"));
+        LinkDataSource source = source(transport.goDown());
+        List<String> roster = List.of("p1", "p2");
+
+        assertEquals(2, source.summary(roster, Map.of()).unknown());
+
+        transport.comeBack();
+        assertEquals(
+                2,
+                source.summary(roster, Map.of()).unlinked(),
+                "a memoised outage would keep the server page reporting unknown for a whole "
+                        + "TTL after core came back");
+    }
+
+    @Test
+    @DisplayName("the summary memo expires, rather than serving one answer forever")
+    void theSummaryMemoExpires() {
+        // Without this, deleting the expiry check from the memo guard leaves the
+        // whole suite green -- and the defect it hides is a dashboard serving a
+        // stale roster answer for the life of the process.
+        MutableClock clock = new MutableClock(NOW);
+        LinkDataSource source = source(
+                InMemoryTransport.always(ok("{\"linked\":false,\"identities\":[]}")),
+                false,
+                clock);
+        List<String> roster = List.of("p1", "p2");
+        Map<String, String> names = Map.of("p1", "A", "p2", "B");
+
+        ServerLinkSummary first = source.summary(roster, names);
+        assertSame(first, source.summary(roster, names), "still inside the TTL");
+
+        clock.advance(Duration.ofSeconds(31));
+
+        assertNotSame(
+                first,
+                source.summary(roster, names),
+                "past the TTL the roster must be walked again, not served from the memo");
+    }
+
+    @Test
+    @DisplayName("the cache sweeps expired entries once it grows past its threshold")
+    void theSweepBoundsGrowth() {
+        // The growth bound its comment justifies was never exercised: the
+        // concurrency test deliberately stays below the threshold, so deleting
+        // the sweep entirely left the suite green.
+        MutableClock clock = new MutableClock(NOW);
+        LinkDataSource source = source(
+                InMemoryTransport.always(ok("{\"linked\":false,\"identities\":[]}")),
+                false,
+                clock);
+
+        int threshold = 4096;
+        for (int i = 0; i < threshold; i++) {
+            source.player("p" + i);
+        }
+        assertEquals(threshold, source.cachedEntries());
+
+        // Everything above is now expired, so the next insert should find the
+        // map at its threshold and clear what is dead rather than growing.
+        clock.advance(Duration.ofSeconds(31));
+        source.player("fresh");
+
+        assertEquals(
+                1,
+                source.cachedEntries(),
+                "a map that is only ever added to is one that is only ever added to; the sweep "
+                        + "is what stops a long-lived server holding every player it ever saw");
+    }
+
+    @Test
+    @DisplayName("invalidate forgets the players and the roster answer alike")
+    void invalidateClearsBothCaches() {
+        // invalidate() has no caller in the repository yet, so nothing else
+        // exercises it -- including the summary memo it must also clear, which
+        // was added later and would otherwise survive a deliberate flush.
+        LinkDataSource source = source(InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}")));
+        List<String> roster = List.of("p1");
+        Map<String, String> names = Map.of("p1", "A");
+
+        ServerLinkSummary before = source.summary(roster, names);
+        assertEquals(1, source.cachedEntries());
+
+        source.invalidate();
+
+        assertEquals(0, source.cachedEntries(), "the per-player answers are gone");
+        assertNotSame(
+                before,
+                source.summary(roster, names),
+                "and so is the roster answer -- a flush that left the memo behind would keep "
+                        + "serving the very numbers the operator asked to refresh");
+    }
+
+    @Test
+    @DisplayName("unlinked names are sorted, not left in the roster's order")
+    void unlinkedNamesAreSorted() {
+        LinkDataSource source = source(InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}")));
+
+        // Names deliberately run OPPOSITE to id order. Mapped p1->Alice,
+        // p2->Bob, p3->Carol the two orders agree, the output is already sorted
+        // before the sort runs, and deleting the sort leaves this test green --
+        // which is exactly what it did until a battery mutation-checked it.
+        ServerLinkSummary summary = source.summary(
+                List.of("p3", "p1", "p2"),
+                Map.of("p1", "Carol", "p2", "Bob", "p3", "Alice"));
+
+        assertEquals(
+                List.of("Alice", "Bob", "Carol"),
+                summary.unlinkedNames(),
+                "the caller's roster promises no iteration order -- a HashMap gives a "
+                        + "different one per JVM run -- and a table that reshuffles between "
+                        + "refreshes looks like data changing when nothing has");
     }
 }

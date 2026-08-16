@@ -30,6 +30,23 @@ dependencyResolutionManagement {
                 includeGroup("com.velocitypowered")
             }
         }
+        // Plan's DataExtension API is published only through JitPack, which
+        // builds artifacts on demand from arbitrary GitHub repositories. That is
+        // a materially larger trust surface than the one above -- papermc serves
+        // one project's own releases, JitPack serves anyone's -- so the content
+        // filter matters more here, not less.
+        //
+        // Scoped to exactly the publisher whose API this is. A typo'd coordinate
+        // cannot resolve from here, and neither can anything else: JitPack will
+        // happily build a package with a plausible name from a repository nobody
+        // chose, and that is how a supply chain gains a participant.
+        maven {
+            name = "jitpack"
+            url = uri("https://jitpack.io")
+            content {
+                includeGroup("com.github.plan-player-analytics")
+            }
+        }
     }
 }
 

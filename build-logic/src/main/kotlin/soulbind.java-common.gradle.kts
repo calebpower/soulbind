@@ -11,6 +11,8 @@
 // rule — deliberately, per the methodology's "assert against the source, not a
 // re-export".
 
+import java.util.concurrent.atomic.AtomicLong
+
 plugins {
     // java-library, not java: connector-sdk exposes protocol's types to every
     // connector that depends on it, which is an `api` relationship. Expressing
@@ -93,6 +95,114 @@ tasks.withType<Test>().configureEach {
     }
 }
 
+/**
+ * Makes a tag-selected task refuse to pass having run nothing.
+ *
+ * A task wired into `check` that discovers zero tests reports success, and the
+ * build is greener for it. That is not hypothetical here: the comment on the
+ * default test task records a narrowing that "made fuzzTest run zero tests -- a
+ * green run that fuzzed nothing", and `outputs.upToDateWhen { false }` was the
+ * fix. That stops a CACHED empty result; it does nothing about a genuinely empty
+ * one. Empirically, `fuzzTest` executed zero tests in eight of nine modules and
+ * `charsetHostilityTest` in seven, every one of them reporting success.
+ *
+ * A module with no tagged tests legitimately has nothing to run, so this cannot
+ * simply demand a non-zero count everywhere. Instead it asks the source: if this
+ * module's test sources CONTAIN the tag, the task must have executed at least
+ * one test. A tag that is renamed, mis-spelled, moved to a class the task does
+ * not scan, or excluded by a future narrowing then fails the build instead of
+ * quietly reducing coverage to nothing.
+ *
+ * The narrowing is exactly that: modules with no occurrence of the tag are not
+ * required to run anything, because for them zero is the right answer.
+ */
+fun Test.failIfTaggedTestsExistButNoneRan(tag: String) {
+    val testSourceSet = project.extensions.getByType<SourceSetContainer>().named("test").get()
+    val sources = testSourceSet.allJava.srcDirs
+    val taskName = name
+    val projectPath = project.path
+
+    // Counted from THIS run, not from the results directory.
+    //
+    // The first version of this check counted XML files under
+    // build/test-results/<task>. Gradle does not clear that directory when a run
+    // discovers nothing, so the previous run's files were still sitting there and
+    // the count was never zero. Both mutations survived: excluding the fuzz tag
+    // from fuzzTest -- the exact historical bug this exists to catch -- and
+    // pointing the task at a tag that matches nothing. A check that reads last
+    // run's evidence is a check that cannot observe this one.
+    val executed = AtomicLong()
+    addTestListener(object : TestListener {
+        override fun beforeSuite(suite: TestDescriptor) {}
+        override fun afterSuite(suite: TestDescriptor, result: TestResult) {}
+        override fun beforeTest(testDescriptor: TestDescriptor) {}
+        override fun afterTest(testDescriptor: TestDescriptor, result: TestResult) {
+            executed.incrementAndGet()
+        }
+    })
+
+    doLast {
+        // Concatenated, not interpolated. Written as "@Tag(\"${'$'}tag\")" this
+        // compiles to the LITERAL text `@Tag("$tag")` -- ${'$'} is Kotlin's escape
+        // for a dollar sign, so the tag was never substituted, `declaresTag` was
+        // always false, and the whole check silently did nothing. Both mutations
+        // survived until this line was fixed.
+        val marker = "@Tag(\"" + tag + "\")"
+
+        // NARROWING, stated: this reads the `test` source set's .java files for
+        // the tag written literally. A tag supplied by a constant, a
+        // meta-annotation, or a test living in
+        // another source set reads as "this module has no tagged tests" -- and
+        // the check then permits zero execution, which is the very condition it
+        // exists to catch.
+        //
+        // It is a backstop for the ordinary mistake (a renamed tag, one more
+        // exclusion, a moved class), not a proof of absence, and the gap is
+        // written down rather than implied. Every tag in this repository is
+        // written literally.
+        //
+        // The grouped form needs no special case: Java's
+        // @Tags({@Tag("charset"), ...}) CONTAINS the literal @Tag("charset"),
+        // so this finds it already. A clause added for it was redundant, and
+        // its unanchored fallback -- @Tags( anywhere plus the quoted tag
+        // anywhere in the same file -- failed a build for a class holding an
+        // unrelated string constant. It errs red rather than green, but it
+        // asserts something untrue, so it is gone.
+        // Comments stripped before matching.
+        //
+        // This is the fourth time in this repository that a check has matched
+        // its own explanatory prose. Here it was worse than noise: a javadoc in
+        // StorageBackends warning "drop @Tag(\"fuzz\") and the battery stays
+        // green" itself contains the literal, so `core` declared the tag partly
+        // because of a comment about the tag. That makes the warning false, and
+        // it means a module that legitimately loses its last fuzz test would
+        // fail the build forever with a message asserting something untrue --
+        // the exact defect class cited when the @Tags clause was deleted.
+        //
+        // The copyleft guard in this same change already strips comments. This
+        // one did not, which is precisely how it went unnoticed.
+        val blockComment = Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL)
+        val lineComment = Regex("//.*")
+        val declaresTag = sources.any { dir ->
+            dir.walkTopDown().any {
+                it.isFile && it.extension == "java"
+                        && it.readText()
+                            .replace(blockComment, "")
+                            .replace(lineComment, "")
+                            .contains(marker)
+            }
+        }
+        if (declaresTag && executed.get() == 0L) {
+            throw GradleException(
+                projectPath + ":" + taskName + " declares " + marker + " in its test sources " +
+                    "but executed no tests. A tag-selected task that discovers nothing reports " +
+                    "success, so this would have reduced the tier to zero coverage while the " +
+                    "build stayed green."
+            )
+        }
+    }
+}
+
 // The charset-hostility run.
 //
 // Code that hashes or signs must encode to UTF-8 explicitly, because a digest
@@ -122,11 +232,29 @@ val charsetHostilityTest = tasks.register<Test>("charsetHostilityTest") {
     // read during JVM start-up, before anything Gradle could set afterwards.
     jvmArgs("-Dfile.encoding=ISO-8859-1")
 
+    // Never up-to-date, for a different reason than fuzzTest's.
+    //
+    // This tier IS deterministic, so a cached result is not stale in the way a
+    // cached fuzz run is. The problem is what rides along: the zero-tests check
+    // below lives in a `doLast`, and `doLast` does not run on a task Gradle
+    // skips. Observed directly -- two consecutive invocations both reported
+    // `:protocol:charsetHostilityTest UP-TO-DATE`, so on an ordinary incremental
+    // `./gradlew check` the hostile-charset tier AND the guard that says whether
+    // it ran anything both silently did nothing.
+    //
+    // A guard that is skipped whenever the thing it guards is skipped guards
+    // nothing. The tier is ten tests across two modules -- protocol 8, core 2
+    // -- and running them every time measures at about three seconds on a warm
+    // build, which is what it costs to make the green mean this build.
+    outputs.upToDateWhen { false }
+
     // The tagged tests read this and refuse to pass silently if the hostile
     // charset did not actually take effect -- otherwise a future JDK that
     // ignores file.encoding would turn this whole task into a second identical
     // run, and nothing would say so.
     systemProperty("soulbind.hostileCharset", "true")
+
+    failIfTaggedTestsExistButNoneRan("charset")
 }
 
 // The fuzz tier.
@@ -156,6 +284,8 @@ val fuzzTest = tasks.register<Test>("fuzzTest") {
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
+
+    failIfTaggedTestsExistButNoneRan("fuzz")
 }
 
 // The latency measurement.

@@ -31,6 +31,14 @@ REPO=$(cd "$HERE/../.." && pwd)
 # are small.
 RUN=${RUN:-/tmp/soulbind-forum-stack-${CORE_BACKEND:-sqlite}}
 
+# Registration names are built from this, and nothing ever set it -- the default
+# meant every run produced the same names. That was survivable only because each
+# run gets a fresh forum database; pointed at a persistent forum, the first
+# registration would collide and the failure would read as a gate defect.
+#
+# Backend and pid, so the two engine passes in one session cannot collide either.
+RUN_TAG=${RUN_TAG:-${CORE_BACKEND:-sqlite}$$}
+
 . "$HERE/pins.env"
 
 DB_NAME=flarum
@@ -61,8 +69,55 @@ CORE_C=soulbind-forum-core-$SUFFIX
 
 log() { echo "[forum] $*"; }
 
+# On failure, keep what the page looked like.
+#
+# Playwright writes a trace and screenshot into test-results/, inside the suite
+# mount, and the five run reports land in $RUN. Both live only on the guest --
+# $RUN is deliberately NOT under out/, and reaper rsyncs back out/ and nothing
+# else. So every artifact naming the cause of a red run was destroyed with the
+# VM that produced it.
+#
+# That is the failure this exists to prevent, stated in reaper's own pull
+# documentation: a failure trace must never exist only on a machine scheduled
+# for destruction. The previous version of this function wrote into $RUN and was
+# never called from anywhere -- so it neither ran nor would have helped.
+#
+# Defined above cleanup deliberately: the EXIT trap can fire before this point
+# in the script is ever reached, and a trap calling an undefined function
+# replaces the real failure with "command not found".
+keep_browser_evidence() {
+    # cleanup is trapped on EXIT INT TERM, so on a signal it runs and then the
+    # EXIT trap runs it again. Copying twice is harmless but the log line reads
+    # like two separate failures.
+    [ -n "${EVIDENCE_KEPT:-}" ] && return 0
+    EVIDENCE_KEPT=1
+
+    dest="$REPO/out/browser-evidence/${CORE_BACKEND:-sqlite}"
+    # Emptied first: $RUN is not cleared between runs on a warm guest, and
+    # reaper's backward sync never deletes, so without this a green run's
+    # evidence directory would keep an older run's reports and read as current.
+    rm -rf "$dest"
+    mkdir -p "$dest" || return 0
+
+    if [ -d "$REPO/harness/flarum/browser/test-results" ]; then
+        cp -r "$REPO/harness/flarum/browser/test-results/." "$dest/" 2>/dev/null || true
+    fi
+    cp "$RUN"/playwright-*.json "$dest/" 2>/dev/null || true
+
+    if [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
+        log "browser evidence kept in out/browser-evidence/${CORE_BACKEND:-sqlite}"
+    else
+        rmdir "$dest" 2>/dev/null || true
+    fi
+}
+
 cleanup() {
     status=$?
+    # Before the containers go, and only when something went wrong -- a green
+    # run has nothing to explain and out/ is rsynced back on every run.
+    if [ "$status" -ne 0 ]; then
+        keep_browser_evidence
+    fi
     log "tearing down"
     for c in "$WEB_C" "$CORE_C" "$DB_C"; do
         podman rm -f "$c" >/dev/null 2>&1 || true
@@ -1071,22 +1126,11 @@ set_rule() {
         "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" forum-register "$1" "$2"
 }
 
-# On any browser failure, keep what the page looked like. Playwright writes a
-# trace and screenshot into test-results/, which lives inside the suite mount
-# and would otherwise be discarded with the container.
-keep_browser_evidence() {
-    if [ -d "$REPO/harness/flarum/browser/test-results" ]; then
-        mkdir -p "$RUN/browser-evidence"
-        cp -r "$REPO/harness/flarum/browser/test-results/." "$RUN/browser-evidence/" 2>/dev/null || true
-        log "browser evidence kept in $RUN/browser-evidence"
-    fi
-}
-
 browser() {
     podman run --rm --network host \
         -v "$REPO/harness/flarum/browser":/suite -w /suite \
         -e FORUM_URL="$FORUM_URL" \
-        -e RUN_TAG="${RUN_TAG:-r}" \
+        -e RUN_TAG="$RUN_TAG" \
         -e LINK_CODE="${LINK_CODE:-}" \
         -e CI=1 \
         -e PLAYWRIGHT_JSON_OUTPUT_NAME="/suite/results.json" \

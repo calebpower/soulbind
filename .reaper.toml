@@ -22,7 +22,21 @@ image = "docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c0125
 
 # `build` then `test` separately, so a compilation failure and a test failure
 # are distinguishable in the log rather than collapsing into one exit code.
-cmd = "./gradlew --no-daemon build -x test && ./gradlew --no-daemon test"
+#
+# `--rerun-tasks` on the TEST half, and only that half.
+#
+# The guest work tree persists between sessions and `cache = ["gradle"]` keeps
+# the Gradle cache warm, so an unchanged module's test task is legitimately
+# UP-TO-DATE. That is fine for a compile and wrong for this stage: the entire
+# reason these tests run again in a session is that a real MariaDB is reachable
+# here and is not on the workstation. A cached "success" from a run where
+# MariaDB was absent is exactly the claim this stage exists to make and cannot
+# make from cache. Observed: `:connector-plan:test` reported UP-TO-DATE on the
+# guest across two full batteries, so the new tests never executed there.
+#
+# The narrowing is the test half alone. The compile half keeps its incremental
+# behaviour, because a cached compile of unchanged sources is the same compile.
+cmd = "./gradlew --no-daemon build -x test && ./gradlew --no-daemon test --rerun-tasks"
 
 cache = ["gradle"]
 

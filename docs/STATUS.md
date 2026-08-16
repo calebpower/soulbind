@@ -3,7 +3,7 @@
 Where the work actually stands. **This document is trusted over the
 specification** (`soulbind-plan.md`) and over the README whenever they disagree.
 
-Last updated: 2026-08-15, Phase 4 in progress.
+Last updated: 2026-08-16, Phase 8 in progress.
 
 ---
 
@@ -19,14 +19,14 @@ Last updated: 2026-08-15, Phase 4 in progress.
 | 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
 | 6 | connector-discord | **In progress** — seam, scripted surface, connector, role effector and the client-library implementation landed; scripted-surface link flow green in the stack. The manual smoke against a real server is outstanding and is named as evidence, not a tier |
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
-| 8 | connector-plan + full-stack battery | Not started |
+| 8 | connector-plan + full-stack battery | **In progress** — the Plan connector has landed: data layer, `DataExtension`, and the provider bodies under test. The full-stack battery and its gate are outstanding |
 | 9 | Simulated users | Not started |
 | 10 | Hardening and release | Not started |
 
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 832 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
+ordinary one and `charsetHostilityTest` — across 970 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
 
 Real behaviour exists now, though nothing links anything yet — that is Phase 2.
 A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite
@@ -98,6 +98,17 @@ Both are recorded in the README departures table with the section they override.
    code does not exist, so their fixtures could not mean anything.
 
 ## Known gaps
+
+**No storage-backend evidence survives a session.** The battery runs both
+backends — the parameterised names say `SQLITE` and `MARIADB`, and the counts
+differ (471 tests on the guest against 402 on the workstation) — but the JUnit
+XML that proves it lives under `build/`, which `[sync].exclude` keeps out of the
+copy back. The only evidence that reaches the workstation is the fuzz tier's
+seed line, which names its backend because that task alone sets
+`showStandardStreams`. Removing `@Tag("fuzz")` from the dispatcher fuzz test
+would take that away and leave the battery green with nothing showing the second
+backend ever ran. Symmetric with the browser-evidence gap that
+`keep_browser_evidence` now closes; the storage half is outstanding.
 
 - No protocol implementation. `docs/protocol.md` is a stub, and the structural
   test holding it to the code arrives with the first real operation.
@@ -253,6 +264,43 @@ handling was mutated and *every mutant survived*: the corpus held no character
 whose case mapping leaves ASCII, so there was nothing to distinguish right from
 wrong. The blindness was the finding. Full account in `DECISIONS.md` 7.3.
 
+## Phase 8 — in progress
+
+### connector-plan, landed
+
+| Deliverable | State |
+|---|---|
+| `PlayerLinkView` / `ServerLinkSummary` | `unknown` carried as its own value, end to end |
+| `LinkDataSource` | Caches answers, never outages; earliest verification wins; subject id gated on the opt-in |
+| `SoulbindDataExtension` | Providers per §10.5, annotated for Plan's scanner |
+| Plan API dependency | `com.github.plan-player-analytics:Plan:5.8.3605`, `compileOnly`, exact pin, JitPack scoped to that one publisher |
+| Provider bodies under test | 30 tests in the module; every mutation caught, including the seven that first survived |
+
+**Why the provider bodies needed their own tests.** `compileOnly` is right for
+the host API and wrong for coverage: the annotations compile and the bodies
+never run, so a units error or an empty-to-placeholder slip ships looking
+exactly like working code, and Plan reports no error because there is none —
+the method ran and returned a value of the right type. The API is on the test
+classpath (with `commons-lang3`, which Plan's `Table.Factory` calls without
+declaring) purely so those bodies execute. Neither reaches a distributed
+artifact. The mutation that mattered: dropping the seconds-to-milliseconds
+factor renders 1970 on every page, which reads as a data problem rather than a
+units one.
+
+### Outstanding for the gate
+
+| Gate item | State |
+|---|---|
+| `harness/fullstack/` compose + stage scripts (§12) | Not started |
+| `.reaper.toml` run verb becomes real | Not started |
+| Run images digest-pinned | Not started |
+| T6 staged battery, both backends, MariaDB started latin1 | Not started |
+| T7 fuzz against the real deployment | Not started |
+| T8 scenarios re-run in-session | Not started |
+| `journeys` emits the T11 evidence directory | Not started |
+| T5 suite against the real stack, 5xx watchdog on | Not started |
+| Plan pages render link data for players created through real flows | Not started |
+
 ## Guards in force
 
 | Guard | Holds |
@@ -269,6 +317,8 @@ wrong. The blindness was the finding. Full account in `DECISIONS.md` 7.3.
 | Event doc sync | Every EventType appears in the document and vice versa |
 | Audit immutability | Nothing in production source or any migration mutates the audit table, and the repository declares no mutating method |
 | Harness pins | Every `harness/*/pins.env` escapes the `*.env` rule, so a clone can still reproduce a stack run |
+| Copyleft packaging | No LGPL artifact the specification pins to a non-bundling scope is declared in a configuration that would bundle it |
+| Non-vacuous tiers | A tag-selected task whose module declares that tag must execute at least one test, so a tier cannot silently become zero coverage |
 
 Every one is paired with a deliberately-broken fixture and has been
 mutation-checked against the real tree, not only the fixture.

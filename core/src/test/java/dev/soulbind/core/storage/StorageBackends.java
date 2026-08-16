@@ -28,13 +28,23 @@ import org.junit.jupiter.params.provider.Arguments;
  * other — which is how "it worked locally on SQLite" reaches a deployment
  * running MariaDB.
  *
- * <p><b>MariaDB is skipped when no server is reachable, and that skip is
- * visible.</b> It is not silently treated as a pass: {@link #mariadbUrl()}
- * returns null and the parameter source omits it, and the test class reports
- * how many backends actually ran. Availability is read from
- * {@code SOULBIND_TEST_MARIADB_URL} so a workstation without a database server
- * can still run the cheap tiers, while the containerised battery supplies one
- * and gets both.
+ * <p><b>MariaDB is skipped when no server is reachable.</b> It is not silently
+ * treated as a pass: {@link #mariadbUrl()} returns null and the parameter
+ * source omits it, so the parameterised display names show which backends ran.
+ * Availability is read from {@code SOULBIND_TEST_MARIADB_URL} so a workstation
+ * without a database server can still run the cheap tiers, while the
+ * containerised battery supplies one and gets both.
+ *
+ * <p><b>Known gap, stated rather than implied.</b> This class does not itself
+ * report how many backends ran — an earlier version of this comment claimed it
+ * did, and nothing implemented it. Today the only proof the second backend was
+ * exercised is incidental: the fuzz tier prints its seed with the backend name
+ * because that task sets {@code showStandardStreams}. Drop {@code @Tag("fuzz")}
+ * from the dispatcher fuzz test and the battery loses its only surviving
+ * evidence that MariaDB ran, and stays green. The result XML that would prove
+ * it lives under {@code build/}, which the session harness excludes from the
+ * sync back, so nothing reaches the workstation either. A deliberate evidence
+ * channel is outstanding work, tracked in {@code docs/STATUS.md}.
  *
  * <p>This is a narrowing with a stated reason, and the reason covers exactly
  * this: MariaDB coverage on a workstation with no MariaDB. It does not excuse

@@ -2634,3 +2634,193 @@ Narrowings, stated:
 - It fails if it finds no keys at all, so it cannot pass by matching nothing.
 
 Both mutations caught: a renamed key, and the wrong namespace.
+
+## Phase 8 — connector-plan and the full-stack battery
+
+### 8.1 — Unknown is a third state, and a boolean cannot carry it
+
+A dashboard has exactly one way to be actively harmful: printing a confident
+answer it does not have. If core is unreachable and the page says **"not
+linked"**, an operator goes and chases somebody whose links are fine, and
+nothing on the page hints that anything was wrong.
+
+Plan's `@BooleanProvider` has no third value. It fails closed to `false`, which
+is correct and insufficient — read on its own it is an answer that was never
+given. So `unknown` is carried beside it in three places that can hold it: a
+`@StringProvider` that says the word, its own `@NumberProvider` count on the
+server page, and `ServerLinkSummary.linkedFraction()`, whose denominator
+excludes unknown so an outage does not read as a decline.
+
+The count is the one that matters most in practice. Without it, linked and
+unlinked simply do not add up to the roster, and an operator has nothing to
+attribute the difference to — the page is wrong and gives no handle on why.
+
+`LinkDataSource` caches answers and never outages, so recovery is visible on the
+next call rather than at the end of a TTL. Caching a failure is how a
+thirty-second blip becomes a thirty-second-and-a-TTL blip that looks unrelated
+to its cause.
+
+### 8.2 — `compileOnly` is right for the host and wrong for coverage
+
+Plan is the host: it is on the classpath at runtime by definition, and bundling
+a second copy is how a plugin loads annotations that are not the ones the host
+scans for. §16 pins it to `provided` scope for the LGPL packaging reason as
+well. `compileOnly` is correct.
+
+It also makes every provider body unexecutable by a test. The annotations
+compile; the bodies never run. And nothing about that failure is loud —
+annotation-driven code produces **a page with a missing panel and no error
+anywhere**, or worse, a panel with a plausible wrong number. Plan reports
+nothing, because there is nothing to report: the method ran and returned a value
+of the right type.
+
+So the same artifact is on the test classpath, with `commons-lang3` at test
+runtime because Plan's `Table.Factory` calls it without declaring it in its POM.
+Neither reaches a distributed artifact, so the packaging guarantee is untouched.
+Recorded as departure 7.
+
+The mutation that justifies the whole arrangement: dropping the
+seconds-to-milliseconds conversion in `linkedSince` renders **1970 on every
+page**. That reads as a data problem and sends whoever investigates in the wrong
+direction entirely. Seven of seven mutations caught, including that one.
+
+### 8.3 — A guard that documented a rule it did not implement
+
+`DependencyGraphGuardTest`'s class comment opened with *"Two rules live here"*
+and listed both: no YAML parser, and no copyleft artifact bundled into a
+distributed artifact. It implemented three tests, all of them about YAML and
+TOML. **There was no licence assertion at all.**
+
+This surfaced because adding the Plan API — LGPL-3.0 — put an artifact into a
+new configuration, the build went green, and the green meant nothing about the
+question it appeared to answer. A guard whose documentation overclaims is worse
+than a missing guard: the missing one prompts somebody to write it, and this one
+told every reader it was already handled.
+
+The rule is now implemented for the two artifacts §16 names specifically: Plan
+(`provided` only) and MariaDB Connector/J (never shaded). A declaration of
+either in `implementation`, `api`, `runtimeOnly` or `compileOnlyApi` fails.
+
+**Narrowings, stated.** It covers those two coordinates and no others — in
+particular **not logback**, which is EPL-1.0 / LGPL-2.1 dual and which §16
+explicitly permits as an unmodified, unbundled binary dependency; listing it
+would fail the build for a decision the specification already made. That
+exclusion covers logback and nothing else. It reads declared dependencies as
+text, not a resolved graph, so a copyleft artifact arriving transitively behind
+a permissive one is not caught; that claim needs the licence-report task in
+Phase 10, and the gap is written here rather than implied.
+
+Two fixtures, not one. The must-fail fixture proves it fires; a second
+**must-pass** fixture proves `compileOnly` and the `test*` configurations are
+still allowed, because a guard that rejects the correct usage too would read as
+coverage while making the module unbuildable. Comments are stripped before
+matching — the fixtures name these artifacts in their own explanatory prose, and
+a guard that matches its own explanation reports a violation that is only a
+sentence about the violation. That mistake has now been made three times in this
+repository and caught by writing the stripping in from the start.
+
+**Corrected after a full battery, because the first version could not fail.**
+Every pinned artifact in this repository is declared through the version
+catalog — `runtimeOnly(libs.mariadb.jdbc)`, not the coordinate — and the scan
+matched literal coordinates only, so it never saw the one real declaration.
+Worse, the single shared list of bundling configurations contained
+`runtimeOnly`, which is precisely how §16 says Connector/J *should* ship
+(`libs.versions.toml` says so in as many words). Two errors cancelling out: a
+matcher that could not see the artifact, and a rule that would have failed the
+build on its correct declaration.
+
+The original mutation check — flipping `connector-plan`'s `compileOnly` to
+`implementation` — passed only because that module happens to use a literal
+coordinate, and it gave false confidence about the catalog case. **This is the
+same failure shape the entry above was written about: documentation claiming a
+rule the implementation does not enforce.** Recorded rather than quietly fixed,
+because the lesson is that "I mutation-checked it" is not the same as "I
+mutation-checked the form the code actually uses".
+
+The rule is now per artifact, since §16 states two different rules: Plan may not
+appear in `implementation`, `api`, `runtimeOnly` or `compileOnlyApi`, while
+Connector/J may not appear in the first, second or fourth — `runtimeOnly` is its
+prescribed form. Catalog aliases are resolved from `libs.versions.toml`, and a
+separate test fails if that resolution finds nothing, so the scan cannot go
+blind again without saying so. Mutation-checked in the form the tree really
+uses: bundling `libs.mariadb.jdbc` as `implementation` fails, and breaking alias
+resolution fails.
+
+### 8.4 — Not on player join
+
+Providers run on `PLAYER_LEAVE` and `SERVER_PERIODICAL`.
+
+A join is both the moment a player is least likely to have *just* linked and the
+one path a proxy plugin must never make slower. A round trip there buys the
+freshest possible answer to a question nobody is asking yet, and pays for it on
+the surface operators notice first and complain about hardest.
+
+`PLAYER_LEAVE` catches the session that just happened, which is when a link made
+during play becomes visible; `SERVER_PERIODICAL` keeps the server page honest
+without touching a player path at all.
+
+### 8.5 — A tier that runs nothing, and two checks that could not see it
+
+`fuzzTest` and `charsetHostilityTest` are wired into `check` for all nine Java
+modules. Only `core` has a `@Tag("fuzz")` test; only `protocol` and `core` have
+`@Tag("charset")` ones. So eight modules ran the fuzz task and seven ran the
+charset task having discovered **zero tests**, every one of them reporting
+success.
+
+For a module with no tagged tests that is the right answer. The danger is the
+other case: the default test task's comment already records a narrowing that
+*"made fuzzTest run zero tests -- a green run that fuzzed nothing"*, fixed with
+`outputs.upToDateWhen { false }`. That stops a **cached** empty result and does
+nothing about a genuinely empty one — rename a tag, move a class, or add one
+more exclusion, and the tier silently becomes zero coverage while the build goes
+green.
+
+So a tag-selected task now fails if its module's test sources **contain** the
+tag and the task executed no tests. The narrowing is exactly that: modules with
+no occurrence of the tag are not required to run anything, because for them zero
+is the right answer.
+
+**It took two wrong versions to get one that fires, and both were green.**
+
+*First:* it counted XML files under `build/test-results/<task>`. Gradle does not
+clear that directory when a run discovers nothing, so the previous run's files
+were still there and the count was never zero. A check that reads the last run's
+evidence cannot observe this one.
+
+*Second:* the marker was written `"@Tag(\"${'$'}tag\")"`. In Kotlin `${'$'}` is
+the escape for a literal dollar sign, so that compiles to the text
+`@Tag("$tag")` — the tag was never substituted, nothing ever matched,
+`declaresTag` was always false, and the check silently did nothing. It is now
+built by concatenation, which has no interpolation to get wrong.
+
+*Third, found by a full battery:* `charsetHostilityTest` had no
+`outputs.upToDateWhen { false }`, so Gradle skipped it on an incremental build —
+and a `doLast` does not run on a skipped task. Two consecutive invocations both
+reported `:protocol:charsetHostilityTest UP-TO-DATE`, meaning the hostile-charset
+tier *and* the new guard that reports whether it ran anything both silently did
+nothing. A guard that is skipped whenever the thing it guards is skipped guards
+nothing. It is now never up-to-date, for a different reason than `fuzzTest`: this
+tier is deterministic, so the cached result is not stale — what could not survive
+caching was the check riding along inside it.
+
+*Fourth, and the one that should have been impossible:* the scan read raw file
+text, and the javadoc added in this same change to `StorageBackends` — warning
+that dropping `@Tag("fuzz")` would leave the battery green — itself contains
+that literal. So `core` declared the tag partly because of a comment about the
+tag, which made the warning false and would have failed the build forever, with
+an untrue message, had `core` ever legitimately lost its last fuzz test. **The
+copyleft guard thirty lines away already strips comments.** This is the fourth
+time in this repository a check has matched its own explanatory prose, and the
+second time it was reintroduced immediately after being fixed. It now strips
+block and line comments, verified in both directions: the javadoc literal alone
+does not fire it, and a real tag with zero discovery still does.
+
+Four wrong versions, all green, before one that fires. The lesson is not that
+mutation checks work; it is that they only work against the form the code
+actually takes — and that a fix for this pattern does not inoculate the code
+written next to it. Three mutations now fail as they should —
+excluding the fuzz tag from `fuzzTest` (the historical bug, exactly), pointing a
+task at a tag that matches nothing, and a real tag whose tests stop being
+discovered — while modules with no tagged tests still pass, and a module whose
+only occurrence of the tag is in a comment is correctly treated as having
+none.
