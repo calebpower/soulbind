@@ -373,11 +373,20 @@ log "starting the forum"
 # an nginx try_files rule would do, and is the whole difference.
 cat > "$SITE/router.php" <<'PHPR'
 <?php
-// Serve a real file if one exists, otherwise hand everything to Flarum's front
-// controller -- exactly what `try_files $uri /index.php?$query_string` does.
+// The front controller, for php -S.
+//
+// chdir into public/ FIRST. Flarum's public/index.php does `require
+// '../site.php'`, which resolves against the WORKING DIRECTORY and not against
+// the file -- under a real web server the cwd is the document root, and under
+// `php -S` it is wherever the server was started. Without this the site fails
+// with "require(../site.php): Failed to open stream", which reads like a broken
+// Flarum install and is really a broken harness.
+chdir(__DIR__ . '/public');
+
+// Serve a real file if one exists, otherwise hand everything to Flarum --
+// exactly what `try_files $uri /index.php?$query_string` does.
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$file = __DIR__ . '/public' . $path;
-if ($path !== '/' && is_file($file)) {
+if ($path !== '/' && is_file(__DIR__ . '/public' . $path)) {
     return false;
 }
 require __DIR__ . '/public/index.php';
