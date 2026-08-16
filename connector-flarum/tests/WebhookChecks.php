@@ -23,6 +23,7 @@ namespace Soulbind\Flarum\Tests;
 use Soulbind\Flarum\Protocol\RequestSigner;
 use Soulbind\Flarum\Webhook\InMemoryNonceStore;
 use Soulbind\Flarum\Webhook\Verdict;
+use Soulbind\Flarum\Webhook\WebhookPayload;
 use Soulbind\Flarum\Webhook\WebhookVerifier;
 
 /**
@@ -348,6 +349,88 @@ final class WebhookChecks
         if (Verdict::REPLAYED_NONCE->httpStatus() !== 200) {
             $failures[] = 'a replayed delivery does not answer 200; an at-least-once sender '
                 . 'behaving exactly as designed would look broken to its operator';
+        }
+
+        return $failures;
+    }
+
+    /**
+     * Reading which identities a delivery is about.
+     *
+     * This runs only on deliveries that already verified, so the input is
+     * signed by core -- but "signed by core" is not "shaped the way this build
+     * expects". A newer core can send a field this version has never seen, and
+     * the right answer is to take what is recognised and ignore the rest, never
+     * to throw inside a webhook handler.
+     *
+     * @return list<string>
+     */
+    public static function payloadReadingIsTotal(): array
+    {
+        $failures = [];
+
+        $cases = [
+            'a single identityRef' =>
+                ['{"payload":{"identityRef":"forum:u1"}}', ['forum:u1']],
+            'a list of them' =>
+                ['{"payload":{"identityRefs":["forum:u1","game:u2"]}}', ['forum:u1', 'game:u2']],
+            'the kind/id pair spelling' =>
+                ['{"payload":{"platformKind":"forum","platformId":"u1"}}', ['forum:u1']],
+            'no envelope, just the payload' =>
+                ['{"identityRef":"forum:u1"}', ['forum:u1']],
+            'duplicates collapsed' =>
+                ['{"payload":{"identityRef":"forum:u1","identityRefs":["forum:u1"]}}',
+                 ['forum:u1']],
+            'blank entries dropped' =>
+                ['{"payload":{"identityRefs":["","  ","forum:u1"]}}', ['forum:u1']],
+        ];
+
+        foreach ($cases as $what => [$body, $expected]) {
+            $actual = WebhookPayload::affectedIdentities($body);
+            if ($actual !== $expected) {
+                $failures[] = "{$what}: got [" . implode(', ', $actual) . '], expected ['
+                    . implode(', ', $expected) . ']';
+            }
+        }
+
+        // Nothing here may throw, and nothing may invent an identity.
+        $hostile = [
+            'not JSON at all' => 'hello',
+            'an empty body' => '',
+            'a JSON array' => '[1,2,3]',
+            'null' => 'null',
+            'deeply nested rubbish' => '{"payload":{"identityRef":{"nested":true}}}',
+            'a numeric ref' => '{"payload":{"identityRef":12345}}',
+            'refs that are not strings' => '{"payload":{"identityRefs":[1,true,null]}}',
+            'an unknown event shape' => '{"payload":{"somethingNew":"forum:u1"}}',
+        ];
+        foreach ($hostile as $what => $body) {
+            try {
+                $result = WebhookPayload::affectedIdentities($body);
+            } catch (\Throwable $e) {
+                $failures[] = "{$what} threw " . get_class($e)
+                    . '. A throw inside a webhook handler is a 500, and core will retry it.';
+                continue;
+            }
+            if ($result !== []) {
+                $failures[] = "{$what} produced identities out of nothing: ["
+                    . implode(', ', $result) . ']';
+            }
+        }
+
+        // Bounded. A delivery claiming ten thousand identities must not become
+        // ten thousand cache writes on a page load.
+        $many = json_encode([
+            'payload' => ['identityRefs' => array_map(
+                static fn (int $i): string => "forum:u{$i}",
+                range(1, 10_000)
+            )],
+        ]);
+        $bounded = WebhookPayload::affectedIdentities((string) $many);
+        if (count($bounded) > 64) {
+            $failures[] = 'a delivery naming 10,000 identities produced ' . count($bounded)
+                . ' invalidations. Unbounded, one signed delivery is a way to make the forum '
+                . 'do arbitrary work.';
         }
 
         return $failures;

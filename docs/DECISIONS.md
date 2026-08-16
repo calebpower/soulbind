@@ -2177,3 +2177,89 @@ operator meant either. Neither reading is safe, so neither is guessed.
 
 The assertion now pins the exact value rather than a range — thirteen mutations,
 all caught, where twelve were before.
+
+### 7.16 — The decision cache needed a store, because PHP has no process
+
+The first version held decisions in an object field. It passed every check and
+would have cached **nothing**: PHP starts a fresh interpreter per request, so the
+field is empty by the time the next page loads — and the webhook that exists to
+keep the cache warm would have been warming something no later request could
+read.
+
+Caught by asking what the webhook was actually for. The checks could not have
+caught it: every one of them lived inside a single request, which is the one
+situation where an in-memory cache works.
+
+`DecisionStore` is now the seam, and it is deliberately the narrowest interface a
+key-value cache can satisfy — get, put with a TTL, forget. No enumeration, no
+prefix scan, no tags. Those are exactly the operations shared caches disagree
+about, and depending on one would make the connector work on one host's cache
+driver and not another's. The rules stay in `DecisionCache`; only the bytes move.
+
+A check now stores through one cache object and reads through a second over the
+same store, which is the smallest thing that distinguishes a real cache from a
+field.
+
+### 7.17 — Invalidation by generation, and the resurrection it can cause
+
+A webhook says "this subject changed" and every gate cached for them must go. A
+shared cache cannot be enumerated to find them, so each entry key embeds a
+per-identity **generation**, and invalidation bumps it. One write orphans every
+gate at once, without knowing which gates exist.
+
+That introduces a failure nobody would look for. If a generation marker expired
+while an entry it had orphaned was still live, the generation would read back as
+`0` and **the orphan would become reachable again** — an invalidated decision
+returning from the dead, hours later, silently.
+
+Found by mutation: shortening the generation TTL to one second changed no test
+result, because every check ran at a fixed instant. The fix is structural rather
+than a longer constant — stored decisions are capped at the generation lifetime,
+so the relationship holds by construction even though core chooses the TTL and
+could choose a year. The check now walks a clock forward past several generation
+lifetimes and asserts the decision stays dead.
+
+A second mutation survived alongside it: removing the store's own expiry check,
+because the cache checks expiry too. That redundancy is intentional — the store's
+clock is not the cache's clock — but a redundancy nothing asserts is one that
+quietly stops being one, so the store's expiry is now checked directly.
+
+### 7.18 — Two caches, two opposite failure directions
+
+Both live in the host's shared cache and they fail in opposite directions, which
+is worth stating because a reader who noticed only one would think the other was
+a mistake.
+
+**The decision store fails to "ask core".** A cache that will not answer is
+treated as a miss: the caller re-asks core, which is slower and entirely correct.
+Throwing would turn a cache problem into a page failure.
+
+**The nonce store fails CLOSED.** Every path that cannot prove a nonce is new
+returns false, and the verifier reads that as a replay and refuses. A decision
+cache that cannot answer degrades to asking core; a replay guard that cannot
+answer degrades to *having no replay guard*.
+
+One honest gap, written down rather than glossed: PSR-16 offers no atomic
+add, so `has()`-then-`set()` in the nonce store is not atomic. Two identical
+deliveries arriving in the same instant could both pass. The window is
+milliseconds, the attacker must already hold a validly signed delivery, and the
+residual effect is a duplicate cache invalidation — idempotent, costing one extra
+`decide`. **If this endpoint ever does something that is not idempotent, that
+line stops being adequate and needs a store with an atomic add.** The comment
+says so at the call site.
+
+PSR-16 also forbids characters that the cache's own key separator uses, and
+permits drivers to throw on others, so keys are hashed. The cache's key rules are
+not soulbind's to negotiate, and a key that works on one driver and throws on
+another is a fault that only ever appears in somebody else's deployment.
+
+### 7.19 — What the admin page is allowed to know
+
+Flarum serializes declared settings into every admin's browser, where they sit in
+the page source. The credential and the webhook secret are therefore **not**
+serialized: the admin page writes them and never reads them back, which is the
+same discipline as showing a minted credential once.
+
+The core URL is not published either. What the page needs is whether the
+connector is configured, so a boolean is derived from the URL and that is what
+crosses — a member's browser has no reason to learn where core lives.

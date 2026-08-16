@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 namespace Soulbind\Flarum\Tests;
 
+use Soulbind\Flarum\Client\ArrayDecisionStore;
 use Soulbind\Flarum\Client\DecisionCache;
 use Soulbind\Flarum\Client\FailMode;
 use Soulbind\Flarum\Client\OkOutcome;
@@ -234,10 +235,11 @@ final class ClientChecks
 
         // And a refusal must not be cached against the subject: it is about
         // this connector's standing, not this person's.
-        $freshCache = new DecisionCache();
+        $store = new ArrayDecisionStore(static fn (): int => self::NOW);
+        $freshCache = new DecisionCache(FailMode::CLOSED, $store);
         self::client(FakeTransport::refusing('missing-capability', 'nope'), $freshCache)
             ->decide('join', 'forum', 'u1');
-        if ($freshCache->size() !== 0) {
+        if ($store->size() !== 0) {
             $failures[] = 'a refusal was cached against the subject, so a credential problem '
                 . 'would keep denying one person after it was fixed';
         }

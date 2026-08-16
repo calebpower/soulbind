@@ -139,4 +139,52 @@ final class DecisionCacheTest extends TestCase
             'a response nobody can parse let somebody through'
         );
     }
+    #[Test]
+    #[DisplayName('a decision stored by one request is visible to the next')]
+    public function theCacheSurvivesBetweenRequests(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::theCacheSurvivesBetweenRequests(),
+            'a cache that lives in an object field caches nothing in PHP'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('invalidation reaches later requests, and only the named identity')]
+    public function invalidationReachesLaterRequests(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::invalidationReachesLaterRequests(),
+            'a webhook either does not take effect or takes effect too broadly'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('a cache entry nobody can parse is absent, never an allow')]
+    public function anUnreadableEntryIsIgnored(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::anUnreadableEntryIsIgnored(),
+            'a corrupt shared-cache entry let somebody through'
+        );
+    }
+    #[Test]
+    #[DisplayName('an invalidated decision cannot come back from the dead')]
+    public function anInvalidatedDecisionCannotResurrect(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::anInvalidatedDecisionCannotResurrect(),
+            'a generation marker expired before the entries it orphaned'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('the store honours its own expiry, independently of the cache')]
+    public function theStoreHonoursItsOwnExpiry(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::theStoreHonoursItsOwnExpiry(),
+            'a redundancy nothing checks has quietly stopped being one'
+        );
+    }
 }

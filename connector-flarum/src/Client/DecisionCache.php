@@ -29,7 +29,7 @@ use Soulbind\Flarum\Policy\Effect;
  * The counterpart of the other implementation's cache, and deliberately the
  * same rules rather than similar ones -- a forum and a game server that
  * disagree about what an outage means is a person let in on one and turned away
- * on the other, for the same reason, at the same moment.
+ * on the other, at the same moment, for the same reason.
  *
  * The default is CLOSED, and it is the only default. Departing from it is a
  * visible line of configuration, and a check asserts the shipped default is
@@ -38,11 +38,14 @@ use Soulbind\Flarum\Policy\Effect;
  * The user-facing message on a fail-closed denial blames THE SYSTEM, not the
  * person. Somebody refused because a server they have never heard of is
  * unreachable should not be told they are not allowed.
+ *
+ * Storage is a {@see DecisionStore}, because PHP has no process to hold a cache
+ * in. The rules live here; only the bytes live there.
  */
 final class DecisionCache
 {
     /**
-     * The cache key separator.
+     * The key separator.
      *
      * A unit separator, which cannot appear in a gate name or a platform
      * identifier. Joining with a colon would let ("a:b", "c") and ("a", "b:c")
@@ -56,12 +59,22 @@ final class DecisionCache
         'This check is temporarily unavailable, so access is on hold. '
         . 'This is a problem on our side, not yours -- please try again shortly.';
 
-    /** @var array<string, array{decision: Decision, expiresAt: int}> */
-    private array $entries = [];
+    /**
+     * How long a generation marker outlives the decisions it invalidates.
+     *
+     * A generation must not expire before the entries it has orphaned, or those
+     * entries become reachable again -- an invalidated decision coming back from
+     * the dead. Decisions are capped well below this by their own TTL.
+     */
+    private const GENERATION_TTL_SECONDS = 86_400;
+
+    private readonly DecisionStore $store;
 
     public function __construct(
-        public readonly FailMode $failMode = FailMode::CLOSED
+        public readonly FailMode $failMode = FailMode::CLOSED,
+        ?DecisionStore $store = null
     ) {
+        $this->store = $store ?? new ArrayDecisionStore();
     }
 
     /**
@@ -70,49 +83,83 @@ final class DecisionCache
      * An unreadable value becomes CLOSED -- not an exception, and certainly not
      * OPEN. A typo in a fail mode must never be the thing that opens a gate.
      */
-    public static function withConfiguredFailMode(?string $configured): self
-    {
-        return new self(FailMode::fromConfigName($configured));
+    public static function withConfiguredFailMode(
+        ?string $configured,
+        ?DecisionStore $store = null
+    ): self {
+        return new self(FailMode::fromConfigName($configured), $store);
     }
 
     /**
      * Stores a decision, if it is cacheable at all.
      *
-     * A TTL of zero means "do not cache", and is honoured rather than treated
-     * as a missing value to be defaulted. Core says zero when it means it.
+     * A TTL of zero means "do not cache", and is honoured rather than treated as
+     * a missing value to be defaulted. Core says zero when it means it.
      */
     public function store(string $gate, string $identityRef, Decision $decision, int $now): void
     {
+        $key = $this->entryKey($gate, $identityRef);
+
         if ($decision->ttlSeconds <= 0) {
-            // Also EVICT any earlier entry for this key. Leaving the previous
-            // decision in place would serve a stale answer that core has just
-            // told us not to keep -- the opposite of what a zero TTL asks for.
-            unset($this->entries[self::key($gate, $identityRef)]);
+            // Also EVICT any earlier entry. Leaving the previous decision in
+            // place would serve a stale answer core has just told us not to
+            // keep -- the opposite of what a zero TTL asks for.
+            $this->store->forget($key);
             return;
         }
 
-        $this->entries[self::key($gate, $identityRef)] = [
-            'decision' => $decision,
-            'expiresAt' => $now + $decision->ttlSeconds,
-        ];
+        // Capped at the generation lifetime, and this is a correctness cap,
+        // not a tidiness one. Invalidation works by orphaning entries behind a
+        // bumped generation; if a generation marker expired while an entry it
+        // had orphaned was still live, the old generation would be read back as
+        // 0 and the orphan would become reachable again -- an invalidated
+        // decision returning from the dead, which is the one thing invalidation
+        // exists to prevent. Core chooses the TTL and could choose a long one,
+        // so the relationship is enforced here rather than assumed.
+        $ttl = min($decision->ttlSeconds, self::GENERATION_TTL_SECONDS);
+
+        $this->store->put(
+            $key,
+            (string) json_encode([
+                'effect' => $decision->effect->value,
+                'reason' => $decision->reason,
+                'detail' => $decision->detail,
+                'ttlSeconds' => $decision->ttlSeconds,
+                'missingKinds' => $decision->missingKinds,
+                'expiresAt' => $now + $ttl,
+            ]),
+            $ttl
+        );
     }
 
     /** An unexpired cached decision, or null. */
     public function cached(string $gate, string $identityRef, int $now): ?Decision
     {
-        $key = self::key($gate, $identityRef);
-        $entry = $this->entries[$key] ?? null;
-        if ($entry === null) {
+        $raw = $this->store->get($this->entryKey($gate, $identityRef));
+        if ($raw === null) {
             return null;
         }
+
+        $entry = json_decode($raw, true);
+        if (!is_array($entry) || !is_int($entry['expiresAt'] ?? null)) {
+            // Unreadable is treated as absent, never as an allow. A cache entry
+            // that cannot be parsed is a cache entry nobody should act on --
+            // and a shared cache can be written by another version of this
+            // extension mid-upgrade.
+            return null;
+        }
+
         // Expiry is exclusive of the instant it names: an entry that expires
         // "at" now is expired. The other side compares the same way, and an
         // off-by-one here is a decision served one second past its licence.
+        //
+        // Checked HERE as well as by the store's own TTL: the store's clock is
+        // not this clock, and the rule belongs where the rest of the rules are.
         if ($entry['expiresAt'] <= $now) {
-            unset($this->entries[$key]);
             return null;
         }
-        return $entry['decision'];
+
+        return Decision::fromPayload($entry);
     }
 
     /**
@@ -145,36 +192,45 @@ final class DecisionCache
         );
     }
 
-    public function size(): int
-    {
-        return count($this->entries);
-    }
-
-    public function clear(): void
-    {
-        $this->entries = [];
-    }
-
     /**
      * Drops a subject's cached decisions.
      *
      * What a webhook calls when core says something about this subject changed.
-     * Dropping is right and refreshing would be wrong: the next question
-     * re-asks core, whereas a refresh here would guess at an answer core has
-     * not given.
+     * Dropping is right and refreshing would be wrong: the next question re-asks
+     * core, whereas a refresh here would guess at an answer core has not given.
+     *
+     * Implemented by bumping a per-identity GENERATION rather than enumerating
+     * keys, because a shared cache cannot be enumerated -- no prefix scan, no
+     * tags, nothing portable across drivers. Every entry key embeds the
+     * generation current when it was written, so a bump orphans all of them at
+     * once, for every gate, without knowing which gates exist. The orphans
+     * expire on their own TTL.
      */
     public function invalidateIdentity(string $identityRef): void
     {
-        $suffix = self::KEY_SEPARATOR . $identityRef;
-        foreach (array_keys($this->entries) as $key) {
-            if (str_ends_with($key, $suffix)) {
-                unset($this->entries[$key]);
-            }
-        }
+        $key = $this->generationKey($identityRef);
+        $this->store->put(
+            $key,
+            (string) ($this->generation($identityRef) + 1),
+            self::GENERATION_TTL_SECONDS
+        );
     }
 
-    private static function key(string $gate, string $identityRef): string
+    private function generation(string $identityRef): int
     {
-        return $gate . self::KEY_SEPARATOR . $identityRef;
+        $raw = $this->store->get($this->generationKey($identityRef));
+        return is_string($raw) && preg_match('/^\d+$/', $raw) === 1 ? (int) $raw : 0;
+    }
+
+    private function generationKey(string $identityRef): string
+    {
+        return 'soulbind' . self::KEY_SEPARATOR . 'gen' . self::KEY_SEPARATOR . $identityRef;
+    }
+
+    private function entryKey(string $gate, string $identityRef): string
+    {
+        return 'soulbind' . self::KEY_SEPARATOR . 'd' . self::KEY_SEPARATOR
+            . $this->generation($identityRef) . self::KEY_SEPARATOR
+            . $gate . self::KEY_SEPARATOR . $identityRef;
     }
 }

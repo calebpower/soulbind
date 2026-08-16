@@ -8,7 +8,8 @@
         "ext-mbstring": "*",
         "ext-hash": "*",
         "ext-json": "*",
-        "flarum/core": "^1.8.19"
+        "flarum/core": "^1.8.19",
+        "ext-curl": "*"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.0"
@@ -26,12 +27,17 @@
     "extra": {
         "flarum-extension": {
             "title": "soulbind",
-            "category": "feature"
+            "category": "feature",
+            "icon": {
+                "name": "fas fa-link"
+            }
         }
     },
     "scripts": {
         "test": "phpunit",
-        "test-hostile": "phpunit --configuration phpunit-hostile.xml"
+        "test-hostile": "phpunit --configuration phpunit-hostile.xml",
+        "checks": "php tests/run-checks.php",
+        "checks-hostile": "php tests/run-checks.php --hostile"
     },
     "config": {
         "allow-plugins": {

@@ -21,6 +21,7 @@ declare(strict_types=1);
 namespace Soulbind\Flarum\Tests;
 
 use Soulbind\Flarum\Client\Answer;
+use Soulbind\Flarum\Client\ArrayDecisionStore;
 use Soulbind\Flarum\Client\DecisionCache;
 use Soulbind\Flarum\Client\FailMode;
 use Soulbind\Flarum\Client\Source;
@@ -178,7 +179,8 @@ final class CacheChecks
     {
         $failures = [];
 
-        $cache = new DecisionCache();
+        $store = new ArrayDecisionStore(static fn (): int => self::NOW);
+        $cache = new DecisionCache(FailMode::CLOSED, $store);
         $cache->store('a:b', 'c', self::decision(Effect::ALLOW, 600), self::NOW);
         $cache->store('a', 'b:c', self::decision(Effect::DENY, 600), self::NOW);
 
@@ -192,8 +194,8 @@ final class CacheChecks
             $failures[] = 'gate "a" identity "b:c" was served the OTHER subject\'s decision. '
                 . 'A key collision here is one person\'s access answered with another\'s.';
         }
-        if ($cache->size() !== 2) {
-            $failures[] = 'two distinct pairs produced ' . $cache->size() . ' cache entries';
+        if ($store->size() !== 2) {
+            $failures[] = 'two distinct pairs produced ' . $store->size() . ' cache entries';
         }
 
         return $failures;
@@ -245,7 +247,8 @@ final class CacheChecks
     {
         $failures = [];
 
-        $cache = new DecisionCache();
+        $store = new ArrayDecisionStore(static fn (): int => self::NOW);
+        $cache = new DecisionCache(FailMode::CLOSED, $store);
         $answer = $cache->whenUnreachable('join', 'chat:abc', self::NOW);
 
         if ($answer->decision->ttlSeconds !== 0) {
@@ -253,7 +256,7 @@ final class CacheChecks
                 . '. It must be 0: a fail-mode answer is the ABSENCE of a decision, and caching '
                 . 'it would extend an outage past the end of the outage.';
         }
-        if ($cache->size() !== 0) {
+        if ($store->size() !== 0) {
             $failures[] = 'asking during an outage populated the cache';
         }
 
@@ -307,6 +310,230 @@ final class CacheChecks
             $failures[] = 'invalidating one identity dropped another\'s decisions. Over-broad '
                 . 'invalidation is not harmless: it turns one webhook into a stampede of '
                 . 'synchronous decides, which is what the cache exists to prevent.';
+        }
+
+        return $failures;
+    }
+
+    /**
+     * The cache must survive between requests, or it caches nothing.
+     *
+     * PHP starts a fresh interpreter per request. A cache held in an object
+     * field would satisfy every other check in this file and cache nothing in
+     * production -- and the webhook that exists to keep it warm would be warming
+     * something no later request can read. Two cache objects over one store is
+     * how that gets caught.
+     *
+     * @return list<string>
+     */
+    public static function theCacheSurvivesBetweenRequests(): array
+    {
+        $failures = [];
+
+        $store = new ArrayDecisionStore(static fn (): int => self::NOW);
+
+        // "Request one" stores a decision, then goes away.
+        (new DecisionCache(FailMode::CLOSED, $store))
+            ->store('join', 'forum:u1', self::decision(Effect::ALLOW, 600), self::NOW);
+
+        // "Request two" is a different object entirely.
+        $later = new DecisionCache(FailMode::CLOSED, $store);
+        $hit = $later->cached('join', 'forum:u1', self::NOW);
+
+        if ($hit === null) {
+            $failures[] = 'a decision stored by one request was invisible to the next. A cache '
+                . 'that lives in an object field caches nothing in PHP, and the webhook that '
+                . 'warms it would be warming something nobody reads.';
+        } elseif (!$hit->isAllowed()) {
+            $failures[] = 'a decision came back from the store with its effect changed';
+        }
+
+        // And the outage path must see it too -- that is the moment it matters.
+        $answer = $later->whenUnreachable('join', 'forum:u1', self::NOW);
+        if ($answer->source !== Source::CACHED) {
+            $failures[] = 'an outage in a later request did not find the earlier decision';
+        }
+
+        return $failures;
+    }
+
+    /**
+     * Invalidation reaches a later request, and only the named identity.
+     *
+     * @return list<string>
+     */
+    public static function invalidationReachesLaterRequests(): array
+    {
+        $failures = [];
+
+        $store = new ArrayDecisionStore(static fn (): int => self::NOW);
+
+        $first = new DecisionCache(FailMode::CLOSED, $store);
+        $first->store('join', 'forum:u1', self::decision(Effect::ALLOW, 600), self::NOW);
+        $first->store('post', 'forum:u1', self::decision(Effect::ALLOW, 600), self::NOW);
+        $first->store('join', 'forum:u2', self::decision(Effect::ALLOW, 600), self::NOW);
+
+        // The webhook arrives as its own request.
+        (new DecisionCache(FailMode::CLOSED, $store))->invalidateIdentity('forum:u1');
+
+        $later = new DecisionCache(FailMode::CLOSED, $store);
+
+        foreach (['join', 'post'] as $gate) {
+            if ($later->cached($gate, 'forum:u1', self::NOW) !== null) {
+                $failures[] = "the {$gate} decision for the invalidated identity survived into "
+                    . 'a later request. Bumping the generation must orphan every gate at once, '
+                    . 'because a shared cache cannot be enumerated to find them.';
+            }
+        }
+
+        if ($later->cached('join', 'forum:u2', self::NOW) === null) {
+            $failures[] = 'invalidating one identity dropped another\'s decisions. Over-broad '
+                . 'invalidation turns one webhook into a stampede of synchronous decides, '
+                . 'which is what the cache exists to prevent.';
+        }
+
+        // A decision stored AFTER the bump must be readable -- otherwise
+        // invalidation is permanent and the cache never refills.
+        $later->store('join', 'forum:u1', self::decision(Effect::ALLOW, 600), self::NOW);
+        if ($later->cached('join', 'forum:u1', self::NOW) === null) {
+            $failures[] = 'nothing could be cached for an identity after it was invalidated, '
+                . 'so one webhook would disable caching for that person forever';
+        }
+
+        return $failures;
+    }
+
+    /**
+     * An invalidated decision must not come back from the dead.
+     *
+     * Invalidation works by orphaning entries behind a bumped generation. If a
+     * generation marker expired while an entry it had orphaned was still live,
+     * the generation would read back as 0 and the orphan would become reachable
+     * again -- the one thing invalidation exists to prevent, happening silently,
+     * hours later.
+     *
+     * Core chooses the decision TTL and could choose a long one, so the cache
+     * caps what it stores at the generation lifetime rather than assuming the
+     * relationship holds. This walks the clock forward past a generation's life
+     * to prove it.
+     *
+     * @return list<string>
+     */
+    public static function anInvalidatedDecisionCannotResurrect(): array
+    {
+        $failures = [];
+
+        $clock = self::NOW;
+        $store = new ArrayDecisionStore(static function () use (&$clock): int {
+            return $clock;
+        });
+        $cache = new DecisionCache(FailMode::CLOSED, $store);
+
+        // Core hands back a decision it would like cached for a year.
+        $cache->store('join', 'forum:u1', self::decision(Effect::ALLOW, 365 * 86_400), self::NOW);
+        $cache->invalidateIdentity('forum:u1');
+
+        if ($cache->cached('join', 'forum:u1', $clock) !== null) {
+            return ['invalidation did not take effect at all'];
+        }
+
+        // Walk past any plausible generation lifetime, a day at a time.
+        foreach ([3_600, 86_400, 86_401, 172_800, 400 * 86_400] as $ahead) {
+            $clock = self::NOW + $ahead;
+            $hit = $cache->cached('join', 'forum:u1', $clock);
+            if ($hit !== null) {
+                $failures[] = "an invalidated decision became readable again {$ahead}s later. "
+                    . 'The generation marker expired before the entry it orphaned, so the '
+                    . 'generation read back as 0 and the old key was reachable once more.';
+                break;
+            }
+        }
+
+        return $failures;
+    }
+
+    /**
+     * The store honours its own expiry, independently of the cache.
+     *
+     * The cache checks expiry too, so removing this from the store changes no
+     * cache behaviour -- which is exactly why it needs asserting directly. A
+     * redundancy that nothing checks is a redundancy that quietly stops being
+     * one, and this store is also what a real cache driver is substituted for.
+     *
+     * @return list<string>
+     */
+    public static function theStoreHonoursItsOwnExpiry(): array
+    {
+        $failures = [];
+
+        $clock = self::NOW;
+        $store = new ArrayDecisionStore(static function () use (&$clock): int {
+            return $clock;
+        });
+
+        $store->put('k', 'v', 60);
+
+        if ($store->get('k') !== 'v') {
+            $failures[] = 'a value did not come back from the store at all';
+        }
+
+        $clock = self::NOW + 59;
+        if ($store->get('k') !== 'v') {
+            $failures[] = 'the store expired a value a second early';
+        }
+
+        $clock = self::NOW + 60;
+        if ($store->get('k') !== null) {
+            $failures[] = 'the store served a value at the instant it expired; expiry is '
+                . 'exclusive of the instant it names, here as everywhere else';
+        }
+
+        $clock = self::NOW + 61;
+        if ($store->get('k') !== null) {
+            $failures[] = 'the store served an expired value';
+        }
+        if ($store->size() !== 0) {
+            $failures[] = 'an expired value was still occupying space after being read, so the '
+                . 'store only ever grows';
+        }
+
+        $store->put('gone', 'v', 60);
+        $store->forget('gone');
+        if ($store->get('gone') !== null) {
+            $failures[] = 'forget() did not forget';
+        }
+
+        return $failures;
+    }
+
+    /**
+     * A cache entry nobody can parse is absent, never an allow.
+     *
+     * A shared cache can be written by another version of this extension
+     * mid-upgrade, or by anything else that shares the key space.
+     *
+     * @return list<string>
+     */
+    public static function anUnreadableEntryIsIgnored(): array
+    {
+        $failures = [];
+
+        foreach ([
+            'a truncated JSON object' => '{"effect":"allow"',
+            'a bare string' => 'allow',
+            'an empty value' => '',
+            'JSON with no expiry' => '{"effect":"allow","reason":"x"}',
+            'an expiry that is not a number' => '{"effect":"allow","expiresAt":"soon"}',
+            'a JSON array' => '["allow"]',
+        ] as $what => $poison) {
+            $cache = new DecisionCache(FailMode::CLOSED, new PoisoningDecisionStore($poison));
+            $cache->store('join', 'forum:u1', self::decision(Effect::ALLOW, 600), self::NOW);
+
+            $hit = $cache->cached('join', 'forum:u1', self::NOW);
+            if ($hit !== null && $hit->isAllowed()) {
+                $failures[] = "{$what} was read as an ALLOW. An entry nobody can parse is an "
+                    . 'entry nobody should act on.';
+            }
         }
 
         return $failures;

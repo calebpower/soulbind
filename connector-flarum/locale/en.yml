@@ -1,0 +1,35 @@
+soulbind-flarum:
+  admin:
+    settings:
+      title: soulbind
+      core_url_label: Core URL
+      core_url_help: >-
+        Where the soulbind core answers. Leave empty to switch this connector
+        off entirely -- the gates below become inert rather than closed.
+      credential_label: Connector credential
+      credential_help: >-
+        Shown once when the connector was registered. Entering a new value
+        replaces the old one; the current value is never sent back to this page.
+      webhook_secret_label: Webhook secret
+      webhook_secret_help: >-
+        The shared secret core signs its webhooks with. Without it the webhook
+        endpoint accepts nothing.
+      fail_mode_label: When core is unreachable
+      fail_mode_closed: Deny (recommended)
+      fail_mode_open: Allow
+      fail_mode_help: >-
+        Applies only when core cannot be reached AND no recent decision is
+        cached. A refusal from core is always a refusal, whatever this says.
+      register_gate_label: Gate name for registration
+      register_gate_help: >-
+        Leave empty to not gate registration.
+      post_gate_label: Gate name for posting
+      post_gate_help: >-
+        Leave empty to not gate posting.
+      timeout_label: Decide timeout (ms)
+      timeout_help: >-
+        How long to wait for core before falling back. Kept short because this
+        runs while somebody is waiting for a page. Values outside 100-10000 are
+        clamped; anything unreadable falls back to 2000.
+  forum:
+    gate_refused: '{message}'
