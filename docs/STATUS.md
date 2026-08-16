@@ -256,6 +256,7 @@ wrong. The blindness was the finding. Full account in `DECISIONS.md` 7.3.
 | Check-then-act | No unreviewed read-then-write in any storage write path |
 | Event doc sync | Every EventType appears in the document and vice versa |
 | Audit immutability | Nothing in production source or any migration mutates the audit table, and the repository declares no mutating method |
+| Harness pins | Every `harness/*/pins.env` escapes the `*.env` rule, so a clone can still reproduce a stack run |
 
 Every one is paired with a deliberately-broken fixture and has been
 mutation-checked against the real tree, not only the fixture.

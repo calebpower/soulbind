@@ -32,9 +32,17 @@
 # overrides for exactly this reason.
 *.env
 
-# ...except the pinned artefact list, which is the OPPOSITE of a secret: it is
-# the record of exactly which bytes a stack run used, and a clone without it
-# cannot reproduce anything. Caught because *.env silently swallowed it.
-!harness/fullstack/pins.env
+# ...except the pinned artefact lists, which are the OPPOSITE of a secret: they
+# are the record of exactly which bytes a stack run used, and a clone without
+# them cannot reproduce anything. Caught because *.env silently swallowed one.
+#
+# A GLOB, not a list. The first version named harness/fullstack/pins.env
+# specifically, and the next harness added -- harness/flarum -- was silently
+# swallowed in exactly the same way, by exactly the same line, because the fix
+# had been written to cover the instance rather than the class.
+#
+# HarnessPinsGuardTest asserts every pins.env on disk is actually tracked, so
+# the next one cannot go missing quietly either.
+!harness/*/pins.env
 
 /secrets/
