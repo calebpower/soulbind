@@ -269,13 +269,41 @@ log "core is up on $CORE_PORT"
 # around it.
 log "installing flarum $FLARUM_VERSION"
 
+# Stage what a USER would install, not the working tree.
+#
+# A composer path repository copies the directory as it finds it, and the
+# working tree carries a dev vendor/ (phpunit and 48 other packages), a
+# .phpunit.result.cache and browser-tier leftovers. Installing that means the
+# forum under test is running something no released version of this extension
+# would ever be, and a vendor/ nested inside vendor/ is a class of autoload
+# problem nobody should be debugging by accident.
+#
+# The exclusions are the release boundary, stated in one place.
+EXT_SRC="$RUN/extension"
+rm -rf "$EXT_SRC"
+mkdir -p "$EXT_SRC"
+tar -C "$REPO/connector-flarum" \
+    --exclude=vendor \
+    --exclude=node_modules \
+    --exclude=.phpunit.result.cache \
+    --exclude=composer.lock \
+    -cf - . | tar -C "$EXT_SRC" -xf -
+
+# The staged copy must actually be a Flarum extension, or the install below
+# succeeds and the forum silently has no extension in it -- which is exactly the
+# failure this run is chasing.
+[ -f "$EXT_SRC/extend.php" ] || { log "staged extension has no extend.php"; exit 1; }
+grep -q '"type": *"flarum-extension"' "$EXT_SRC/composer.json" \
+    || { log "staged composer.json does not declare type=flarum-extension"; exit 1; }
+log "staged the extension for install ($(find "$EXT_SRC" -type f | wc -l | tr -d ' ') files)"
+
 SITE="$RUN/forum/site"
 mkdir -p "$SITE"
 
 composer_in_site() {
     podman run --rm --network "$NET" \
         -v "$SITE":/site \
-        -v "$REPO/connector-flarum":/extension:ro \
+        -v "$EXT_SRC":/extension:ro \
         -w /site -e COMPOSER_HOME=/tmp/composer \
         "$COMPOSER_IMAGE" composer "$@" --no-interaction
 }
@@ -548,18 +576,50 @@ webhook_failed() {
     # Flarum's own view, not mine. The settings table says what SHOULD be
     # enabled; this says what Flarum actually loaded, and the gap between them
     # is the whole question.
-    podman exec "$WEB_C" php flarum info 2>&1 | head -40 || true
-    log "--- is the package in vendor? ---"
-    podman exec "$WEB_C" ls -la /site/vendor/soulbind/flarum-connector 2>&1 | head -15 || true
-    log "--- does its extend.php load? ---"
+    podman exec "$WEB_C" php flarum info 2>&1 | head -30 || true
+
+    log "--- how composer recorded the package ---"
+    # Flarum discovers extensions from installed.json, filtering on
+    # type=flarum-extension. If the entry is missing or the type is wrong,
+    # Flarum never looks at extend.php at all -- which is a different fault from
+    # extend.php failing, and lives in a different file.
     podman exec "$WEB_C" php -r '
+        $f = "/site/vendor/composer/installed.json";
+        $d = json_decode((string) file_get_contents($f), true);
+        $packages = $d["packages"] ?? $d;
+        foreach ($packages as $p) {
+            if (str_contains($p["name"] ?? "", "soulbind")) {
+                echo "name:    ", $p["name"], "\n";
+                echo "type:    ", $p["type"] ?? "(none)", "\n";
+                echo "version: ", $p["version"] ?? "(none)", "\n";
+                echo "extra:   ", json_encode($p["extra"] ?? null), "\n";
+                echo "install-path: ", $p["install-path"] ?? "(none)", "\n";
+                exit;
+            }
+        }
+        echo "NO soulbind package in installed.json at all\n";
+    ' 2>&1 | head -20 || true
+
+    log "--- does extend.php load, WITH flarum's autoloader ---"
+    # With the site autoloader. The first version of this check ran php -r
+    # without it and reported
+    # "Class Flarum\Extend\ServiceProvider not found" -- which says nothing
+    # about the extension and everything about the diagnostic. A diagnostic that
+    # manufactures its own failure is worse than none: it is a false lead that
+    # looks like evidence.
+    podman exec "$WEB_C" php -r '
+        require "/site/vendor/autoload.php";
         $f = "/site/vendor/soulbind/flarum-connector/extend.php";
         if (!is_file($f)) { echo "extend.php is not there\n"; exit; }
         try { $r = require $f; echo "extend.php returned ", count($r), " extenders\n"; }
-        catch (Throwable $e) { echo "extend.php threw ", get_class($e), ": ", $e->getMessage(), "\n"; }
+        catch (Throwable $e) {
+            echo "extend.php threw ", get_class($e), ": ", $e->getMessage(), "\n";
+            echo "  at ", $e->getFile(), ":", $e->getLine(), "\n";
+        }
     ' 2>&1 | head -20 || true
+
     log "--- web container log ---"
-    podman logs "$WEB_C" 2>&1 | tail -30 || true
+    podman logs "$WEB_C" 2>&1 | tail -20 || true
     exit 1
 }
 
