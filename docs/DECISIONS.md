@@ -2319,3 +2319,48 @@ recording because both are ways a guard lies:
   using its own explanation as the evidence against it. It now reads the
   `.for(...)` argument. A check that cannot tell code from prose about the code
   gets silenced rather than obeyed.
+
+### 7.21 — An unreadable payload no longer blames a field that is present
+
+Thirteen handlers shared one branch for two different faults:
+
+```java
+if (request.isEmpty() || blank(request.get().gate())) {
+    return WireResponse.error(INVALID_REQUEST, "rule.set names a gate");
+}
+```
+
+`request.isEmpty()` means the codec could not read the payload at all. The
+second clause means it read fine and a required field was blank. They are not
+the same problem and they do not have the same fix, but every one of these
+answered with the field message.
+
+So a caller who sent a field this build does not recognise was told the gate was
+missing — while the gate sat in the request, spelled correctly. That sends
+somebody to check the one part of their payload that is definitely right.
+
+**Found by being that caller.** The forum harness added a `detail` field to
+`rule.set`, wanting a custom denial message. `RuleView` has no such field, the
+bind failed, and the reply said `rule.set names a gate`. The detour that cost is
+the whole argument for fixing it.
+
+The helper takes the `Operation` enum rather than a string, so the operation
+named in the message cannot drift from the operation handling the request — four
+of the sites had already been converted with hand-written literals before that
+occurred to me, and those are gone.
+
+It names the *shape* it could not read, not the offending field, because the
+codec reports failure without saying which key was at fault. Claiming to know
+would be a second wrong answer dressed as a better one.
+
+Both halves are asserted, and the second half matters: without it, "splitting the
+branch" could be satisfied by reporting *everything* as unreadable, which would
+lose the specific message that was right all along. Mutation-checked by putting
+the two faults back on one branch and watching the unknown-field case fail.
+
+*A related observation, not acted on:* a rule carries no denial wording, so the
+message a person sees comes from the policy engine — for an unlinked account
+that is "this account is not linked to any other". On a **registration** form
+that reads oddly, since somebody registering for the first time has nothing to
+link yet. Whether registration should be gateable on being linked is a design
+question for the owner, not one to settle by editing a string.

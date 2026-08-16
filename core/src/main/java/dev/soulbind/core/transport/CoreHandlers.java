@@ -155,7 +155,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.AUDIT_PUSH, (connector, payload) -> {
             var request = codec.bind(payload, AuditPushRequest.class);
-            if (request.isEmpty() || request.get().action() == null
+            if (request.isEmpty()) {
+                return unreadable(Operation.AUDIT_PUSH, AuditPushRequest.class);
+            }
+            if (request.get().action() == null
                     || request.get().action().isBlank()) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST, "an audit entry must name an action");
@@ -208,7 +211,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.CODE_ISSUE, (connector, payload) -> {
             var request = codec.bind(payload, CodeIssueRequest.class);
-            if (request.isEmpty() || blank(request.get().platformKind())
+            if (request.isEmpty()) {
+                return unreadable(Operation.CODE_ISSUE, CodeIssueRequest.class);
+            }
+            if (blank(request.get().platformKind())
                     || blank(request.get().platformId())) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST,
@@ -226,7 +232,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.CODE_REDEEM, (connector, payload) -> {
             var request = codec.bind(payload, CodeRedeemRequest.class);
-            if (request.isEmpty() || blank(request.get().platformKind())
+            if (request.isEmpty()) {
+                return unreadable(Operation.CODE_REDEEM, CodeRedeemRequest.class);
+            }
+            if (blank(request.get().platformKind())
                     || blank(request.get().platformId())) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST,
@@ -259,7 +268,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.ATTEST, (connector, payload) -> {
             var request = codec.bind(payload, AttestRequest.class);
-            if (request.isEmpty() || blank(request.get().platformKind())
+            if (request.isEmpty()) {
+                return unreadable(Operation.ATTEST, AttestRequest.class);
+            }
+            if (blank(request.get().platformKind())
                     || blank(request.get().platformId())) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST, "attest names a platform account");
@@ -283,7 +295,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.IDENTITY_UNLINK, (connector, payload) -> {
             var request = codec.bind(payload, UnlinkRequest.class);
-            if (request.isEmpty() || blank(request.get().platformKind())
+            if (request.isEmpty()) {
+                return unreadable(Operation.IDENTITY_UNLINK, UnlinkRequest.class);
+            }
+            if (blank(request.get().platformKind())
                     || blank(request.get().platformId())) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST, "unlink names a platform account");
@@ -295,7 +310,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.SUBJECT_INSPECT, (connector, payload) -> {
             var request = codec.bind(payload, SubjectInspectRequest.class);
-            if (request.isEmpty() || blank(request.get().platformKind())
+            if (request.isEmpty()) {
+                return unreadable(Operation.SUBJECT_INSPECT, SubjectInspectRequest.class);
+            }
+            if (blank(request.get().platformKind())
                     || blank(request.get().platformId())) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST, "inspect names a platform account");
@@ -316,7 +334,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.DECIDE, (connector, payload) -> {
             var request = codec.bind(payload, DecideRequest.class);
-            if (request.isEmpty() || blank(request.get().gate())
+            if (request.isEmpty()) {
+                return unreadable(Operation.DECIDE, DecideRequest.class);
+            }
+            if (blank(request.get().gate())
                     || blank(request.get().platformKind())
                     || blank(request.get().platformId())) {
                 return WireResponse.error(
@@ -402,7 +423,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.RULE_GET, (connector, payload) -> {
             var request = codec.bind(payload, GateRequest.class);
-            if (request.isEmpty() || blank(request.get().gate())) {
+            if (request.isEmpty()) {
+                return unreadable(Operation.RULE_GET, GateRequest.class);
+            }
+            if (blank(request.get().gate())) {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, "rule.get names a gate");
             }
             return policy.rule(request.get().gate())
@@ -417,7 +441,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.RULE_SET, (connector, payload) -> {
             var request = codec.bind(payload, RuleView.class);
-            if (request.isEmpty() || blank(request.get().gate())) {
+            if (request.isEmpty()) {
+                return unreadable(Operation.RULE_SET, RuleView.class);
+            }
+            if (blank(request.get().gate())) {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, "rule.set names a gate");
             }
             RuleView view = request.get();
@@ -465,7 +492,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.OVERRIDE_GET, (connector, payload) -> {
             var request = codec.bind(payload, GateRequest.class);
-            if (request.isEmpty() || blank(request.get().gate())) {
+            if (request.isEmpty()) {
+                return unreadable(Operation.OVERRIDE_GET, GateRequest.class);
+            }
+            if (blank(request.get().gate())) {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, "override.get names a gate");
             }
             return WireResponse.ok(Map.of(
@@ -476,7 +506,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.OVERRIDE_SET, (connector, payload) -> {
             var request = codec.bind(payload, OverrideView.class);
-            if (request.isEmpty() || blank(request.get().gate())) {
+            if (request.isEmpty()) {
+                return unreadable(Operation.OVERRIDE_SET, OverrideView.class);
+            }
+            if (blank(request.get().gate())) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST, "override.set names a gate");
             }
@@ -517,7 +550,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.CONFIG_SET, (connector, payload) -> {
             var request = codec.bind(payload, ConfigSetRequest.class);
-            if (request.isEmpty() || blank(request.get().key())) {
+            if (request.isEmpty()) {
+                return unreadable(Operation.CONFIG_SET, ConfigSetRequest.class);
+            }
+            if (blank(request.get().key())) {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, "config.set names a key");
             }
             runtimeConfig.set(
@@ -541,7 +577,10 @@ public final class CoreHandlers {
 
         handlers.put(Operation.IDENTITY_DESCRIBE, (connector, payload) -> {
             var request = codec.bind(payload, SubjectInspectRequest.class);
-            if (request.isEmpty() || blank(request.get().platformKind())
+            if (request.isEmpty()) {
+                return unreadable(Operation.IDENTITY_DESCRIBE, SubjectInspectRequest.class);
+            }
+            if (blank(request.get().platformKind())
                     || blank(request.get().platformId())) {
                 return WireResponse.error(
                         ErrorCode.INVALID_REQUEST, "describe names a platform account");
@@ -634,6 +673,33 @@ public final class CoreHandlers {
     private record GateRequest(String gate) {}
 
     private record ConfigSetRequest(String key, String value) {}
+
+    /**
+     * The payload could not be read as the shape this operation expects.
+     *
+     * <p>Distinct from a field being blank, and the distinction is not
+     * pedantry. Every handler here used to answer {@code "<op> names a gate"}
+     * for <b>both</b> — an unparseable payload and a genuinely missing gate —
+     * because {@code request.isEmpty()} and {@code blank(field)} shared one
+     * branch.
+     *
+     * <p>So a caller who sent a field this build does not know was told the
+     * gate was missing, while the gate sat there in the request. That happened:
+     * a harness added a {@code detail} field to {@code rule.set}, the bind
+     * failed, and the reply said {@code rule.set names a gate}. It sends
+     * somebody to check the one thing that is definitely correct.
+     *
+     * <p>Names the shape rather than the offending field, because the codec
+     * reports failure without saying which key was at fault — claiming to know
+     * would be a second wrong answer dressed as a better one.
+     */
+    private static WireResponse unreadable(Operation operation, Class<?> shape) {
+        return WireResponse.error(
+                ErrorCode.INVALID_REQUEST,
+                operation.wireName() + " could not read the payload as " + shape.getSimpleName()
+                        + ". A field this build does not recognise is refused rather than "
+                        + "ignored, so a typo cannot be mistaken for a deliberate omission.");
+    }
 
     private static boolean blank(String s) {
         return s == null || s.isBlank();
