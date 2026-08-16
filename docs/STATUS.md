@@ -18,7 +18,7 @@ Last updated: 2026-08-15, Phase 4 in progress.
 | 4 | Events and effectors | **Complete** — gate passed: a connector down for 100 mutations receives all 100, in order, applied once by the effector's own reckoning |
 | 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
 | 6 | connector-discord | **In progress** — seam, scripted surface, connector, role effector and the client-library implementation landed; scripted-surface link flow green in the stack. The manual smoke against a real server is outstanding and is named as evidence, not a tier |
-| 7 | connector-flarum | **In progress** — connector complete and the browser tier green against a real forum: gates refuse, admit, hold under an outage and recover, with the database confirming a refused registration created nothing. The settings UI, the code-entry link flow and the cross-engine run are outstanding, so the gate is **not** met |
+| 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | Not started |
 | 9 | Simulated users | Not started |
 | 10 | Hardening and release | Not started |
@@ -179,50 +179,50 @@ permission, put the token in `SOULBIND_PLATFORM_TOKEN`, point
 `soulbind-discord.toml` at a core, and run `/link` and `/whoami`. Record what
 happened here.
 
-## Phase 7 so far
+## Phase 7 — the gate, met
 
-The browser tier is **green**, and the stack it runs against is real: MariaDB,
-core in the toolchain image, Flarum 1.8.19 installed from its skeleton with this
-extension staged as a release would ship it, and Chromium driving the forum.
+`reaper test` green, with the browser tier run twice: once with core on SQLite,
+once on MariaDB.
+
+| Gate item | Evidence |
+|---|---|
+| Vectors green in both languages | 61 checks, two entry points, both charsets; PHPUnit `OK (61 tests, 61 assertions)` twice in its pinned container |
+| T5 injection suite green **cross-engine** | 10 browser passes — five specs against each backend, including a pass with core genuinely stopped |
+| A forum account **links via code entry** against a real core | A code minted for a game identity, typed into the settings panel in a browser, and **core** asked afterwards: *the link is real, and core agrees* — on both engines |
 
 ```
 ✓ @refused   an unlinked account is refused, in core's own words
 ✓ @admitted  the account is admitted once the rule allows it
 ✓ @outage    a dead core denies, and blames the system rather than the person
 ✓ @recovery  the next attempt simply works, with no intervention
+✓ @link      a member links this account by entering a code from another platform
 
-accounts created by the allowing passes: 2
-accounts created by the refusing passes: 0
+accounts created by the allowing passes: 2 · by the refusing passes: 0
+core reports the game identity is linked to 2 identities
 ```
 
-That last pair is the assertion the browser could not make: a refused
+The refusing-passes count is the assertion no browser could make: a refused
 registration created **nothing**. A gate that shows a refusal and lets the row
-through would look like it was working.
+through looks like it is working.
 
-`@outage` runs with core genuinely stopped, and asserts the person is told the
-system is at fault rather than that they are not allowed — the sentence this
-connector has carried deliberately through the cache, the client, the gate, the
-exception handler, two error types and a frontend bundle.
-
-### The gate, item by item
-
-| Gate item | State |
-|---|---|
-| Vectors green in both languages | **Met.** 54 checks, two entry points, both charsets, and PHPUnit running in a pinned container |
-| T5 injection suite green **cross-engine** | **Partly.** The suite is green; it runs against core on SQLite only. "Cross-engine" is not yet honoured |
-| A forum account **links via code entry** against a real core | **Not met.** The link flow is not built |
-
-### What is left
+### Deliverables
 
 | Deliverable | State |
 |---|---|
-| Settings UI — link status, code entry and display in user settings | **Not built.** Only the admin settings page exists |
-| T5 cross-engine | The forum tier needs a second run with core on MariaDB |
-| T3 message-key guard extended to the extension | Not done for PHP |
+| Extension per §10.4, Flarum pinned | 1.8.19; 2.x is only an RC (DECISIONS 7.1) |
+| PHP protocol re-implementation | Held to the game side by the golden vectors |
+| PHP vector consumer, hostile charset | Both entry points, both charsets |
+| Webhook receiver | Signature, clock, replay; 12 mutations caught |
+| Settings UI | Admin page and the member link panel |
+| Register and post gates | With no forum in the deciding half |
+| T3 message-key guard | Extended to the extension |
 
-Phase 7 is **not complete**, and the browser tier being green does not make it
-so. What is proven is that the gates work end to end against a real forum; what
-is missing is the half of the extension a member actually uses.
+### What only a running forum found
+
+Three defects in the connector that every static check passed over: the
+extension id Flarum computes, a cache interface Flarum does not bind, and a
+refusal that could not carry its reason. One in core: thirteen handlers
+reporting an unparseable payload as a named field missing.
 
 ## The defect Phase 7 found in shipped code, on both sides
 
