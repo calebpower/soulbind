@@ -779,8 +779,29 @@ browser() {
         "$FLARUM_BROWSER_IMAGE" "$@"
 }
 
-log "installing the browser suite's dependencies"
-browser npm ci --no-audit --no-fund
+# Installed from a COMMITTED lock, or a lock is emitted for review.
+#
+# Same discipline as the PHP tree and the image digests: a browser tier whose
+# dependencies resolve fresh on every run is a tier whose green result is about
+# whatever npm felt like that day. `npm ci` is the install that honours a lock
+# and refuses without one -- which is how this surfaced.
+#
+# npm is broken on the workstation (MODULE_NOT_FOUND inside npm's own tree, for
+# any package), so the lock is generated HERE, in the image that will use it,
+# and copied out to be committed.
+BROWSER_LOCK="$REPO/harness/flarum/browser/package-lock.json"
+
+if [ -f "$BROWSER_LOCK" ]; then
+    log "installing the browser suite from its committed lock"
+    browser npm ci --no-audit --no-fund
+else
+    log "NO committed browser lock; generating one and emitting it to out/"
+    browser npm install --package-lock-only --no-audit --no-fund
+    mkdir -p "$REPO/out"
+    cp "$BROWSER_LOCK" "$REPO/out/browser-package-lock.json"
+    log "browser lock written to out/browser-package-lock.json -- review and commit it"
+    browser npm ci --no-audit --no-fund
+fi
 
 log "pass 1 of 4: an unlinked account is refused, in core's own words"
 core_cli rule set --gate forum-register --require-kinds game \
