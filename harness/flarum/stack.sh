@@ -286,6 +286,30 @@ else
     log "NO committed site lock; this run resolves fresh and emits one to out/"
 fi
 
+# Resolve for the PHP the SITE runs on, not the PHP composer runs on.
+#
+# The composer image carries its own PHP -- 8.4 -- and without being told
+# otherwise it resolves a dependency tree for that. The site then starts on the
+# pinned 8.3 image and dies before Flarum's first line:
+#
+#   Your Composer dependencies require a PHP version ">= 8.4.1".
+#   You are running 8.3.33.
+#
+# `--ignore-platform-reqs` would silence it and ship a site whose dependencies
+# genuinely do not support its runtime -- a crash moved from install time to
+# whenever the first incompatible line executes.
+#
+# The version is READ from the image rather than written here, so re-pinning the
+# php image cannot leave a stale number behind. The resolver and the runtime
+# agree by construction.
+SITE_PHP=$(podman run --rm "$FLARUM_PHP_IMAGE" php -r 'echo PHP_VERSION;')
+case "$SITE_PHP" in
+    [0-9]*.[0-9]*.[0-9]*) : ;;
+    *) log "could not read a PHP version from the forum image, got '$SITE_PHP'"; exit 1 ;;
+esac
+log "resolving for the site's PHP $SITE_PHP"
+composer_in_site config platform.php "$SITE_PHP"
+
 # The extension arrives as a path repository. `*@dev` is scoped to THIS package
 # only -- it is a working tree with no version tag, so composer reads it as
 # dev-main. Relaxing minimum-stability globally would let a dev release of
