@@ -2118,3 +2118,62 @@ Mutation-checked in both directions: it fires on a real `!==` signature
 comparison, and the presence checks it must tolerate do not trip it. The first
 version *did* trip on them, which is how the exemption came to be written
 narrowly instead of as a blanket skip.
+
+### 7.14 — An unconfigured connector is inert, not closed
+
+Fail-closed is about an **outage**: core is configured and unreachable, somebody
+chose to gate this, and the gate should hold while the answer is unavailable.
+
+Core having never been configured is not an outage. It is the absence of a gate.
+A freshly installed extension that locked everybody out of a working forum,
+before its owner had entered a URL, would be uninstalled within the minute and
+would deserve it. The half-configured case — a gate name set, no credential yet —
+resolves the same way: an admin panel that bricks the forum between two form
+fields is not a safety feature.
+
+So the two defaults pull in opposite directions on purpose. Gates are **off**
+until switched on; the fail mode is **closed** once one is. What must never
+happen is a connector that is half-configured and silently *open*, so
+`isConfigured()` is one explicit test rather than a scattering of empty checks at
+each call site — two call sites disagreeing about what an unset value means is,
+here, a gate.
+
+`AccessGate` knows nothing about the host platform: no request, no user model, no
+exception type. The listeners that call it are a few lines each and do the
+translating. The part with the rules in it is therefore testable without standing
+up a forum, and the rules are what must not be wrong.
+
+The platform kind is fixed at construction rather than passed per call — it
+identifies which platform this connector speaks for, and a caller able to change
+it could ask about somebody else's account on another platform.
+
+A denial carries **core's own wording** when core gave any, because core knows
+what is missing and this connector does not. Only when core gives none does this
+side supply text, and never a bare "denied": a refusal nobody can act on is a
+support ticket.
+
+### 7.15 — An unreadable timeout falls back to the default, not to the floor
+
+Found by mutation, and the survivor is more interesting than the fix.
+
+Removing the strict integer parse left every assertion passing, because the clamp
+that follows it caught the damage: `'2.5'` cast to `2` and clamped to `100`, which
+is inside the permitted range. The check only asserted the result was in range, so
+it saw nothing wrong.
+
+But 100ms is short enough that every `decide` call times out. A typo in an admin
+field would have become a permanent outage, and — by the rule directly above — a
+permanently closed gate. The setting most likely to be fat-fingered was the one
+that could silently shut the forum.
+
+Unreadable values now reach the **default**. Readable but out-of-range values are
+still clamped, and the distinction is the point: an operator who typed `99999`
+expressed an intent that the nearest permitted value honours, while one who typed
+`soon` expressed nothing to honour.
+
+An explicit `0` falls back too. It means "no timeout" to most HTTP clients, which
+is the hang the bound exists to prevent; clamping it to 100ms is not what the
+operator meant either. Neither reading is safe, so neither is guessed.
+
+The assertion now pins the exact value rather than a range — thirteen mutations,
+all caught, where twelve were before.

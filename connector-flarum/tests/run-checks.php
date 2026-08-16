@@ -48,6 +48,7 @@ require __DIR__ . '/autoload.php';
 
 use Soulbind\Flarum\Tests\CacheChecks;
 use Soulbind\Flarum\Tests\ClientChecks;
+use Soulbind\Flarum\Tests\GateChecks;
 use Soulbind\Flarum\Tests\WebhookChecks;
 use Soulbind\Flarum\Tests\VectorChecks;
 
@@ -65,6 +66,7 @@ $suites = [
     'decision cache and fail mode' => [CacheChecks::class, __DIR__ . '/DecisionCacheTest.php'],
     'client: signing, outages and refusals' => [ClientChecks::class, __DIR__ . '/SoulbindClientTest.php'],
     'inbound webhook' => [WebhookChecks::class, __DIR__ . '/WebhookTest.php'],
+    'register and post gates' => [GateChecks::class, __DIR__ . '/GateTest.php'],
 ];
 
 echo 'soulbind checks (', $hostile ? 'HOSTILE charset' : 'ordinary', ")\n";
