@@ -429,23 +429,63 @@ log "core credential for the forum is in $RUN/forum.credential"
 # rather than a second that can drift from it.
 log "enabling and configuring the extension"
 
+# SQL arrives on STDIN, not through -e.
+#
+# The -e form put a multi-line statement containing backticks, JSON and a
+# credential through two levels of shell quoting, and when it silently changed
+# nothing there was no way to tell whether the statement was wrong, the quoting
+# was wrong, or the write had happened and been overwritten. A heredoc has one
+# level of quoting and the client reports its own errors.
 sql() {
-    podman exec -i "$DB_C" mariadb -h 127.0.0.1 -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "$1"
+    podman exec -i "$DB_C" mariadb --batch --skip-column-names \
+        -h 127.0.0.1 -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" 2>/dev/null
 }
 
 EXT_ID=soulbind-flarum-connector
+FORUM_CRED_VALUE=$(cat "$RUN/forum.credential")
 
-sql "REPLACE INTO settings (\`key\`, \`value\`) VALUES
-      ('extensions_enabled', '[\"${EXT_ID}\"]'),
-      ('soulbind.core_url',       'http://${CORE_C}:${CORE_PORT}/'),
-      ('soulbind.credential',     '$(cat "$RUN/forum.credential")'),
-      ('soulbind.webhook_secret', '$(cat "$RUN/forum.credential")'),
-      ('soulbind.fail_mode',      'closed'),
-      ('soulbind.register_gate',  'forum-register'),
-      ('soulbind.post_gate',      'forum-post'),
-      ('soulbind.timeout_ms',     '2000');"
+sql <<SQL
+REPLACE INTO settings (\`key\`, \`value\`) VALUES
+  ('extensions_enabled', '["${EXT_ID}"]'),
+  ('soulbind.core_url', 'http://${CORE_C}:${CORE_PORT}/'),
+  ('soulbind.credential', '${FORUM_CRED_VALUE}'),
+  ('soulbind.webhook_secret', '${FORUM_CRED_VALUE}'),
+  ('soulbind.fail_mode', 'closed'),
+  ('soulbind.register_gate', 'forum-register'),
+  ('soulbind.post_gate', 'forum-post'),
+  ('soulbind.timeout_ms', '2000');
+SQL
 
-podman exec "$WEB_C" php flarum cache:clear >/dev/null 2>&1 || true
+# Read it back IMMEDIATELY, and print what is actually there.
+#
+# The previous version wrote, then checked much later, and reported only
+# "the extension is NOT enabled: []" -- which does not distinguish a write that
+# failed from a write that was undone in between. Checking here narrows it to
+# one statement.
+ENABLED=$(sql <<'SQL'
+SELECT `value` FROM settings WHERE `key` = 'extensions_enabled';
+SQL
+)
+case "$ENABLED" in
+    *"$EXT_ID"*)
+        log "extensions_enabled is now: $ENABLED" ;;
+    *)
+        log "the write did not take. extensions_enabled is: '$ENABLED'"
+        log "--- every soulbind setting row, as stored ---"
+        sql <<'SQL'
+SELECT `key`, `value` FROM settings WHERE `key` LIKE 'soulbind%' OR `key` = 'extensions_enabled';
+SQL
+        exit 1 ;;
+esac
+
+# Flarum caches settings and the extension list. Without clearing, the running
+# server keeps serving the state it read at boot, and every gate assertion would
+# be about a forum that has not noticed the extension exists.
+#
+# NOT `|| true`. If the cache cannot be cleared, the tests that follow are
+# meaningless, and hiding that is how a green run gets reported for a stack that
+# never picked up its own configuration.
+podman exec "$WEB_C" php flarum cache:clear
 
 # --- the smoke --------------------------------------------------------------
 #
@@ -480,16 +520,16 @@ smoke_failed() {
 grep -q "soulbind harness" "$SMOKE_BODY" \
     || smoke_failed "the response did not contain the forum title"
 
-grep -qi "fatal error\|stack trace" "$SMOKE_BODY" \
-    && smoke_failed "the page rendered a PHP error"
+# `if`, not `grep ... && smoke_failed`. Under set -e the GOOD case -- grep
+# finding nothing and returning 1 -- makes that compound return 1, and the
+# script aborts on the path where everything is fine. A guard that fails when
+# it passes is worse than no guard: it would have been "fixed" by deleting it.
+if grep -qi "fatal error\|stack trace" "$SMOKE_BODY"; then
+    smoke_failed "the page rendered a PHP error"
+fi
 
 log "the forum renders with the extension enabled"
 
-ENABLED=$(sql "SELECT value FROM settings WHERE \`key\`='extensions_enabled';" | tail -1)
-case "$ENABLED" in
-    *"$EXT_ID"*) log "extension enabled" ;;
-    *) log "the extension is NOT enabled: $ENABLED"; exit 1 ;;
-esac
 
 # The webhook endpoint must exist and must REFUSE an unsigned request. If it
 # 404s, the extension's routes did not load and every gate assertion after this
