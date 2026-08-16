@@ -16,6 +16,8 @@
 
 import { extend } from 'flarum/common/extend';
 import Application from 'flarum/common/Application';
+import SettingsPage from 'flarum/forum/components/SettingsPage';
+import LinkSettingsPanel from './LinkSettingsPanel';
 
 /*
  * Show the reason a gate gave, instead of a message chosen by status code.
@@ -46,6 +48,19 @@ import Application from 'flarum/common/Application';
 const SOULBIND_ERROR_CODES = ['soulbind_gate_refused', 'soulbind_unavailable'];
 
 app.initializers.add('soulbind/flarum-connector', () => {
+  // The panel a member uses: link status, a code to type elsewhere, and a box
+  // for a code they were given. This is the half of the extension somebody
+  // actually touches, and until now the extension had none of it.
+  extend(SettingsPage.prototype, 'settingsItems', function (items) {
+    items.add(
+      'soulbind',
+      m(LinkSettingsPanel),
+      // Above the account section, because linking is the thing this forum
+      // gates on -- a member sent here by a refusal should not have to hunt.
+      100
+    );
+  });
+
   extend(Application.prototype, 'requestErrorCatch', function (_returned, error) {
     // `extend` runs AFTER the original, so error.alert is already built and
     // this replaces its content rather than racing to produce it.

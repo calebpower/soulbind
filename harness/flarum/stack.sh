@@ -874,6 +874,7 @@ podman exec "$WEB_C" php -r '
             Soulbind\Flarum\Client\SoulbindClient::class,
             Soulbind\Flarum\Gate\AccessGate::class,
             Soulbind\Flarum\Webhook\WebhookVerifier::class,
+            Soulbind\Flarum\Link\LinkService::class,
         ] as $class) {
             $c->make($class);
             echo "resolved ", $class, "\n";
@@ -1044,6 +1045,7 @@ browser() {
         -v "$REPO/harness/flarum/browser":/suite -w /suite \
         -e FORUM_URL="$FORUM_URL" \
         -e RUN_TAG="${RUN_TAG:-r}" \
+        -e LINK_CODE="${LINK_CODE:-}" \
         -e CI=1 \
         -e PLAYWRIGHT_JSON_OUTPUT_NAME="/suite/results.json" \
         "$FLARUM_BROWSER_IMAGE" "$@"
@@ -1073,27 +1075,59 @@ else
     browser npm ci --no-audit --no-fund
 fi
 
-log "pass 1 of 4: an unlinked account is refused, in core's own words"
+log "pass 1 of 5: an unlinked account is refused, in core's own words"
 set_rule true deny
 browser npx playwright test --grep "@refused"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-1.json" 2>/dev/null || true
 
-log "pass 2 of 4: the rule allows, and the account is admitted"
+log "pass 2 of 5: the rule allows, and the account is admitted"
 set_rule false allow
 browser npx playwright test --grep "@admitted"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-2.json" 2>/dev/null || true
 
-log "pass 3 of 4: core is stopped, and the gate must hold"
+log "pass 3 of 5: core is stopped, and the gate must hold"
 set_rule true deny
 stop_core
 browser npx playwright test --grep "@outage"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-3.json" 2>/dev/null || true
 
-log "pass 4 of 4: core returns, and nothing needs cleaning up after it"
+log "pass 4 of 5: core returns, and nothing needs cleaning up after it"
 start_core
 set_rule false allow
 browser npx playwright test --grep "@recovery"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-4.json" 2>/dev/null || true
+
+log "pass 5 of 5: a member links this forum account by entering a code"
+
+# The code is minted for a GAME identity, by the harness credential, against the
+# real core. That makes the redemption a genuine cross-platform link rather than
+# a forum handing itself a code it issued a moment earlier.
+LINK_CODE=$("$REPO/harness/rpc.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
+    code.issue '{"platformKind":"game","platformId":"harness-player-1","display":"Harness Player"}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("code",""))')
+
+if [ -z "$LINK_CODE" ]; then
+    log "core did not mint a link code; the link pass would prove nothing"
+    exit 1
+fi
+log "  minted a code for game:harness-player-1"
+
+LINK_CODE="$LINK_CODE" browser npx playwright test --grep "@link"
+cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-5.json" 2>/dev/null || true
+
+# Core is the authority on whether the link happened. The panel says so, and the
+# panel is the thing under test -- so this asks core directly.
+LINKED=$("$REPO/harness/rpc.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
+    identity.describe '{"platformKind":"game","platformId":"harness-player-1"}' \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("identities",[])))')
+
+log "  core reports the game identity is linked to $LINKED identities"
+if [ "${LINKED:-0}" -lt 2 ]; then
+    log "core does not show the forum account linked to the game account."
+    log "The panel may have said it worked; core is the authority and it did not."
+    exit 1
+fi
+log "the link is real, and core agrees"
 
 # --- did the allowed registrations actually create accounts? ----------------
 #

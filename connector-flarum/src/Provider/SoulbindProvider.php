@@ -27,6 +27,7 @@ use Soulbind\Flarum\Client\CurlTransport;
 use Soulbind\Flarum\Client\DecisionCache;
 use Soulbind\Flarum\Client\SoulbindClient;
 use Soulbind\Flarum\Gate\AccessGate;
+use Soulbind\Flarum\Link\LinkService;
 use Soulbind\Flarum\Settings\ConnectorSettings;
 use Soulbind\Flarum\Settings\HostSettings;
 use Soulbind\Flarum\Store\FlarumCacheDecisionStore;
@@ -77,6 +78,13 @@ final class SoulbindProvider extends AbstractServiceProvider
             return new AccessGate(
                 $container->make(SoulbindClient::class),
                 $container->make(ConnectorSettings::class),
+                self::PLATFORM_KIND
+            );
+        });
+
+        $this->container->singleton(LinkService::class, static function ($container) {
+            return new LinkService(
+                $container->make(SoulbindClient::class),
                 self::PLATFORM_KIND
             );
         });

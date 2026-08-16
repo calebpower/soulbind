@@ -31,6 +31,19 @@ soulbind-flarum:
         How long to wait for core before falling back. Kept short because this
         runs while somebody is waiting for a page. Values outside 100-10000 are
         clamped; anything unreadable falls back to 2000.
+  forum:
+    link:
+      title: Linked accounts
+      linked: >-
+        This account is linked to {count} other.
+      not_linked: >-
+        This account is not linked to anything yet.
+      get_code: Get a link code
+      code_placeholder: Paste a code from the other platform
+      redeem: Link
+      unavailable: >-
+        We cannot check your linked accounts right now. This is a problem on our
+        side, not yours -- please try again shortly.
 # Flarum looks up core.lib.error.<type> to decide what a person is shown, so
 # these live under core rather than under this extension's own namespace.
 core:

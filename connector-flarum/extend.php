@@ -21,6 +21,7 @@ declare(strict_types=1);
 use Flarum\Extend;
 use Flarum\Post\Event\Saving as PostSaving;
 use Flarum\User\Event\Saving as UserSaving;
+use Soulbind\Flarum\Controller\LinkController;
 use Soulbind\Flarum\Controller\WebhookController;
 use Soulbind\Flarum\Listener\GatePosting;
 use Soulbind\Flarum\Listener\GateRefused;
@@ -54,7 +55,18 @@ return [
      * class is the most heavily checked file in the extension.
      */
     (new Extend\Routes('forum'))
-        ->post('/soulbind/webhook', 'soulbind.webhook', WebhookController::class),
+        ->post('/soulbind/webhook', 'soulbind.webhook', WebhookController::class)
+
+        /*
+         * The member's own link status, code and redemption -- one endpoint,
+         * because it is one panel and three routes would be three places to
+         * forget the actor check.
+         *
+         * POST even for reading. It is not idempotent in the way a GET promises:
+         * asking core to issue a code mints one, and a cache or a prefetch
+         * repeating a GET would hand out codes nobody asked for.
+         */
+        ->post('/soulbind/link', 'soulbind.link', LinkController::class),
 
     /*
      * The refusal has to REACH the person.

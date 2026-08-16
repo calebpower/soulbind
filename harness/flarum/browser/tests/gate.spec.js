@@ -184,3 +184,52 @@ test('@recovery the next attempt simply works, with no intervention', async ({ p
   await expect(dialog).not.toContainText(/not linked|needs a linked account/i);
   await expectNoServerError(page);
 });
+
+/*
+ * The gate item nothing else covers: a forum account LINKS, by typing a code
+ * issued on another platform into the settings panel.
+ *
+ * Everything above proves the gates decide correctly. None of it touches the
+ * half of the extension a member actually uses, and a connector that gates
+ * perfectly and cannot link is a connector that only ever says no.
+ *
+ * The code is minted by the orchestrator for a GAME identity, so this is a real
+ * cross-platform link and not a forum talking to itself.
+ */
+test('@link a member links this account by entering a code from another platform',
+  async ({ page }) => {
+    const code = process.env.LINK_CODE;
+    if (!code) {
+      throw new Error(
+        'LINK_CODE was not set. The orchestrator mints it against a real core; ' +
+          'without it this test would silently prove nothing.'
+      );
+    }
+
+    // The admin account, because it is the one this install confirmed. A member
+    // registered by an earlier pass cannot log in until they confirm an email
+    // nobody will read.
+    await page.goto('/');
+    await page.getByRole('button', { name: /log in/i }).click();
+    const login = page.locator('.Modal');
+    await fillStable(login, 'identification', 'admin');
+    await fillStable(login, 'password', 'harness-admin-password');
+    await login.getByRole('button', { name: /log in/i }).click();
+
+    await page.goto('/settings');
+    const panel = page.locator('.SoulbindPanel');
+    await expect(panel).toBeVisible({ timeout: 30_000 });
+
+    // Not linked yet, and the panel must say so rather than showing the
+    // unavailable state -- which would mean it never reached core.
+    await expect(panel).toContainText(/not linked to anything yet/i);
+    await expect(panel).not.toContainText(/problem on our side/i);
+
+    await fillStable(panel, 'soulbind-code', code);
+    await panel.getByRole('button', { name: /^link$/i }).click();
+
+    // The panel re-reads its status from core after a successful redemption,
+    // so this is core answering rather than the page congratulating itself.
+    await expect(panel).toContainText(/linked to 1 other/i, { timeout: 30_000 });
+    await expectNoServerError(page);
+  });
