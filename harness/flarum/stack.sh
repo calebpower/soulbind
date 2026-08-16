@@ -134,6 +134,19 @@ mkdir -p "$RUN/core" "$RUN/forum"
 
 podman network create "$NET" >/dev/null
 
+# --- the forum's PHP image --------------------------------------------------
+#
+# Built from the pinned base, with the extensions Flarum needs. Once, here,
+# rather than on every container start: the first version installed pdo_mysql
+# inline with `|| true` after it, so a failed install looked exactly like a
+# successful one.
+FORUM_IMAGE=soulbind-forum-php:harness
+
+log "building the forum php image"
+podman build --quiet \
+    --build-arg "BASE=$FLARUM_PHP_IMAGE" \
+    -f "$HERE/Containerfile" -t "$FORUM_IMAGE" "$HERE" >/dev/null
+
 # --- the database -----------------------------------------------------------
 log "starting mariadb"
 podman run -d --name "$DB_C" --network "$NET" \
@@ -302,7 +315,7 @@ fi
 # The version is READ from the image rather than written here, so re-pinning the
 # php image cannot leave a stale number behind. The resolver and the runtime
 # agree by construction.
-SITE_PHP=$(podman run --rm "$FLARUM_PHP_IMAGE" php -r 'echo PHP_VERSION;')
+SITE_PHP=$(podman run --rm "$FORUM_IMAGE" php -r 'echo PHP_VERSION;')
 case "$SITE_PHP" in
     [0-9]*.[0-9]*.[0-9]*) : ;;
     *) log "could not read a PHP version from the forum image, got '$SITE_PHP'"; exit 1 ;;
@@ -352,11 +365,7 @@ YML
 
 podman run --rm --network "$NET" \
     -v "$SITE":/site -w /site \
-    "$FLARUM_PHP_IMAGE" sh -c '
-      set -e
-      docker-php-ext-install pdo_mysql > /dev/null 2>&1 || true
-      php flarum install --file=install.yml
-    '
+    "$FORUM_IMAGE" php flarum install --file=install.yml
 
 log "starting the forum"
 # php -S, not a real web server. This is a harness: a browser tier needs a URL
@@ -377,10 +386,7 @@ PHPR
 podman run -d --name "$WEB_C" --network "$NET" \
     -p "${FORUM_PORT}:${FORUM_PORT}" \
     -v "$SITE":/site -w /site \
-    "$FLARUM_PHP_IMAGE" sh -c "
-      docker-php-ext-install pdo_mysql > /dev/null 2>&1 || true
-      php -S 0.0.0.0:${FORUM_PORT} router.php
-    " >/dev/null
+    "$FORUM_IMAGE" php -S "0.0.0.0:${FORUM_PORT}" router.php >/dev/null
 
 wait_for_url "the forum" "$FORUM_URL/" 120
 

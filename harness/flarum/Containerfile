@@ -1,0 +1,37 @@
+# The forum's PHP, with the extensions Flarum actually needs.
+#
+# Built once per session rather than installed on every container start. The
+# first version ran `docker-php-ext-install pdo_mysql` inline, in two places,
+# with `|| true` after it -- so a failed install was indistinguishable from a
+# successful one, and the missing extension surfaced later as a Flarum error
+# about something else. Here it is a build step: it fails at build time, loudly,
+# naming the extension.
+#
+# The base is pinned by digest in pins.env and substituted at build time, so
+# this file cannot drift from the pin.
+ARG BASE
+FROM ${BASE}
+
+# gd needs its image libraries present before it can be configured, and zip
+# needs libzip. Flarum's installer refuses to continue without gd -- it is what
+# resizes avatars -- and that refusal is what sent this build here.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        libpng-dev libjpeg62-turbo-dev libfreetype6-dev libzip-dev; \
+    docker-php-ext-configure gd --with-freetype --with-jpeg; \
+    docker-php-ext-install -j"$(nproc)" gd zip pdo_mysql exif; \
+    rm -rf /var/lib/apt/lists/*
+
+# Assert what was just installed is actually loadable. `docker-php-ext-install`
+# exiting 0 is not the same claim as the extension being present at runtime, and
+# the difference is a forum that installs and then fails on its first upload.
+RUN set -eux; \
+    for ext in gd zip pdo_mysql exif mbstring dom; do \
+        php -m | grep -qix "$ext" || { echo "extension $ext is not loaded" >&2; exit 1; }; \
+    done
+
+# Flarum writes to storage/ and public/assets/. php -S runs as root here, which
+# is fine for a harness and would not be for a deployment -- stated so nobody
+# copies this file into one.
+WORKDIR /site
