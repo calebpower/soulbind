@@ -58,7 +58,7 @@ public final class PolicyEngine {
     }
 
     public static Decision decide(
-            SubjectSnapshot snapshot, Rule rule, List<Override> overrides, Instant now) {
+            SubjectSnapshot snapshot, Rule rule, List<PolicyOverride> overrides, Instant now) {
         return decide(snapshot, rule, overrides, now, DEFAULT_TTL_SECONDS);
     }
 
@@ -73,13 +73,13 @@ public final class PolicyEngine {
     public static Decision decide(
             SubjectSnapshot snapshot,
             Rule rule,
-            List<Override> overrides,
+            List<PolicyOverride> overrides,
             Instant now,
             int ttlSeconds) {
 
-        Optional<Override> applicable = strongestOverride(snapshot, overrides, now);
+        Optional<PolicyOverride> applicable = strongestOverride(snapshot, overrides, now);
         if (applicable.isPresent()) {
-            Override o = applicable.get();
+            PolicyOverride o = applicable.get();
             return new Decision(
                     o.effect(), Decision.Reason.OVERRIDE, o.reason(), ttlSeconds, List.of());
         }
@@ -149,14 +149,14 @@ public final class PolicyEngine {
      * an operator admitted somebody by identity before they linked, and later
      * banned the subject. The ban wins, which is the only safe reading.
      */
-    private static Optional<Override> strongestOverride(
-            SubjectSnapshot snapshot, List<Override> overrides, Instant now) {
+    private static Optional<PolicyOverride> strongestOverride(
+            SubjectSnapshot snapshot, List<PolicyOverride> overrides, Instant now) {
 
         if (overrides == null || overrides.isEmpty()) {
             return Optional.empty();
         }
-        Optional<Override> allow = Optional.empty();
-        for (Override o : overrides) {
+        Optional<PolicyOverride> allow = Optional.empty();
+        for (PolicyOverride o : overrides) {
             if (!o.isActive(now)) {
                 continue;
             }

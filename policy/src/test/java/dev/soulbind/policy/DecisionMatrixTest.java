@@ -146,10 +146,10 @@ class DecisionMatrixTest {
     @MethodSource("matrix")
     @DisplayName("a deny override beats every rule and every identity state")
     void denyOverrideAlwaysWins(SubjectSnapshot snapshot, Rule rule) {
-        Override deny = new Override(GATE, "s1", null, Effect.DENY, "banned", null);
-        Override denyByRef = new Override(GATE, null, REF, Effect.DENY, "banned", null);
+        PolicyOverride deny = new PolicyOverride(GATE, "s1", null, Effect.DENY, "banned", null);
+        PolicyOverride denyByRef = new PolicyOverride(GATE, null, REF, Effect.DENY, "banned", null);
 
-        for (Override o : List.of(deny, denyByRef)) {
+        for (PolicyOverride o : List.of(deny, denyByRef)) {
             if (o.subjectId() != null && snapshot.subjectId() == null) {
                 continue; // a subject-targeted override cannot match a subjectless snapshot
             }
@@ -167,7 +167,7 @@ class DecisionMatrixTest {
     @MethodSource("matrix")
     @DisplayName("an allow override beats a rule the subject does not satisfy")
     void allowOverrideWins(SubjectSnapshot snapshot, Rule rule) {
-        Override allow = new Override(GATE, null, REF, Effect.ALLOW, "vouched for", null);
+        PolicyOverride allow = new PolicyOverride(GATE, null, REF, Effect.ALLOW, "vouched for", null);
         Decision decision = PolicyEngine.decide(snapshot, rule, List.of(allow), NOW);
         assertEquals(Effect.ALLOW, decision.effect());
         assertEquals(Decision.Reason.OVERRIDE, decision.reason());
@@ -180,9 +180,9 @@ class DecisionMatrixTest {
         // later banned the subject. The ban wins: wrongly denying costs a
         // complaint, wrongly allowing costs the thing the gate existed for.
         SubjectSnapshot snapshot = new SubjectSnapshot("s1", REF, Set.of(), 2, NOW);
-        List<Override> both = List.of(
-                new Override(GATE, null, REF, Effect.ALLOW, "admitted early", null),
-                new Override(GATE, "s1", null, Effect.DENY, "banned since", null));
+        List<PolicyOverride> both = List.of(
+                new PolicyOverride(GATE, null, REF, Effect.ALLOW, "admitted early", null),
+                new PolicyOverride(GATE, "s1", null, Effect.DENY, "banned since", null));
 
         assertEquals(
                 Effect.DENY,
@@ -198,7 +198,7 @@ class DecisionMatrixTest {
     @DisplayName("an expired override does not apply, and the caller need not filter it")
     void expiredOverrideIgnored() {
         SubjectSnapshot snapshot = SubjectSnapshot.unlinked(REF, NOW);
-        Override lapsed = new Override(
+        PolicyOverride lapsed = new PolicyOverride(
                 GATE, null, REF, Effect.ALLOW, "temporary", NOW.minusSeconds(1));
 
         Decision decision =
@@ -212,7 +212,7 @@ class DecisionMatrixTest {
     void overrideBoundaryIsExclusive() {
         // Same convention as link-code expiry. Consistency matters more than
         // which one is chosen: an operator who learns one expects the other.
-        Override edge = new Override(GATE, null, REF, Effect.ALLOW, "temporary", NOW);
+        PolicyOverride edge = new PolicyOverride(GATE, null, REF, Effect.ALLOW, "temporary", NOW);
         assertTrue(edge.isActive(NOW));
         assertFalse(edge.isActive(NOW.plusMillis(1)));
     }
@@ -223,7 +223,7 @@ class DecisionMatrixTest {
         // Not enforced by the engine -- the caller passes the overrides for the
         // gate it is asking about -- so this states the contract at the boundary
         // where somebody would otherwise assume filtering happens here.
-        Override other = new Override("gate.other", null, REF, Effect.DENY, "banned", null);
+        PolicyOverride other = new PolicyOverride("gate.other", null, REF, Effect.DENY, "banned", null);
         assertEquals("gate.other", other.gateName());
         assertFalse(other.gateName().equals(GATE));
     }
@@ -324,7 +324,7 @@ class DecisionMatrixTest {
         for (String reason : new String[] {null, "", "   "}) {
             org.junit.jupiter.api.Assertions.assertThrows(
                     IllegalArgumentException.class,
-                    () -> new Override(GATE, "s1", null, Effect.ALLOW, reason, null));
+                    () -> new PolicyOverride(GATE, "s1", null, Effect.ALLOW, reason, null));
         }
     }
 
@@ -333,11 +333,11 @@ class DecisionMatrixTest {
     void overrideNeedsExactlyOneTarget() {
         org.junit.jupiter.api.Assertions.assertThrows(
                 IllegalArgumentException.class,
-                () -> new Override(GATE, "s1", REF, Effect.ALLOW, "r", null),
+                () -> new PolicyOverride(GATE, "s1", REF, Effect.ALLOW, "r", null),
                 "naming both makes it ambiguous which one it followed");
         org.junit.jupiter.api.Assertions.assertThrows(
                 IllegalArgumentException.class,
-                () -> new Override(GATE, null, null, Effect.ALLOW, "r", null),
+                () -> new PolicyOverride(GATE, null, null, Effect.ALLOW, "r", null),
                 "naming neither makes it apply to everybody");
     }
 

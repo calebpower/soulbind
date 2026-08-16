@@ -356,6 +356,66 @@ Query limits are bounded server-side whatever is asked for. An unbounded audit
 query against a long-lived deployment is a way to exhaust memory from an
 authenticated endpoint, and "the caller asked nicely" is not a defence.
 
+## Decisions
+
+`decide` asks whether an identity may pass a gate. The **identity**, not the
+subject: a connector asking usually knows only the account in front of it, and
+requiring a lookup first would make every enforcement point do two round trips
+to answer one question.
+
+Gates are recorded on first use. A connector asking about one is declaring that
+it exists, and an operator cannot write a rule for a gate they cannot see.
+
+| Field | Means |
+|---|---|
+| `effect` | `allow` or `deny` |
+| `reason` | stable machine-readable code — match on this, never on `detail` |
+| `detail` | human-readable, for logs and for showing a person |
+| `ttlSeconds` | how long a connector may cache this |
+| `missingKinds` | what the subject would need, present on a denial |
+
+### Reasons
+
+`no-rule`, `requirements-met` and `grace` produce `allow`. `not-linked`,
+`missing-kinds` and `default` produce `deny`. `override` produces either.
+
+### Precedence
+
+Overrides beat rules; **deny beats allow**; no rule means allow; grace is
+checked after establishing that requirements are unmet.
+
+An unconfigured gate allows, because a gate nobody configured is a gate nobody
+asked for. Note that a **connector** whose core is unreachable *denies* — those
+look contradictory and are not: here there is nothing to enforce, there
+enforcement has failed.
+
+### What "verified" means
+
+A rule naming required kinds is satisfied only by **verified** identities.
+Binding an account is not proving it, and a gate that accepted a bound but
+unproven identity would accept a claim. A denial names the kind even when the
+account is of that kind — what is missing is the proof.
+
+`linked` means **two or more** identities. A subject with one is a person known
+on one platform, which is what an attestation produces; calling that linked
+would let a gate demanding a link be satisfied by the very account asking.
+
+### Caching, and failing
+
+`ttlSeconds` is carried in the response so cache behaviour is core-tunable
+without redeploying connectors. A grace allowance carries a **shortened** TTL,
+clamped so it cannot outlive the grace window — otherwise the gate stays open
+for the remainder of the cache period, advisory rather than enforced.
+
+A TTL of zero means *do not cache this*.
+
+**Fail-closed is the default.** A connector that cannot reach core and holds no
+unexpired cached decision denies, and the message it shows says the *system* is
+at fault rather than the person. Fail-open is spellable for gates whose cost of
+wrongly denying exceeds the cost of wrongly allowing, but it is always a visible
+configuration line — and only the exact word `open` selects it, because a typo
+in a fail-mode must never be the thing that opens a gate.
+
 ## Events
 
 At-least-once, idempotency-keyed, with per-connector cursors so a connector that

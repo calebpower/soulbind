@@ -19,20 +19,27 @@ package dev.soulbind.core.transport;
 import dev.soulbind.core.registry.Authorizer.Operation;
 import dev.soulbind.core.audit.AuditEntry;
 import dev.soulbind.core.audit.AuditQuery;
+import dev.soulbind.core.identity.Identity;
 import dev.soulbind.core.identity.LinkCodeRecord;
 import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
 import dev.soulbind.core.storage.IdentityRepository;
+import dev.soulbind.core.storage.PolicyRepository;
 import dev.soulbind.protocol.AttestRequest;
 import dev.soulbind.protocol.AuditEntryView;
 import dev.soulbind.protocol.AuditPushRequest;
 import dev.soulbind.protocol.AuditQueryRequest;
+import dev.soulbind.policy.Decision;
+import dev.soulbind.policy.PolicyEngine;
+import dev.soulbind.policy.SubjectSnapshot;
 import dev.soulbind.protocol.Capability;
 import dev.soulbind.protocol.CodeIssueRequest;
 import dev.soulbind.protocol.CodeIssueResponse;
 import dev.soulbind.protocol.CodeRedeemRequest;
 import dev.soulbind.protocol.CodeRedeemResponse;
+import dev.soulbind.protocol.DecideRequest;
+import dev.soulbind.protocol.DecideResponse;
 import dev.soulbind.protocol.IdentityView;
 import dev.soulbind.protocol.SubjectInspectRequest;
 import dev.soulbind.protocol.UnlinkRequest;
@@ -47,6 +54,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.TreeSet;
 
 /** The operations core implements at this phase. */
@@ -67,6 +75,7 @@ public final class CoreHandlers {
             ConnectorRepository connectors,
             AuditRepository audit,
             IdentityRepository identities,
+            PolicyRepository policy,
             LinkingService linking,
             Codec codec,
             Clock clock,
@@ -290,6 +299,59 @@ public final class CoreHandlers {
             return WireResponse.ok(body);
         });
 
+        handlers.put(Operation.DECIDE, (connector, payload) -> {
+            var request = codec.bind(payload, DecideRequest.class);
+            if (request.isEmpty() || blank(request.get().gate())
+                    || blank(request.get().platformKind())
+                    || blank(request.get().platformId())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "decide needs a gate and a platform account");
+            }
+            DecideRequest q = request.get();
+
+            // Recorded on first use, like platform kinds. A connector asking
+            // about a gate is a connector declaring that the gate exists, and
+            // an operator cannot write a rule for a gate they cannot see.
+            policy.gateSeen(q.gate(), connector.id(), null);
+
+            var subject = identities.subjectOf(q.platformKind(), q.platformId());
+            String ref = q.platformKind() + ":" + q.platformId();
+
+            SubjectSnapshot snapshot;
+            if (subject.isEmpty()) {
+                snapshot = SubjectSnapshot.unlinked(ref, clock.instant());
+            } else {
+                List<Identity> graph = identities.identitiesOf(subject.get().id());
+                Set<String> verified = new TreeSet<>();
+                Instant firstSeen = clock.instant();
+                for (Identity identity : graph) {
+                    if (identity.isVerified()) {
+                        verified.add(identity.platformKind());
+                    }
+                    if (identity.createdAt().isBefore(firstSeen)) {
+                        firstSeen = identity.createdAt();
+                    }
+                }
+                // firstSeen from the graph, not from the caller: grace computed
+                // from a connector-supplied time is grace anybody can extend.
+                snapshot = new SubjectSnapshot(
+                        subject.get().id(), ref, verified, graph.size(), firstSeen);
+            }
+
+            Decision decision = PolicyEngine.decide(
+                    snapshot,
+                    policy.rule(q.gate()).orElse(null),
+                    policy.overridesFor(q.gate()),
+                    clock.instant());
+
+            return WireResponse.ok(new DecideResponse(
+                    decision.effect().wireName(),
+                    decision.reason().wireName(),
+                    decision.detail(),
+                    decision.ttlSeconds(),
+                    decision.missingKinds()));
+        });
+
         return Map.copyOf(handlers);
     }
 
@@ -333,6 +395,7 @@ public final class CoreHandlers {
                 Operation.CODE_ISSUE,
                 Operation.CODE_REDEEM,
                 Operation.ATTEST,
+                Operation.DECIDE,
                 Operation.IDENTITY_UNLINK,
                 Operation.SUBJECT_INSPECT);
     }

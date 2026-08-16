@@ -55,7 +55,7 @@ class DecisionLatencyTest {
     void measure() {
         List<SubjectSnapshot> snapshots = new ArrayList<>();
         List<Rule> rules = new ArrayList<>();
-        List<List<Override>> overrideSets = new ArrayList<>();
+        List<List<PolicyOverride>> overrideSets = new ArrayList<>();
 
         Random random = new Random(seed());
 
@@ -76,9 +76,9 @@ class DecisionLatencyTest {
             // A realistic override list: most subjects have none, a few have
             // several. Measuring only the empty case would measure the fast
             // path and call it the budget.
-            List<Override> overrides = new ArrayList<>();
+            List<PolicyOverride> overrides = new ArrayList<>();
             for (int j = 0; j < random.nextInt(5); j++) {
-                overrides.add(new Override(
+                overrides.add(new PolicyOverride(
                         "gate.x", "s" + random.nextInt(200), null,
                         random.nextBoolean() ? Effect.ALLOW : Effect.DENY,
                         "measured", null));

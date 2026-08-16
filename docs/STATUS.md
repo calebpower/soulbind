@@ -14,7 +14,7 @@ Last updated: 2026-08-15, Phase 3 in progress.
 | 0 | Skeleton and guards | **Complete** — gate passed |
 | 1 | Core skeleton: storage, config, registry, audit | **Complete** — gate passed |
 | 2 | Identity graph and linking | **Complete** — gate passed: two connectors link in both directions, exactly-one-redeem proven under concurrency on both backends, vectors consumed under the hostile charset |
-| 3 | Policy engine and decisions | **In progress** — evaluator, matrix, SDK fail-closed and the latency figure landed; the `decide` operation outstanding |
+| 3 | Policy engine and decisions | **Complete** — gate passed |
 | 4 | Events and effectors | Not started |
 | 5 | connector-velocity | Not started |
 | 6 | connector-discord | Not started |
@@ -26,7 +26,7 @@ Last updated: 2026-08-15, Phase 3 in progress.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 781 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
+ordinary one and `charsetHostilityTest` — across 788 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
 
 Real behaviour exists now, though nothing links anything yet — that is Phase 2.
 A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite

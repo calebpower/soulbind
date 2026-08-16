@@ -146,6 +146,7 @@ public final class Main {
                             storage.connectors(),
                             storage.audit(),
                             storage.identities(),
+                            storage.policy(),
                             new LinkingService(
                                     storage.identities(), storage.linkCodes(),
                                     storage.platformKinds(), storage.audit(), clock,

@@ -1150,3 +1150,41 @@ The measurement warms up first, because measuring a cold JIT measures the JIT,
 and it uses a realistic override distribution rather than the empty list —
 measuring only the fast path and calling it the budget would be the easy
 mistake.
+
+### 3.8 — `Override` was the wrong name for a Java class
+
+`dev.soulbind.policy.Override` shadowed `java.lang.Override`, which is implicitly
+imported into every Java file. Any class importing the policy type lost the
+ability to write `@Override` — which showed up the moment a repository
+implemented an interface, with three compile errors reading "Override cannot be
+converted to Annotation".
+
+Renamed to `PolicyOverride`. The collision is not a Java quirk worth working
+around with import gymnastics; it is a name that was wrong.
+
+### 3.9 — Gates are recorded when a connector first asks about one
+
+A connector calling `decide` for a gate is declaring the gate exists. Recording
+it there means an operator can see the gate in order to write a rule for it —
+otherwise the only way to learn a gate's name is to read the connector's source.
+
+### 3.10 — The override path was reachable only in unit tests
+
+**Found by mutation-checking.** Replacing `policy.overridesFor(gate)` with an
+empty list passed every wire test. The override mechanism — how an operator
+admits or bans one person — was exercised only through the engine's own tests,
+and nothing proved core actually consulted it.
+
+Wire tests now cover an allow override, a deny override winning over it, an
+override for a different gate not leaking in, and an expired one not applying.
+
+### 3.11 — The T8 race asserts coherence, not stability
+
+A rule mutating under a storm of decisions **must** change the answer — that is
+the point of editing a rule. The claim worth asserting is that every answer is
+one of the two coherent ones and never a blend of a half-applied edit, so the
+test pairs each effect with the reasons that can produce it and counts
+mismatches.
+
+Asserting stability instead would have been asserting that editing a rule does
+nothing.

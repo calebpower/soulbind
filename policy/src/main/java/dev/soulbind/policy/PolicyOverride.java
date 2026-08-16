@@ -38,7 +38,7 @@ import java.util.Objects;
  * @param expiresAt when it stops applying, or null for permanent. Permanent is
  *     spellable, because some are — but it has to be chosen.
  */
-public record Override(
+public record PolicyOverride(
         String gateName,
         String subjectId,
         String identityRef,
@@ -46,7 +46,7 @@ public record Override(
         String reason,
         Instant expiresAt) {
 
-    public Override {
+    public PolicyOverride {
         Objects.requireNonNull(gateName, "gateName");
         Objects.requireNonNull(effect, "effect");
         if ((subjectId == null) == (identityRef == null)) {

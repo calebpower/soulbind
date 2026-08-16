@@ -18,6 +18,10 @@ dependencies {
     // to re-declare protocol to use methods core already hands them.
     api(project(":protocol"))
 
+    // The evaluator. api, because core hands Decisions to the transport layer
+    // and the wire types name them.
+    api(project(":policy"))
+
     implementation(libs.javalin)
     implementation(libs.bundles.jackson)
     implementation(libs.hikari)

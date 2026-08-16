@@ -42,6 +42,7 @@ public final class Storage implements AutoCloseable {
     private final PlatformKindRepository platformKinds;
     private final IdentityRepository identities;
     private final LinkCodeRepository linkCodes;
+    private final PolicyRepository policy;
 
     private Storage(Backend backend, HikariDataSource dataSource, ExecutorService writeExecutor) {
         this.backend = backend;
@@ -52,6 +53,7 @@ public final class Storage implements AutoCloseable {
         this.platformKinds = new JdbcPlatformKindRepository(dataSource, writeExecutor);
         this.identities = new JdbcIdentityRepository(dataSource, writeExecutor);
         this.linkCodes = new JdbcLinkCodeRepository(dataSource, writeExecutor);
+        this.policy = new JdbcPolicyRepository(dataSource, writeExecutor);
     }
 
     /**
@@ -144,6 +146,10 @@ public final class Storage implements AutoCloseable {
 
     public LinkCodeRepository linkCodes() {
         return linkCodes;
+    }
+
+    public PolicyRepository policy() {
+        return policy;
     }
 
     @Override
