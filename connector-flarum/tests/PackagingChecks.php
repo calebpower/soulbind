@@ -49,6 +49,65 @@ final class PackagingChecks
     {
     }
 
+    /**
+     * A refusal must be registered, or the person is told nothing.
+     *
+     * `KnownError` alone stops Flarum logging a refusal as a server fault. It
+     * does NOT make Flarum render the reason: an unregistered error type falls
+     * through to a generic 500, which the frontend shows as "Oops! Something
+     * went wrong. Please reload the page and try again."
+     *
+     * So the gate refused correctly, with core's own wording attached, and the
+     * person saw nothing. Every unit check passed -- they all assert the message
+     * on the GateOutcome, and that message was right. The missing piece was the
+     * last hop, and only a browser could see it.
+     *
+     * This is the cheap half of that lesson: extend.php must register a status
+     * for exactly the type GateRefused reports.
+     *
+     * @return list<string>
+     */
+    public static function theRefusalTypeIsRegistered(): array
+    {
+        $failures = [];
+
+        $extend = (string) file_get_contents(dirname(__DIR__) . '/extend.php');
+
+        if (!str_contains($extend, 'ErrorHandling')) {
+            $failures[] = 'extend.php registers no ErrorHandling extender, so a gate refusal '
+                . 'falls through to a generic 500 and the person is shown "Oops! Something '
+                . 'went wrong" instead of the reason they were refused.';
+            return $failures;
+        }
+
+        // The constant, not a repeated literal. Two spellings of the same
+        // string in two files is the failure this check exists to catch, so
+        // satisfying it by writing the literal twice would be missing the
+        // point.
+        if (!str_contains($extend, 'GateRefused::TYPE')) {
+            $failures[] = 'extend.php does not register GateRefused::TYPE. If it names the '
+                . 'string literally instead, the two can drift and the drift is silent -- a '
+                . 'refusal that renders as a generic error looks like a bug in the forum.';
+        }
+
+        // Read from the SOURCE, never loaded.
+        //
+        // GateRefused implements a Flarum interface, so loading it needs Flarum on
+        // the classpath -- and this runner exists precisely to work on a machine
+        // that has PHP and nothing else. The first version referenced the constant
+        // directly and died with a class-not-found inside the check, which would
+        // have made the whole dependency-free suite unrunnable to test one string.
+        $refusal = (string) file_get_contents(dirname(__DIR__) . '/src/Listener/GateRefused.php');
+        if (preg_match("/const TYPE = '([^']+)'/", $refusal, $m) !== 1) {
+            $failures[] = 'GateRefused declares no TYPE constant, so there is nothing '
+                . 'for extend.php to register a status against';
+        } elseif (trim($m[1]) === '') {
+            $failures[] = 'GateRefused::TYPE is empty';
+        }
+
+        return $failures;
+    }
+
     /** Flarum's own derivation, from `Flarum\Extension\Extension::assignId()`. */
     public static function flarumExtensionId(string $composerName): string
     {

@@ -2364,3 +2364,44 @@ that is "this account is not linked to any other". On a **registration** form
 that reads oddly, since somebody registering for the first time has nothing to
 link yet. Whether registration should be gateable on being linked is a design
 question for the owner, not one to settle by editing a string.
+
+### 7.22 — A refusal that never reaches the person
+
+The browser tier drove a real registration against a real forum with the gate
+configured to deny, and the person was shown:
+
+> Oops! Something went wrong. Please reload the page and try again.
+
+The gate refused correctly. It refused for the right reason. It attached core's
+own wording. And none of that arrived.
+
+`GateRefused implements KnownError` stops Flarum logging a refusal as a server
+fault, which is why that was written — but it does **not** make Flarum render the
+reason. Flarum maps a known error to an HTTP status through the `ErrorHandling`
+registry, and an unregistered type falls through to a generic 500, which the
+frontend renders as the message above.
+
+**Every unit check passed**, and they were not wrong to. Each asserts the message
+on the `GateOutcome`, and the message on the `GateOutcome` was correct. The
+missing piece was the last hop, from the exception to the page, and nothing that
+stops short of a browser can see it. This is the second defect in this phase that
+only a running forum could find, after the extension id.
+
+403, not 400: the request was well-formed, and the answer is that this account
+may not do this. A 400 tells an API client to fix its payload, which is neither
+the problem nor a thing the client can act on.
+
+`GateRefused::TYPE` is a constant because it is written in two files that must
+agree, and `PackagingChecks::theRefusalTypeIsRegistered` asserts `extend.php`
+registers *that constant* rather than a matching literal. Both mutations are
+caught: removing the extender, and replacing the constant with the same string
+spelled out. The second matters more — a literal that happens to match today is
+a silent drift tomorrow, and the symptom is a refusal that looks like a bug in
+the forum.
+
+The check reads `GateRefused.php` as **source** rather than loading the class.
+The first version referenced the constant directly and died with a
+class-not-found: `GateRefused` implements a Flarum interface, and the
+dependency-free runner exists precisely to work on a machine with PHP and
+nothing else. Loading Flarum to check one string would have made the entire
+suite unrunnable there.

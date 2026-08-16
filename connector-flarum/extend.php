@@ -23,6 +23,7 @@ use Flarum\Post\Event\Saving as PostSaving;
 use Flarum\User\Event\Saving as UserSaving;
 use Soulbind\Flarum\Controller\WebhookController;
 use Soulbind\Flarum\Listener\GatePosting;
+use Soulbind\Flarum\Listener\GateRefused;
 use Soulbind\Flarum\Listener\GateRegistration;
 use Soulbind\Flarum\Provider\SoulbindProvider;
 use Soulbind\Flarum\Settings\ConnectorSettings;
@@ -44,6 +45,31 @@ return [
      */
     (new Extend\Routes('forum'))
         ->post('/soulbind/webhook', 'soulbind.webhook', WebhookController::class),
+
+    /*
+     * The refusal has to REACH the person.
+     *
+     * GateRefused implements KnownError, which stops Flarum logging it as a
+     * server fault -- but that alone is not enough. Flarum maps a KnownError to
+     * an HTTP status through this registry, and an unregistered type falls
+     * through to a generic 500, which the frontend renders as
+     * "Oops! Something went wrong. Please reload the page and try again."
+     *
+     * So the gate refused correctly, for the right reason, with core's own
+     * wording attached -- and the person was told nothing at all. Every unit
+     * check passed, because every one of them asserts the message on the
+     * GateOutcome, and the message on the GateOutcome was right. What was
+     * missing was the last hop.
+     *
+     * Found by the browser tier, which is the only thing that looks at what a
+     * person actually sees.
+     *
+     * 403, not 400: the request was well-formed and the answer is that this
+     * account may not do this. A 400 would tell an API client to fix its
+     * payload, which is not the problem and cannot be the fix.
+     */
+    (new Extend\ErrorHandling())
+        ->status(GateRefused::TYPE, 403),
 
     (new Extend\Event())
         ->listen(UserSaving::class, GateRegistration::class)

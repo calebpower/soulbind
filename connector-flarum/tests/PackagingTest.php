@@ -61,4 +61,13 @@ final class PackagingTest extends TestCase
             'the extension would install and then not exist as far as Flarum is concerned'
         );
     }
+    #[Test]
+    #[DisplayName('a gate refusal is registered, so its reason reaches the person')]
+    public function theRefusalTypeIsRegistered(): void
+    {
+        $this->assertNoFailures(
+            PackagingChecks::theRefusalTypeIsRegistered(),
+            'a refusal would render as a generic error and tell the person nothing'
+        );
+    }
 }

@@ -39,8 +39,19 @@ final class GateRefused extends RuntimeException implements KnownError
         parent::__construct($outcome->message);
     }
 
+    /**
+     * The wire type, and the key extend.php registers a status for.
+     *
+     * A constant because it is written in two places that must agree: here,
+     * and in the ErrorHandling extender. When they disagreed -- which is to
+     * say, when the extender did not exist at all -- Flarum fell through to a
+     * generic 500 and the person was shown "Oops! Something went wrong"
+     * instead of the reason.
+     */
+    public const TYPE = 'soulbind_gate_refused';
+
     public function getType(): string
     {
-        return 'soulbind_gate_refused';
+        return self::TYPE;
     }
 }
