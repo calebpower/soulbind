@@ -1,0 +1,12 @@
+{
+  "name": "@soulbind/forum-browser-tier",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "T5. Drives a real forum in a real browser against a real core.",
+  "devDependencies": {
+    "@playwright/test": "1.50.0"
+  },
+  "scripts": {
+    "test": "playwright test"
+  }
+}

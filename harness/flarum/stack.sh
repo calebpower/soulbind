@@ -41,19 +41,17 @@ FORUM_URL="http://127.0.0.1:${FORUM_PORT}"
 NET=soulbind-forum-net
 DB_C=soulbind-forum-db
 WEB_C=soulbind-forum-web
+CORE_C=soulbind-forum-core
 
 log() { echo "[forum] $*"; }
 
 cleanup() {
     status=$?
     log "tearing down"
-    for c in "$WEB_C" "$DB_C"; do
+    for c in "$WEB_C" "$CORE_C" "$DB_C"; do
         podman rm -f "$c" >/dev/null 2>&1 || true
     done
     podman network rm -f "$NET" >/dev/null 2>&1 || true
-    if [ -f "$RUN/core.pid" ]; then
-        kill "$(cat "$RUN/core.pid")" 2>/dev/null || true
-    fi
     return $status
 }
 trap cleanup EXIT INT TERM
@@ -76,7 +74,7 @@ wait_for() {
     log "$what did not come up in ${tries}s; refusing to test against it"
     podman logs "$DB_C" 2>&1 | tail -20 || true
     podman logs "$WEB_C" 2>&1 | tail -40 || true
-    [ -f "$RUN/core.log" ] && tail -30 "$RUN/core.log"
+    podman logs "$CORE_C" 2>&1 | tail -30 || true
     return 1
 }
 
@@ -104,9 +102,24 @@ wait_for "mariadb" 90 \
     podman exec "$DB_C" mariadb-admin ping -h 127.0.0.1 -u"$DB_USER" -p"$DB_PASS" --silent
 
 # --- core -------------------------------------------------------------------
-log "building core"
-(cd "$REPO" && ./gradlew --quiet :core:installDist)
+#
+# Built AND run inside the toolchain container. The guest template ships no
+# language toolchains -- .reaper.toml says so where it explains why the build
+# verb is `container` -- and the first version of this harness ran gradle on the
+# host and got "JAVA_HOME is not set and no 'java' command could be found".
+#
+# Running core in a container has a second benefit the host version could not
+# have had: stopping it for the outage pass is `podman stop`, which the
+# orchestrator can do reliably, rather than signalling a pid and hoping.
+log "building core in the toolchain container"
 
+podman run --rm -v "$REPO":/work -w /work \
+    -e GRADLE_USER_HOME=/work/.gradle-forum-home \
+    "$FLARUM_TOOLCHAIN_IMAGE" \
+    ./gradlew --no-daemon --quiet --project-cache-dir /tmp/gradle-forum-cache \
+    :core:installDist
+
+mkdir -p "$RUN/core"
 cat > "$RUN/core/soulbind.toml" <<TOML
 [server]
 host = "0.0.0.0"
@@ -114,40 +127,70 @@ port = $CORE_PORT
 
 [storage]
 backend = "sqlite"
-url = "jdbc:sqlite:$RUN/core/soulbind.db"
+url = "jdbc:sqlite:/state/soulbind.db"
 
 [linking]
 codettlseconds = 600
 TOML
 
-CORE_CLI="$REPO/core/build/install/core/bin/core"
+# Every core CLI call goes through the toolchain image, on the shared network,
+# with the same state volume the server uses. One helper, so no call site can
+# quietly use different paths from another.
+core_cli() {
+    podman run --rm --network "$NET" \
+        -v "$REPO":/work:ro -v "$RUN/core":/state \
+        "$FLARUM_TOOLCHAIN_IMAGE" \
+        /work/core/build/install/core/bin/core "$@" --config /state/soulbind.toml
+}
 
 log "registering the forum connector"
-# Exactly the capabilities the connector needs, and no more. Granting it
-# everything would prove the flow works for something holding every capability,
-# which is not what a deployment runs -- and it is how a missing grant stays
-# hidden until somebody else's install.
-FORUM_CRED=$("$CORE_CLI" register --name forum --quiet \
-    --capabilities code-display,code-entry,enforcement-point \
-    --config "$RUN/core/soulbind.toml")
+# Exactly the capabilities the connector needs, and no more. Granting everything
+# would prove the flow works for something holding every capability, which is
+# not what a deployment runs -- and it is how a missing grant stays hidden until
+# somebody else's install.
+FORUM_CRED=$(core_cli register --name forum --quiet \
+    --capabilities code-display,code-entry,enforcement-point)
 
 # The harness stands in for the game side AND for an operator's tooling.
-HARNESS_CRED=$("$CORE_CLI" register --name harness --quiet \
-    --capabilities code-display,code-entry,config-management,enforcement-point \
-    --config "$RUN/core/soulbind.toml")
+HARNESS_CRED=$(core_cli register --name harness --quiet \
+    --capabilities code-display,code-entry,config-management,enforcement-point)
 
 if [ -z "$FORUM_CRED" ] || [ -z "$HARNESS_CRED" ]; then
     log "a credential did not come back from register; refusing to continue"
     exit 1
 fi
+printf '%s' "$FORUM_CRED" > "$RUN/forum.credential"
+printf '%s' "$HARNESS_CRED" > "$RUN/harness.credential"
+
+start_core() {
+    podman rm -f "$CORE_C" >/dev/null 2>&1 || true
+    podman run -d --name "$CORE_C" --network "$NET" \
+        -p "${CORE_PORT}:${CORE_PORT}" \
+        -v "$REPO":/work:ro -v "$RUN/core":/state \
+        "$FLARUM_TOOLCHAIN_IMAGE" \
+        /work/core/build/install/core/bin/core serve --config /state/soulbind.toml \
+        >/dev/null
+    wait_for "core" 90 curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/"
+}
+
+stop_core() {
+    podman stop -t 10 "$CORE_C" >/dev/null 2>&1 || true
+    # Wait for the port to actually close. Stopping and immediately testing
+    # races the shutdown, and a test that reached a dying core would prove
+    # nothing about the outage path while looking like it had.
+    i=0
+    while [ "$i" -lt 30 ] && curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/" 2>/dev/null; do
+        i=$((i + 1)); sleep 1
+    done
+    if curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/" 2>/dev/null; then
+        log "core did not stop; the outage pass would test the wrong world"
+        exit 1
+    fi
+    log "core is down"
+}
 
 log "starting core"
-"$CORE_CLI" serve --config "$RUN/core/soulbind.toml" > "$RUN/core.log" 2>&1 &
-echo $! > "$RUN/core.pid"
-wait_for "core" 60 curl -sf -o /dev/null "http://127.0.0.1:${CORE_PORT}/"
-
-echo "$FORUM_CRED" > "$RUN/forum.credential"
-echo "$HARNESS_CRED" > "$RUN/harness.credential"
+start_core
 log "core is up on $CORE_PORT"
 
 # --- the forum --------------------------------------------------------------
@@ -280,7 +323,7 @@ EXT_ID=soulbind-flarum-connector
 
 sql "REPLACE INTO settings (\`key\`, \`value\`) VALUES
       ('extensions_enabled', '[\"${EXT_ID}\"]'),
-      ('soulbind.core_url',       'http://host.containers.internal:${CORE_PORT}/'),
+      ('soulbind.core_url',       'http://${CORE_C}:${CORE_PORT}/'),
       ('soulbind.credential',     '$(cat "$RUN/forum.credential")'),
       ('soulbind.webhook_secret', '$(cat "$RUN/forum.credential")'),
       ('soulbind.fail_mode',      'closed'),
@@ -330,3 +373,81 @@ case "$WEBHOOK_STATUS" in
 esac
 
 log "stack is up and the extension is live"
+
+# --- the browser tier -------------------------------------------------------
+#
+# Four passes. Every change to the WORLD -- the policy rule, whether core is
+# answering -- is made HERE, and the specs only assert.
+#
+# That split is not tidiness. The specs run inside the browser image; core runs
+# in another container and its CLI needs a JVM the browser image does not have.
+# The first version had the specs shell out to core and signal its process, and
+# neither could have worked from where they run. Pushing the world into the
+# orchestrator is what makes each spec a plain statement about what a person
+# sees.
+#
+# The tags are the contract between the two. An outage spec run against a live
+# core would assert a fail-closed message that never appears -- so the outage
+# specs assert something that CANNOT hold while core is answering, and a
+# mis-tagged spec fails loudly rather than passing in the wrong world.
+log "browser tier"
+
+browser() {
+    podman run --rm --network host \
+        -v "$REPO/harness/flarum/browser":/suite -w /suite \
+        -e FORUM_URL="$FORUM_URL" \
+        -e RUN_TAG="${RUN_TAG:-r}" \
+        -e CI=1 \
+        -e PLAYWRIGHT_JSON_OUTPUT_NAME="/suite/results.json" \
+        "$FLARUM_BROWSER_IMAGE" "$@"
+}
+
+log "installing the browser suite's dependencies"
+browser npm ci --no-audit --no-fund
+
+log "pass 1 of 4: an unlinked account is refused, in core's own words"
+core_cli rule set --gate forum-register --require-kinds game \
+    --default-effect deny --detail "Link a game account before registering."
+browser npx playwright test --grep "@refused"
+cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-1.json" 2>/dev/null || true
+
+log "pass 2 of 4: the rule allows, and the account is admitted"
+core_cli rule set --gate forum-register --default-effect allow
+browser npx playwright test --grep "@admitted"
+cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-2.json" 2>/dev/null || true
+
+log "pass 3 of 4: core is stopped, and the gate must hold"
+core_cli rule set --gate forum-register --require-kinds game --default-effect deny
+stop_core
+browser npx playwright test --grep "@outage"
+cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-3.json" 2>/dev/null || true
+
+log "pass 4 of 4: core returns, and nothing needs cleaning up after it"
+start_core
+core_cli rule set --gate forum-register --default-effect allow
+browser npx playwright test --grep "@recovery"
+cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-4.json" 2>/dev/null || true
+
+# --- every spec must have run somewhere -------------------------------------
+#
+# Four --grep passes is four chances for a spec to belong to no pass at all. A
+# spec nobody runs is not a gap anybody notices: playwright reports "0 tests" as
+# a success, the pass prints green, and the suite looks complete.
+#
+# So the passes are counted against the file. If somebody adds a test with a new
+# tag, or misspells an existing one, the totals disagree and this says so.
+EXPECTED_SPECS=$(grep -cE "^test\(" "$REPO/harness/flarum/browser/tests/gate.spec.js")
+ACTUAL_SPECS=0
+for r in "$RUN"/playwright-*.json; do
+    [ -f "$r" ] || continue
+    n=$(grep -o '"status":"passed"' "$r" | wc -l | tr -d ' ')
+    ACTUAL_SPECS=$((ACTUAL_SPECS + n))
+done
+
+if [ "$ACTUAL_SPECS" -ne "$EXPECTED_SPECS" ]; then
+    log "the browser tier ran $ACTUAL_SPECS specs but the file declares $EXPECTED_SPECS."
+    log "a spec that belongs to no --grep pass never runs, and playwright reports"
+    log "'0 tests' as a success -- so the pass prints green and the gap is invisible."
+    exit 1
+fi
+log "browser tier green: $ACTUAL_SPECS of $EXPECTED_SPECS specs ran"
