@@ -95,6 +95,29 @@ final class PackagingChecks
                 . 'refused without being told why.';
         }
 
+        // Both types must be TRANSLATED, or Flarum falls back to a message
+        // chosen by HTTP status -- "You do not have permission to do that" for a
+        // 403, which is a lie when the truth is that core is unreachable.
+        //
+        // Flarum's frontend picks what a person reads from the error type and
+        // ignores the detail in the body, so the distinction between "you are
+        // not linked" and "we cannot check right now" survives the last hop only
+        // if both types exist and both are translated.
+        $locale = (string) file_get_contents(dirname(__DIR__) . '/locale/en.yml');
+        foreach (['soulbind_gate_refused', 'soulbind_unavailable'] as $type) {
+            if (!str_contains($locale, $type . ':')) {
+                $failures[] = "the error type '{$type}' has no translation, so Flarum shows a "
+                    . 'message chosen by status code instead of by cause';
+            }
+        }
+
+        // Under core.lib.error, which is the only place Flarum looks for these.
+        // An extension-scoped key would read correctly and do nothing.
+        if (preg_match('/core:\s*\n\s*lib:\s*\n\s*error:/', $locale) !== 1) {
+            $failures[] = 'the error translations are not under core.lib.error, which is the '
+                . 'only place Flarum looks them up';
+        }
+
         // And the exception must NOT be a KnownError, or Flarum resolves it on
         // the known path and never reaches the handler above.
         $refusalSource = (string) file_get_contents(

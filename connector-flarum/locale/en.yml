@@ -31,5 +31,13 @@ soulbind-flarum:
         How long to wait for core before falling back. Kept short because this
         runs while somebody is waiting for a page. Values outside 100-10000 are
         clamped; anything unreadable falls back to 2000.
-  forum:
-    gate_refused: '{message}'
+# Flarum looks up core.lib.error.<type> to decide what a person is shown, so
+# these live under core rather than under this extension's own namespace.
+core:
+  lib:
+    error:
+      soulbind_gate_refused: >-
+        This action needs a linked account. Link one and try again.
+      soulbind_unavailable: >-
+        This check is temporarily unavailable, so access is on hold. This is a
+        problem on our side, not yours -- please try again shortly.

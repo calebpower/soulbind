@@ -58,6 +58,22 @@ final class GateRefused extends RuntimeException
      */
     public const TYPE = 'soulbind_gate_refused';
 
+    /**
+     * The type used when the gate held because core could not be reached.
+     *
+     * A SEPARATE type, and this is the whole reason there are two.
+     *
+     * Flarum's frontend renders a message chosen by the error type, not the
+     * detail in the response body -- so with one type, a person refused by a
+     * policy and a person refused because a server they have never heard of is
+     * unreachable are told exactly the same thing. The first is true and the
+     * second is a lie, and it is the lie this project has been careful about
+     * since the fail-closed message was written.
+     *
+     * Two types, two translations, and the distinction survives the last hop.
+     */
+    public const UNAVAILABLE_TYPE = 'soulbind_unavailable';
+
     public function getType(): string
     {
         return self::TYPE;

@@ -2506,3 +2506,47 @@ different hat.
 Nothing in the PHP suite could have found this: none of it opens a socket, which
 is deliberate and remains right. The harness found it the moment it asked the
 gate a question, which is the argument for the gate-resolution smoke in 7.23.
+
+### 7.26 — Two error types, because the frontend reads the type and not the reason
+
+The API carried core's reason correctly:
+
+```
+403 {"code":"soulbind_gate_refused","detail":"this account is not linked to any other"}
+```
+
+and the page said **"You do not have permission to do that."**
+
+Flarum's frontend picks what a person reads from the error TYPE and ignores the
+detail in the body. With one type, the two cases this connector exists to keep
+apart collapse into one sentence:
+
+- somebody who has not linked an account, and
+- somebody refused because a server they have never heard of is unreachable.
+
+The first message is true. The second is a lie, and it is the exact lie the
+fail-closed message was written to avoid — *"this is a problem on our side, not
+yours"* — discarded at the last hop, after being carried faithfully through
+every layer beneath.
+
+So there are two types. `soulbind_gate_refused` is a 403 and reads "This action
+needs a linked account." `soulbind_unavailable` is a **503** and keeps the
+system-blaming wording. 503 is right on its own terms: the request was fine and
+the service could not answer.
+
+The detail still carries core's precise reason for anything reading the API,
+which is where a machine-readable answer belongs.
+
+Checked two ways. Statically: both types must exist and both must be translated
+**under `core.lib.error`**, which is the only place Flarum looks — an
+extension-scoped key would read correctly and do nothing. Behaviourally: the
+`@refused` browser pass asserts the linked-account wording and rejects the
+outage wording, and the `@outage` pass does the reverse. Either assertion alone
+would pass with one type.
+
+*One correction worth recording.* I first placed the translation assertions with
+a text anchor that matched the end of the wrong method, so a missing translation
+was reported under "the endpoint matches the protocol path". The check failed
+correctly and blamed the wrong thing, which is the same defect I had just fixed
+in core's handlers — and I introduced it while fixing that. It now sits in the
+refusal check, and the mutation confirms the attribution as well as the failure.

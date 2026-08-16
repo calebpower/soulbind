@@ -65,11 +65,15 @@ test('@refused an unlinked account is refused, in core\'s own words', async ({ p
 
   // The refusal must reach the PERSON. A gate that denies correctly and renders
   // a blank modal has failed at the only job this tier tests.
-  // Core's OWN wording, not the connector's. The gate passes core's detail
-  // through because core knows what is missing and the connector does not --
-  // and a rule carries no custom message, which I learned by trying to send
-  // one and having the whole payload refused.
-  await expect(dialog).toContainText(/not linked to any other/i);
+  // What Flarum RENDERS, which is chosen by the error type -- not the detail in
+  // the response body. Core's precise reason is still in the API payload for
+  // anything reading it; a person gets the actionable sentence.
+  await expect(dialog).toContainText(/needs a linked account/i);
+
+  // And emphatically NOT the outage wording. These are different types on
+  // purpose: telling somebody the system is broken when they simply have not
+  // linked an account sends them to wait instead of to act.
+  await expect(dialog).not.toContainText(/problem on our side/i);
   await expectNoServerError(page);
 });
 
@@ -97,6 +101,11 @@ test('@outage a dead core denies, and blames the system rather than the person',
     await expect(dialog).toContainText(/problem on our side/i);
     await expect(dialog).toContainText(/try again/i);
     await expect(dialog).not.toContainText(/you are not allowed|not permitted|denied/i);
+
+    // And NOT the refusal wording. A person refused because a server they have
+    // never heard of is unreachable must not be told to go and link an account
+    // -- they would do it, and still be refused.
+    await expect(dialog).not.toContainText(/needs a linked account/i);
 
     await expectNoServerError(page);
   });

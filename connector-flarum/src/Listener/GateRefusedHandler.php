@@ -21,29 +21,38 @@ declare(strict_types=1);
 namespace Soulbind\Flarum\Listener;
 
 use Flarum\Foundation\ErrorHandling\HandledError;
+use Soulbind\Flarum\Client\Source;
 
 /**
- * Turns a gate refusal into a response that carries its reason.
+ * Turns a gate refusal into a response the forum can render truthfully.
  *
- * This exists because Flarum's KnownError path cannot. `Registry::handle()`
- * tries known types first and only then custom handlers, and the known-type
- * branch builds a `HandledError` with no details -- so an exception that
- * implements `KnownError` can never explain itself. The person got a bare
- * status code, which the frontend rendered as "Oops! Something went wrong."
+ * Two types, not one, because Flarum's frontend picks its message from the
+ * error TYPE and ignores the detail in the body. With a single type, somebody
+ * refused by a policy and somebody refused because core is unreachable are told
+ * the same thing -- and for the second that is a lie.
  *
- * 403, not 400: the request was well-formed, and the answer is that this account
- * may not do this. A 400 tells an API client to fix its payload, which is
- * neither the problem nor something it can act on.
+ * This project has been careful about that sentence since the fail-closed
+ * message was written: a person refused because a server they have never heard
+ * of is unreachable must not be told they are not allowed. That care is worth
+ * nothing if it is discarded at the last hop.
  *
- * The detail is core's own wording, carried through unchanged. Core knows what
- * is missing; this connector does not, and inventing a friendlier sentence here
- * would be a second answer competing with the real one.
+ * The detail still carries core's own wording, unchanged, for anything reading
+ * the API rather than the page.
  */
 final class GateRefusedHandler
 {
     public function handle(GateRefused $e): HandledError
     {
-        return (new HandledError($e, GateRefused::TYPE, 403))
-            ->withDetails([['detail' => $e->getMessage()]]);
+        $unavailable = $e->outcome->source === Source::FAIL_MODE;
+
+        return (new HandledError(
+            $e,
+            $unavailable ? GateRefused::UNAVAILABLE_TYPE : GateRefused::TYPE,
+            // 503 for an outage: the request was fine and the service could not
+            // answer. 403 for a refusal: the request was fine and the answer is
+            // no. Neither is a 400 -- there is nothing for a client to fix, and
+            // saying otherwise sends somebody to edit a payload that is correct.
+            $unavailable ? 503 : 403
+        ))->withDetails([['detail' => $e->getMessage()]]);
     }
 }
