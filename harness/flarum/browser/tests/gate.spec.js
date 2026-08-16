@@ -46,9 +46,26 @@ async function register(page, name) {
   await page.goto('/');
   await page.getByRole('button', { name: /sign up/i }).click();
   const dialog = page.locator('.Modal');
-  await dialog.getByLabel(/username/i).fill(name);
-  await dialog.getByLabel(/email/i).fill(`${name}@example.com`);
-  await dialog.getByLabel(/password/i).fill('a-long-enough-password');
+
+  // input[name=...], not getByLabel.
+  //
+  // Flarum's sign-up fields carry name attributes and no <label>, so a label
+  // lookup resolves by placeholder and heuristics -- and resolved the username
+  // and email boxes to the SAME input. Filling both in turn left the username
+  // holding an email address and the email empty, which the forum reported as
+  // "username may only contain letters, numbers, and dashes" and "the email
+  // field is required". Two validation errors that look like a broken form and
+  // were a broken selector.
+  await dialog.locator('input[name="username"]').fill(name);
+  await dialog.locator('input[name="email"]').fill(`${name}@example.com`);
+  await dialog.locator('input[name="password"]').fill('a-long-enough-password');
+
+  // The fields must actually hold what was typed before submitting. Without
+  // this the next failure is again a validation message, and again reads as a
+  // problem with the forum rather than with this file.
+  await expect(dialog.locator('input[name="username"]')).toHaveValue(name);
+  await expect(dialog.locator('input[name="email"]')).toHaveValue(`${name}@example.com`);
+
   await dialog.getByRole('button', { name: /sign up/i }).click();
   return dialog;
 }
