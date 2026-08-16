@@ -487,6 +487,11 @@ esac
 # never picked up its own configuration.
 podman exec "$WEB_C" php flarum cache:clear
 
+# Assets are compiled from the ENABLED extension set, and the set changed after
+# install published them. Without this the forum serves the bundle it built
+# before the extension existed.
+podman exec "$WEB_C" php flarum assets:publish
+
 # --- the smoke --------------------------------------------------------------
 #
 # Proves the pieces are actually wired before any browser opens. A Playwright
@@ -536,20 +541,39 @@ log "the forum renders with the extension enabled"
 # would be testing an extension that is not running -- passing for the wrong
 # reason, which is worse than failing.
 log "smoke: the webhook endpoint exists and refuses an unsigned delivery"
+
+webhook_failed() {
+    log "SMOKE FAILED: $1"
+    log "--- what Flarum itself thinks is installed ---"
+    # Flarum's own view, not mine. The settings table says what SHOULD be
+    # enabled; this says what Flarum actually loaded, and the gap between them
+    # is the whole question.
+    podman exec "$WEB_C" php flarum info 2>&1 | head -40 || true
+    log "--- is the package in vendor? ---"
+    podman exec "$WEB_C" ls -la /site/vendor/soulbind/flarum-connector 2>&1 | head -15 || true
+    log "--- does its extend.php load? ---"
+    podman exec "$WEB_C" php -r '
+        $f = "/site/vendor/soulbind/flarum-connector/extend.php";
+        if (!is_file($f)) { echo "extend.php is not there\n"; exit; }
+        try { $r = require $f; echo "extend.php returned ", count($r), " extenders\n"; }
+        catch (Throwable $e) { echo "extend.php threw ", get_class($e), ": ", $e->getMessage(), "\n"; }
+    ' 2>&1 | head -20 || true
+    log "--- web container log ---"
+    podman logs "$WEB_C" 2>&1 | tail -30 || true
+    exit 1
+}
+
 WEBHOOK_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     -H 'Content-Type: application/json' -d '{}' "$FORUM_URL/soulbind/webhook")
 case "$WEBHOOK_STATUS" in
     400|401)
         log "webhook refused an unsigned delivery with $WEBHOOK_STATUS" ;;
     404)
-        log "the webhook endpoint 404s: the extension's routes did not load"
-        exit 1 ;;
+        webhook_failed "the webhook endpoint 404s: the extension's routes did not load" ;;
     200)
-        log "the webhook ACCEPTED an unsigned delivery -- signature verification is not running"
-        exit 1 ;;
+        webhook_failed "the webhook ACCEPTED an unsigned delivery -- signature verification is not running" ;;
     *)
-        log "unexpected webhook status $WEBHOOK_STATUS"
-        exit 1 ;;
+        webhook_failed "unexpected webhook status $WEBHOOK_STATUS" ;;
 esac
 
 log "stack is up and the extension is live"
