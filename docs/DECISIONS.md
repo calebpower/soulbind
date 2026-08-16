@@ -1760,3 +1760,143 @@ forgets, and a code shown publicly is a code anybody can redeem.
 Its stdout is the message and nothing else, the same discipline as
 `register --quiet` — a driver meant to be scripted cannot share a stream between
 its output and its commentary.
+
+---
+
+## Phase 7 — connector-flarum
+
+### 7.1 — Flarum pinned to 1.8.19, not 2.x
+
+2.x exists only as `v2.0.0-rc.5`. Pinning a release candidate for an extension
+people would install on a live forum trades their stability for our novelty, and
+the 1.x extension API is what the connector needs.
+
+*Alternative:* pin the RC and track it. Rejected — a forum is somebody's
+community, and an RC dependency makes every upgrade their problem.
+
+This resolves the departure the plan anticipated for this phase without needing
+one: §14 Phase 7 names no version, so pinning the stable line is the plain
+reading rather than an override.
+
+### 7.2 — The vector checks are PHPUnit-free, with PHPUnit as a second entry point
+
+PHPUnit 11 requires `ext-xmlwriter`, which this PHP does not have and which
+cannot be installed without touching the system PHP — outside the directive that
+everything created stays inside the repository.
+
+The vectors are the one artifact whose entire purpose is to be run from *both*
+languages. An oracle that runs only where a particular extension happens to be
+installed is an oracle that stops being run, and its silence reads the same as
+agreement.
+
+So the assertions live in `tests/VectorChecks.php` and have two entry points:
+`tests/run-vectors.php`, which needs nothing but `mbstring`, `hash` and `json`;
+and `tests/GoldenVectorTest.php` under PHPUnit, for where PHPUnit runs. One
+implementation, because two copies drift and the copy run less often drifts
+further while still looking like coverage.
+
+That sharing introduced a smaller risk in place of the larger one — a check
+wired into one runner and not the other, which fails silently. The runner
+therefore reflects over `VectorChecks`, enumerates every public check, and
+refuses to pass unless **both** entry points invoke every one. Mutation-checked
+by unwiring a check from the PHPUnit side and watching the runner name it.
+
+`ext-xmlwriter` is recorded in `STATUS.md` as an owner prerequisite, not worked
+around: with it installed, `composer install` succeeds and the PHPUnit suite
+runs the same checks.
+
+### 7.3 — Case folding is ASCII-only, in both languages
+
+**A real defect, in shipped code on both sides.** Normalisation uppercases
+before it validates — that ordering is what makes a typed code
+case-insensitive — and Unicode case mapping does not stay inside its input set.
+So the repair step could turn a character that is *not* in the alphabet into one
+that is:
+
+| Input | Java (`Character.toUpperCase`) | PHP (`mb_strtoupper`) |
+|---|---|---|
+| `U+017F` long s | `S` — **accepted** | `S` — **accepted** |
+| `U+00DF` sharp s | rejected | `SS` — **accepted** |
+| `U+FB00` ﬀ | rejected | `FF` — **accepted** |
+| `U+FB05` ﬅ | rejected | `ST` — **accepted** |
+| `U+FB06` ﬆ | rejected | `ST` — **accepted** |
+
+Typing a long s where somebody's code began with `S` redeemed **their** code,
+with no error anybody could see. That is exactly the harm `LinkCode`'s
+reject-never-repair rule is written to prevent, committed by the repair step
+itself — and the rule's own comment names the consequence: "silently redeem a
+different code and link the wrong account".
+
+The two implementations also *disagreed*: per-character mapping cannot expand
+one character into two, so the Java side let only `U+017F` through. A code the
+forum accepted, the game refused.
+
+Both now map ASCII `a`–`z` and nothing else. That is the only rule that cannot
+invent an alphabet character from a non-alphabet one, it is trivially identical
+in both languages, and it is locale-independent — which is what the comments
+that stood in both files were reaching for. Locale was the smaller problem, and
+fixing only it hid the larger one by making it rare.
+
+*Alternative:* keep Unicode folding and subtract the known-bad characters.
+Rejected — that is a denylist against a table Unicode revises, and the next
+ligature added is a defect that ships.
+
+**How it was found, and what that says.** Not by a test. The vector corpus
+passed, the hand-written tests passed, and the hostile-charset run passed. It
+surfaced when the charset handling was mutated — encoding arguments stripped,
+`/u` dropped — and *every mutant survived*, because the corpus held no character
+whose case mapping leaves ASCII. The blindness was the finding; the defect was
+underneath it.
+
+*See also 1.13 (UTF-8 assertions that could not fail on this JVM) and 1.15 (an
+empty-key test that passed for the wrong reason): the third time a suite has
+been green because nothing in it could distinguish the right answer from the
+wrong one. Each was found the same way -- by breaking the thing on purpose and
+noticing nothing complained.*
+
+### 7.4 — The folding guard is an exhaustive sweep, not vectors
+
+Eight corpus rows now pin the eight known characters. They are not the guard —
+they only ever catch those eight, and the defect they were written for was found
+by mutation rather than by any row.
+
+`LinkCodeFoldingTest` and `VectorChecks::foldingCannotSynthesise` therefore
+sweep **every code point** — all 1,112,064 — and assert that the set of single
+characters normalising to non-null is exactly the 28 alphabet characters plus
+the 20 ASCII lowercase letters that fold into them. Under a second, both take
+well under a second, so there is no reason to sample.
+
+The expected set is **written out by hand** in both languages, not derived from
+`ALPHABET` and not computed with the folding rule. An expectation built the way
+production builds it asserts only that the code agrees with itself, and the
+defect here was a folding rule that was internally consistent and wrong. This is
+the same discipline as the Tier 4 authorization matrix.
+
+Both tests also assert the fix did not overshoot: `bcdfghjk` must still
+normalise to `BCDFGHJK`. A change that rejected everything would satisfy every
+other assertion in the sweep.
+
+### 7.5 — Unicode whitespace vectors exist to make `/u` observable
+
+Dropping the `u` flag from the forum side's whitespace regex, or swapping the
+game side's `Character.isWhitespace` for a literal set, previously changed no
+test result: every whitespace vector used a character the explicit strip-list
+already named. Four rows now use `U+2003`, `U+3000` and `U+2009`, which only the
+general whitespace test catches. Mutation-checked in both directions.
+
+They are written as `\uXXXX` escapes, as the corpus header requires for anything
+invisible — a literal ideographic space in a TSV is indistinguishable from a
+typo, and the next person to edit the file deletes it by accident.
+
+### 7.6 — The cross-language vectors run in `reaper test`, first
+
+The Gradle suites prove the Java side agrees with the corpus. Agreeing with the
+corpus is something both sides could do *while disagreeing with each other* —
+and 7.3 is that sentence as a defect. The manifest's `[run]` verb therefore runs
+the PHP vector script, ordinary and hostile, in a digest-pinned `php:8.4-cli`
+image, before MariaDB starts: the step needs no database, so it fails in seconds
+rather than after a server has come up.
+
+The image is pinned by digest for the same reason as the others, and needs only
+`mbstring`, `hash` and `json` — notably not `ext-xmlwriter`, because the runner
+does not use PHPUnit (7.2).

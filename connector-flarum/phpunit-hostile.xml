@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The hostile run.
+
+  Identical to phpunit.xml except that the bootstrap pins a non-UTF-8 internal
+  encoding and a non-UTF-8 locale. Under a friendly default the vector suite
+  passes whether or not the code genuinely pins its encoding, so the second run
+  is the only thing that can tell the difference.
+
+  A test in the suite asserts the hostility actually took effect, so a future
+  PHP that ignores these settings turns this into a duplicate of the first run
+  loudly rather than silently.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="tests/bootstrap-hostile.php"
+         colors="true"
+         failOnWarning="true"
+         failOnRisky="true"
+         beStrictAboutOutputDuringTests="true">
+  <testsuites>
+    <testsuite name="soulbind-hostile">
+      <directory>tests</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>

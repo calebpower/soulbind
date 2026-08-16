@@ -85,11 +85,26 @@ public final class LinkCode {
                 continue;
             }
 
-            // Character.toUpperCase(char), not String.toUpperCase(): the latter
-            // is locale-sensitive, and under a Turkish default locale 'i' becomes
-            // 'İ' -- so a code would stop validating on a correctly-configured
-            // Turkish server. A defect that appears only for some users.
-            sb.append(Character.toUpperCase(c));
+            // ASCII case mapping ONLY -- not Character.toUpperCase, and not
+            // String.toUpperCase.
+            //
+            // The alphabet is pure ASCII, so Unicode case mapping can do exactly
+            // one thing here that ASCII mapping cannot: turn a character that is
+            // NOT in the alphabet into one that is. It did. U+017F (LATIN SMALL
+            // LETTER LONG S) uppercases to 'S', so "SFGHJK" was redeemable by
+            // typing a long s -- somebody else's code, claimed with no error
+            // anybody could see. That is the precise harm the reject-never-repair
+            // rule above exists to prevent, committed by the repair step itself.
+            //
+            // Restricting the mapping to a-z is the only rule that cannot invent
+            // an alphabet character from a non-alphabet one. It is also
+            // locale-independent, which is what the comment that stood here was
+            // reaching for -- but locale was the smaller of the two problems, and
+            // fixing it per-character hid the larger one by making it rare.
+            //
+            // LinkCodeFoldingTest sweeps every code point and asserts that no
+            // character outside the alphabet normalises into it.
+            sb.append(c >= 'a' && c <= 'z' ? (char) (c - ('a' - 'A')) : c);
         }
 
         String candidate = sb.toString();

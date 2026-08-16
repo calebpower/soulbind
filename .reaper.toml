@@ -60,6 +60,33 @@ set -e
 MARIADB=docker.io/library/mariadb@sha256:67873d30a17f6a9c331f06363b2fa15f38abca415529966d67c84f87f82439fe
 TOOLCHAIN=docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012526d6fb31cc78123c740ebdc1cfd2dced12
 
+# ---------------------------------------------------------------------------
+# The cross-language vectors, FIRST.
+#
+# They need no database and no toolchain, so they fail in seconds rather than
+# after MariaDB has come up. More to the point, they are the only check in this
+# manifest that runs the OTHER implementation: the Gradle suites prove the Java
+# side agrees with the corpus, and agreeing with the corpus alone is something
+# both sides could do while disagreeing with each other.
+#
+# The runner is deliberately PHPUnit-free. PHPUnit needs ext-xmlwriter, which
+# the workstation's PHP does not have, and an oracle that only runs where a
+# particular extension is installed is an oracle that stops being run. The
+# PHPUnit suite covers the same VectorChecks through a second entry point, and
+# the runner asserts that both entry points invoke every one of them.
+#
+# Ordinary and hostile: the hostile pass sets a non-UTF-8 internal encoding and
+# refuses to pass unless it actually took effect. A hostile run that quietly
+# stayed UTF-8 proves nothing the ordinary run did not.
+# ---------------------------------------------------------------------------
+PHP=docker.io/library/php@sha256:f78661b492226388a7057679cc731c3e43bc92ba66cd49a8cfe12374a56bee9f
+
+echo "run: cross-language vectors"
+podman run --rm -v "$PWD":/work -w /work "$PHP" \
+  php connector-flarum/tests/run-vectors.php
+podman run --rm -v "$PWD":/work -w /work "$PHP" \
+  php connector-flarum/tests/run-vectors.php --hostile
+
 # A run must not inherit a container the previous run left behind: it would be
 # serving the previous run's schema, and a green result would be about data
 # nobody in this session created.
@@ -113,6 +140,10 @@ podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 # database silently changes underneath it is a run whose green means nothing.
 images = [
     "docker.io/library/mariadb@sha256:67873d30a17f6a9c331f06363b2fa15f38abca415529966d67c84f87f82439fe",
+    # php 8.4-cli, resolved 2026-08-16. Digest for the same reason as the others.
+    # Needs only mbstring, hash and json, all of which the official image ships;
+    # notably NOT ext-xmlwriter, because the vector runner does not use PHPUnit.
+    "docker.io/library/php@sha256:f78661b492226388a7057679cc731c3e43bc92ba66cd49a8cfe12374a56bee9f",
 ]
 
 [sync]

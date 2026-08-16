@@ -18,7 +18,7 @@ Last updated: 2026-08-15, Phase 4 in progress.
 | 4 | Events and effectors | **Complete** — gate passed: a connector down for 100 mutations receives all 100, in order, applied once by the effector's own reckoning |
 | 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
 | 6 | connector-discord | **In progress** — seam, scripted surface, connector, role effector and the client-library implementation landed; scripted-surface link flow green in the stack. The manual smoke against a real server is outstanding and is named as evidence, not a tier |
-| 7 | connector-flarum | Not started |
+| 7 | connector-flarum | **In progress** — protocol re-implementation, the shared vector checks and their two entry points, and the cross-language run wired into `reaper test`. Found and fixed a real link-code defect present in **both** languages (see below). Webhook receiver, settings UI, register/post gates and the T5 injection suite outstanding |
 | 8 | connector-plan + full-stack battery | Not started |
 | 9 | Simulated users | Not started |
 | 10 | Hardening and release | Not started |
@@ -145,7 +145,19 @@ budget would be the easy mistake.
 
 ## Outstanding, and needing the owner
 
-One item in the whole build cannot be done from here.
+Two items in the whole build cannot be done from here.
+
+**`ext-xmlwriter` for PHP.** `composer install` in `connector-flarum` fails:
+PHPUnit 11 requires `ext-xmlwriter`, and this PHP 8.4.24 does not have it. The
+package exists — `php84-xmlwriter-8.4.24` — but installing it means touching the
+system PHP, which is outside the directive that everything created stays inside
+the repository.
+
+**Nothing is blocked by it.** The vector checks were deliberately written
+PHPUnit-free (`DECISIONS.md` 7.2) and run today, on the workstation and in a
+pinned container inside `reaper test`, ordinary and hostile. Installing the
+extension adds the PHPUnit entry point to the same checks; it does not add
+coverage that is currently missing.
 
 **The Phase 6 manual smoke.** The specification asks for one run against a real
 chat platform in a throwaway server, recorded here — and names it as **evidence,
@@ -166,6 +178,35 @@ To run it: register a bot, invite it to a throwaway server with role-management
 permission, put the token in `SOULBIND_PLATFORM_TOKEN`, point
 `soulbind-discord.toml` at a core, and run `/link` and `/whoami`. Record what
 happened here.
+
+## The defect Phase 7 found in shipped code, on both sides
+
+Link-code normalisation uppercases before it validates. Unicode case mapping
+does not stay inside its input set, so the repair step could turn a character
+that is **not** in the alphabet into one that is:
+
+| Input | Game side | Forum side |
+|---|---|---|
+| `U+017F` long s | `S` — **accepted** | `S` — **accepted** |
+| `U+00DF` sharp s | rejected | `SS` — **accepted** |
+| `U+FB00`, `U+FB05`, `U+FB06` ligatures | rejected | `FF`, `ST`, `ST` — **accepted** |
+
+Typing a long s where somebody's code began with `S` redeemed **their** code,
+with no error anybody could see — the precise harm the reject-never-repair rule
+exists to prevent, committed by the repair step itself. The two sides also
+disagreed, so a code one connector accepted the other refused.
+
+Both now fold ASCII `a`–`z` and nothing else. An exhaustive sweep of all
+1,112,064 code points, in both languages, asserts that the set of characters
+normalising to non-null is exactly the 28 alphabet characters plus the 20 ASCII
+lowercase letters — with the expected set written out by hand rather than
+derived from the code it checks.
+
+**It was not found by a test.** The corpus passed, the hand-written tests
+passed, and the hostile-charset run passed. It surfaced when the charset
+handling was mutated and *every mutant survived*: the corpus held no character
+whose case mapping leaves ASCII, so there was nothing to distinguish right from
+wrong. The blindness was the finding. Full account in `DECISIONS.md` 7.3.
 
 ## Guards in force
 

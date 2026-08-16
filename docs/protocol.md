@@ -275,6 +275,43 @@ The code is normalised **once, in core**. A connector normalising first and core
 normalising again would be two chances to disagree about what a typed code
 means.
 
+A connector may still normalise locally to reject nonsense before a round trip,
+and the golden vectors exist to keep that identical to core's rule rather than
+merely similar.
+
+### What normalisation is
+
+The rule is part of the wire contract, because two implementations that
+normalise differently accept different codes.
+
+1. **Strip** the ASCII separators `-` `_` `.` `:` `,`, every Unicode whitespace
+   character, and the three invisibles a copy-paste from a web page drags along:
+   `U+00A0`, `U+200B`, `U+FEFF`. The last three are not whitespace to a general
+   whitespace test, which is why they are named as well.
+2. **Uppercase ASCII `a`–`z`, and nothing else.**
+3. **Reject** unless every remaining character is in the alphabet
+   `23456789BCDFGHJKMNPQRSTVWXYZ` — no `0`/`O`, no `1`/`l`/`I`, no vowels, so
+   look-alikes stay apart and a short code cannot spell a word.
+
+**Reject, never repair.** Mapping `O` to `0` would silently redeem a *different*
+code and link the wrong account, with no error anybody can see.
+
+Step 2 says ASCII because that rule was learned the hard way. Unicode case
+mapping does not stay inside its input set: `U+017F` (long s) uppercases to `S`,
+and a whole-string fold also expands `U+00DF` to `SS` and the `ﬀ`/`ﬅ`/`ﬆ`
+ligatures to `FF`/`ST`. Applied before validation, that turns a character nobody
+may type into a code somebody else holds — the repair step committing the exact
+harm the reject-never-repair rule forbids. Both implementations shipped it, and
+disagreed about which characters were affected. See `DECISIONS.md` 7.3.
+
+ASCII-only mapping is the only rule that cannot invent an alphabet character
+from a non-alphabet one. It is also locale-independent, which matters
+separately: a Turkish locale maps `i` to `İ`, so a locale-sensitive uppercase
+would stop validating codes on a correctly-configured Turkish server.
+
+Held by the vectors in `vectors/link-code-normalisation.tsv`, consumed by both
+languages, and by an exhaustive sweep of every code point in each.
+
 ### Single use
 
 One statement carries the decision:

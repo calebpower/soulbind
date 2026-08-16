@@ -93,3 +93,40 @@ BCDF@GHJ	NULL
 # length" when the real answer is "no such code".
 B	B
 BCDFGHJKBCDFGHJKBCDFGHJK	BCDFGHJKBCDFGHJKBCDFGHJK
+
+# --- case folding must not INVENT an alphabet character --------------------
+# Every one of these was a live defect, found by mutating the charset handling
+# and noticing the mutants survived.
+#
+# Unicode case mapping can turn a character that is not in the alphabet into
+# one that is. Uppercasing U+017F (long s) gives 'S'; the whole-string fold the
+# forum side used also expanded U+00DF to 'SS', U+FB00 to 'FF', and U+FB05 and
+# U+FB06 to 'ST'. So typing a sharp s redeemed a code beginning 'SS' that
+# belonged to somebody else -- exactly the harm "reject, never repair" exists
+# to prevent, committed by the repair step itself.
+#
+# The two sides disagreed as well as being wrong: per-character mapping cannot
+# expand one character into two, so the game side let only U+017F through. A
+# code one connector accepted the other refused.
+#
+# Both now map ASCII a-z and nothing else. These rows pin that; the exhaustive
+# sweep in LinkCodeFoldingTest and VectorChecks::foldingCannotSynthesise is
+# what actually guards it, because eight rows only ever catch eight characters.
+ſ	NULL
+ſFGHJK	NULL
+BCDſFGH	NULL
+ß	NULL
+ß2345	NULL
+ﬀ	NULL
+ﬅ	NULL
+Xﬆ23	NULL
+
+# --- whitespace beyond the enumerated list ---------------------------------
+# The explicit list cannot enumerate every Unicode space, so both sides fall
+# back to a general whitespace test. These rows are what makes that fallback
+# observable: drop the /u from the forum side's regex, or swap the game side's
+# isWhitespace for a literal set, and only these fail.
+BCD\u2003FGH	BCDFGH
+BCD\u3000FGH	BCDFGH
+BCD\u2009FGH	BCDFGH
+\u2003\u3000BCDFGH	BCDFGH
