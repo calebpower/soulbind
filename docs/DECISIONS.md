@@ -1394,3 +1394,33 @@ the REVIEWED marker is still matched on the raw line, because that one **is**
 meant to be a comment.
 
 A guard an explanation can switch off is not a guard.
+
+### X.5 — The contract suite paid for itself within the hour
+
+The first MariaDB run of the new suite deadlocked: twelve threads acknowledging
+one cursor, and InnoDB rolled one back. The caller received an exception.
+
+That is a fifth defect of the same family — something the multi-writer backend
+does that the single-writer one cannot — and it was found by a test written
+specifically to look for that family, rather than by a phase gate stumbling
+into it.
+
+`Jdbc.write` now retries a rolled-back transaction, bounded, with a growing
+pause. Dead code on SQLite. Load-bearing on the other backend.
+
+**The running tally, for whoever reads this later.** Five defects, one shape,
+all invisible on the single-writer backend:
+
+| Defect | Found by | Consequence if shipped |
+|---|---|---|
+| Audit sequence by `SELECT MAX+1` | First MariaDB run | 45 sequences from 200 appends |
+| Storage tests isolated by accident | First MariaDB run | Tests passing for the wrong reason |
+| `platformKind.seen` check-then-act | T8 race on MariaDB | HTTP 500 |
+| `gate.seen` check-then-act | The same 500 | HTTP 500 |
+| Cursor `SELECT`-then-`UPDATE` | The check-then-act guard | Redelivery of applied events |
+| Cursor acknowledgement deadlock | The contract suite | Exception to the connector |
+
+Three mechanisms now cover it: the contract suite (runtime, needs a real
+multi-writer backend), the check-then-act guard (static, runs anywhere), and
+`reaper test` after every phase. The guard is the only one that works on this
+workstation, which is why it exists.
