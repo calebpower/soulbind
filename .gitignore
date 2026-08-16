@@ -15,6 +15,12 @@
 # artifacts of a run, never inputs to one.
 /out/
 
+# Fetched stack artefacts. Pinned by checksum in harness/fullstack/pins.env,
+# so the pin is committed and the bytes are not -- a 100MB jar in git is a jar
+# somebody clones every time to run one test.
+/harness/fullstack/.cache/
+/harness/fullstack/run/
+
 # Local tooling state
 .DS_Store
 *.swp
@@ -25,4 +31,10 @@
 # Secrets never belong in the tree. Config carries environment-variable
 # overrides for exactly this reason.
 *.env
+
+# ...except the pinned artefact list, which is the OPPOSITE of a secret: it is
+# the record of exactly which bytes a stack run used, and a clone without it
+# cannot reproduce anything. Caught because *.env silently swallowed it.
+!harness/fullstack/pins.env
+
 /secrets/

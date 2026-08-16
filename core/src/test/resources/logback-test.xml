@@ -3,7 +3,7 @@
   Test logging.
 
   WARN by default. The fuzz task turns on showStandardStreams so its SEED line
-  is visible -- and at DEBUG the connection pool's configuration dump buries
+  is visible — and at DEBUG the connection pool's configuration dump buries
   that line under two hundred others, which defeats the only reason the streams
   were turned on.
 

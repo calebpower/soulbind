@@ -1,0 +1,17 @@
+{
+  "name": "soulbind-player-driver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drives a real game client against the proxy connector, so linking is exercised through the real flow rather than a backdoor.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "smoke": "node smoke.js"
+  },
+  "dependencies": {
+    "mineflayer": "4.37.1"
+  }
+}

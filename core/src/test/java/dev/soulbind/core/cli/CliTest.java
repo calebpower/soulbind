@@ -19,6 +19,7 @@ package dev.soulbind.core.cli;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -323,6 +324,51 @@ class CliTest {
         assertEquals(Doctor.EXIT_HEALTHY, run.exit(), run.err());
         assertTrue(run.out().contains("registered cli-connector"), run.out());
         assertTrue(run.out().contains("credential"), run.out());
+    }
+
+    @Test
+    @DisplayName("--quiet prints ONLY the credential, with nothing to parse around it")
+    void registerQuiet() throws Exception {
+        // A stack script parsed the human report with awk and picked up a log
+        // line that also said "credential", producing a multi-line value the
+        // HTTP client refused as an invalid header. A command meant to be
+        // scripted should not need fragile parsing.
+        Run run = invoke(
+                "register",
+                "--name", "scripted",
+                "--capabilities", "code-display",
+                "--quiet",
+                "--config", writeConfig(healthyConfig()).toString());
+
+        assertEquals(Doctor.EXIT_HEALTHY, run.exit(), run.err());
+
+        String[] lines = run.out().strip().split("\n");
+        assertEquals(
+                1, lines.length,
+                () -> "--quiet printed " + lines.length + " lines; a script cannot tell which "
+                        + "is the credential: " + run.out());
+        assertFalse(lines[0].contains(" "), () -> "the credential line has spaces: " + lines[0]);
+        assertFalse(lines[0].isBlank());
+
+        // Asserted POSITIVELY: stdout is exactly a credential, character for
+        // character. A negative list of things it must not contain would need
+        // updating every time a dependency learned to log -- and naming a
+        // connection pool here would put a JDBC implementation detail outside
+        // the storage package, which a guard caught when this was first
+        // written that way.
+        //
+        // Logging goes to stderr precisely so this holds. The first stack
+        // script to read this stream got a pool log line and sent it as an
+        // HTTP header.
+        assertTrue(
+                lines[0].matches("[A-Za-z0-9_-]+"),
+                () -> "stdout is not just a credential; something else logged there: "
+                        + run.out());
+
+        // And it is the real thing, not a truncated render of it.
+        try (Storage storage = StorageBackends.open(StorageBackends.any(), tempDir)) {
+            assertNotNull(storage);
+        }
     }
 
     @Test

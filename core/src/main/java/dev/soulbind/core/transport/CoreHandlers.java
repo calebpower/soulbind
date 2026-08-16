@@ -28,11 +28,15 @@ import dev.soulbind.core.storage.ConnectorRepository;
 import dev.soulbind.core.storage.IdentityRepository;
 import dev.soulbind.core.storage.EventRepository;
 import dev.soulbind.core.storage.PolicyRepository;
+import dev.soulbind.core.storage.RuntimeConfigRepository;
 import dev.soulbind.protocol.AttestRequest;
 import dev.soulbind.protocol.AuditEntryView;
 import dev.soulbind.protocol.AuditPushRequest;
 import dev.soulbind.protocol.AuditQueryRequest;
 import dev.soulbind.policy.Decision;
+import dev.soulbind.policy.Effect;
+import dev.soulbind.policy.PolicyOverride;
+import dev.soulbind.policy.Rule;
 import dev.soulbind.policy.PolicyEngine;
 import dev.soulbind.policy.SubjectSnapshot;
 import dev.soulbind.protocol.Capability;
@@ -46,7 +50,10 @@ import dev.soulbind.protocol.EventAckRequest;
 import dev.soulbind.protocol.EventPollRequest;
 import dev.soulbind.protocol.EventPollResponse;
 import dev.soulbind.protocol.EventView;
+import dev.soulbind.protocol.EventType;
 import dev.soulbind.protocol.IdentityView;
+import dev.soulbind.protocol.OverrideView;
+import dev.soulbind.protocol.RuleView;
 import dev.soulbind.protocol.SubjectInspectRequest;
 import dev.soulbind.protocol.UnlinkRequest;
 import dev.soulbind.protocol.ErrorCode;
@@ -83,6 +90,7 @@ public final class CoreHandlers {
             IdentityRepository identities,
             PolicyRepository policy,
             EventRepository events,
+            RuntimeConfigRepository runtimeConfig,
             LinkingService linking,
             Codec codec,
             Clock clock,
@@ -392,6 +400,145 @@ public final class CoreHandlers {
             return WireResponse.ok(Map.of("cursor", position));
         });
 
+        handlers.put(Operation.RULE_GET, (connector, payload) -> {
+            var request = codec.bind(payload, GateRequest.class);
+            if (request.isEmpty() || blank(request.get().gate())) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST, "rule.get names a gate");
+            }
+            return policy.rule(request.get().gate())
+                    .map(r -> WireResponse.ok(toView(r)))
+                    // No rule is not an error: a gate nobody configured is a
+                    // gate nobody asked for, and reporting that as a failure
+                    // would make "is this gate governed?" unanswerable without
+                    // catching something.
+                    .orElseGet(() -> WireResponse.ok(Map.of("gate", request.get().gate(),
+                            "configured", false)));
+        });
+
+        handlers.put(Operation.RULE_SET, (connector, payload) -> {
+            var request = codec.bind(payload, RuleView.class);
+            if (request.isEmpty() || blank(request.get().gate())) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST, "rule.set names a gate");
+            }
+            RuleView view = request.get();
+
+            Effect effect = Effect.fromConfigName(view.defaultEffect())
+                    // An unreadable effect DENIES. A rule this build cannot
+                    // parse must not open a gate, and refusing the write
+                    // outright would leave the operator unable to fix a gate
+                    // that is currently wrong.
+                    .orElse(Effect.DENY);
+
+            Rule rule;
+            try {
+                rule = new Rule(
+                        view.gate(),
+                        Set.copyOf(view.requiredKinds()),
+                        view.requireLinked(),
+                        view.graceSeconds(),
+                        effect);
+            } catch (IllegalArgumentException e) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST, e.getMessage());
+            }
+
+            policy.gateSeen(view.gate(), connector.id(), null);
+            policy.setRule(rule, clock.instant(), "connector:" + connector.id());
+
+            audit.append(new AuditEntry(
+                    0L, clock.instant(), "connector:" + connector.id(), "rule.changed",
+                    null, null, view.gate(),
+                    Map.of("requiredKinds", view.requiredKinds(),
+                            "requireLinked", view.requireLinked(),
+                            "graceSeconds", view.graceSeconds(),
+                            "defaultEffect", effect.wireName())));
+
+            // Emitted so connectors caching decisions for this gate learn their
+            // cache is suspect. Without it a rule change takes effect only as
+            // fast as the shortest TTL, which is not what an operator pressing
+            // enter believes they just did.
+            events.append(EventRecord.of(
+                    EventType.RULE_CHANGED, null, null, view.gate(), Map.of(),
+                    clock.instant()));
+
+            return WireResponse.ok(toView(rule));
+        });
+
+        handlers.put(Operation.OVERRIDE_GET, (connector, payload) -> {
+            var request = codec.bind(payload, GateRequest.class);
+            if (request.isEmpty() || blank(request.get().gate())) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST, "override.get names a gate");
+            }
+            return WireResponse.ok(Map.of(
+                    "overrides",
+                    policy.overridesFor(request.get().gate()).stream()
+                            .map(CoreHandlers::toView).toList()));
+        });
+
+        handlers.put(Operation.OVERRIDE_SET, (connector, payload) -> {
+            var request = codec.bind(payload, OverrideView.class);
+            if (request.isEmpty() || blank(request.get().gate())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "override.set names a gate");
+            }
+            OverrideView view = request.get();
+
+            PolicyOverride override;
+            try {
+                override = new PolicyOverride(
+                        view.gate(),
+                        blank(view.subjectId()) ? null : view.subjectId(),
+                        blank(view.identityRef()) ? null : view.identityRef(),
+                        Effect.fromConfigName(view.effect()).orElse(Effect.DENY),
+                        view.reason(),
+                        view.expiresAtEpochSeconds() == null
+                                ? null
+                                : Instant.ofEpochSecond(view.expiresAtEpochSeconds()));
+            } catch (IllegalArgumentException e) {
+                // The record's own constructor enforces "a reason" and "exactly
+                // one target". Reporting its message means the operator is told
+                // which rule they broke rather than that something was invalid.
+                return WireResponse.error(ErrorCode.INVALID_REQUEST, e.getMessage());
+            }
+
+            String id = policy.addOverride(
+                    override, clock.instant(), "connector:" + connector.id());
+
+            audit.append(new AuditEntry(
+                    0L, clock.instant(), "connector:" + connector.id(), "override.set",
+                    override.subjectId(), override.identityRef(), view.gate(),
+                    Map.of("effect", override.effect().wireName(),
+                            "reason", override.reason())));
+
+            return WireResponse.ok(Map.of("id", id));
+        });
+
+        handlers.put(Operation.CONFIG_GET, (connector, payload) ->
+                WireResponse.ok(Map.of("config", runtimeConfig.all())));
+
+        handlers.put(Operation.CONFIG_SET, (connector, payload) -> {
+            var request = codec.bind(payload, ConfigSetRequest.class);
+            if (request.isEmpty() || blank(request.get().key())) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST, "config.set names a key");
+            }
+            runtimeConfig.set(
+                    request.get().key(), request.get().value(),
+                    clock.instant(), "connector:" + connector.id());
+
+            audit.append(new AuditEntry(
+                    0L, clock.instant(), "connector:" + connector.id(), "config.changed",
+                    null, null, null,
+                    // The KEY, never the value. Runtime config can hold
+                    // something an operator would not want in an audit log any
+                    // more than in a config file.
+                    Map.of("key", request.get().key())));
+
+            events.append(EventRecord.of(
+                    EventType.CONFIG_CHANGED, null, null, null,
+                    Map.of("key", request.get().key()), clock.instant()));
+
+            return WireResponse.ok(Map.of("key", request.get().key()));
+        });
+
         return Map.copyOf(handlers);
     }
 
@@ -440,6 +587,31 @@ public final class CoreHandlers {
                 event.createdAt().getEpochSecond());
     }
 
+    private static RuleView toView(Rule rule) {
+        return new RuleView(
+                rule.gateName(),
+                List.copyOf(rule.requiredKinds()),
+                rule.requireLinked(),
+                rule.graceSeconds(),
+                rule.defaultEffect().wireName());
+    }
+
+    private static OverrideView toView(PolicyOverride override) {
+        return new OverrideView(
+                null,
+                override.gateName(),
+                override.subjectId(),
+                override.identityRef(),
+                override.effect().wireName(),
+                override.reason(),
+                override.expiresAt() == null ? null : override.expiresAt().getEpochSecond());
+    }
+
+    /** A request naming only a gate. */
+    private record GateRequest(String gate) {}
+
+    private record ConfigSetRequest(String key, String value) {}
+
     private static boolean blank(String s) {
         return s == null || s.isBlank();
     }
@@ -483,6 +655,12 @@ public final class CoreHandlers {
                 Operation.DECIDE,
                 Operation.EVENT_SUBSCRIBE,
                 Operation.EVENT_ACK,
+                Operation.RULE_GET,
+                Operation.RULE_SET,
+                Operation.OVERRIDE_GET,
+                Operation.OVERRIDE_SET,
+                Operation.CONFIG_GET,
+                Operation.CONFIG_SET,
                 Operation.IDENTITY_UNLINK,
                 Operation.SUBJECT_INSPECT);
     }

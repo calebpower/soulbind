@@ -79,6 +79,7 @@ final class TestCore implements AutoCloseable {
                         storage.identities(),
                         storage.policy(),
                         storage.events(),
+                        storage.runtimeConfig(),
                         new dev.soulbind.core.identity.LinkingService(
                                 new dev.soulbind.core.events.EventEmitter(storage.events(), clock),
                                 storage.identities(), storage.linkCodes(),

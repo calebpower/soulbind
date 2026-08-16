@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logging goes to STDERR. Deliberately.
+
+  stdout is the command's OUTPUT: `soulbind register —quiet` prints a
+  credential there and nothing else, so a script can read it. Sharing the stream
+  with log lines makes that impossible — and it failed exactly that way the
+  first time a stack script tried, picking up a connection-pool line as the
+  credential and sending it as an HTTP header.
+
+  Third-party libraries are at WARN. Their INFO is a running commentary on
+  connection pools and migrations that buries the one line an operator needed.
+  Nothing is silenced: warnings and errors from anything still print, and
+  soulbind's own logger stays at INFO because when core says something it is
+  worth reading.
+-->
+<configuration>
+  <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+    <target>System.err</target>
+    <encoder>
+      <pattern>%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{24} -- %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="com.zaxxer.hikari" level="WARN"/>
+  <logger name="org.flywaydb" level="WARN"/>
+  <logger name="io.javalin" level="WARN"/>
+  <logger name="org.eclipse.jetty" level="WARN"/>
+
+  <logger name="dev.soulbind" level="INFO"/>
+
+  <root level="WARN">
+    <appender-ref ref="STDERR"/>
+  </root>
+</configuration>

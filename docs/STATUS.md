@@ -16,7 +16,7 @@ Last updated: 2026-08-15, Phase 4 in progress.
 | 2 | Identity graph and linking | **Complete** — gate passed: two connectors link in both directions, exactly-one-redeem proven under concurrency on both backends, vectors consumed under the hostile charset |
 | 3 | Policy engine and decisions | **Complete** — gate passed |
 | 4 | Events and effectors | **Complete** — gate passed: a connector down for 100 mutations receives all 100, in order, applied once by the effector's own reckoning |
-| 5 | connector-velocity | Not started |
+| 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
 | 6 | connector-discord | Not started |
 | 7 | connector-flarum | Not started |
 | 8 | connector-plan + full-stack battery | Not started |

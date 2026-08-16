@@ -1571,3 +1571,85 @@ because the loader reaches connectors through the SDK as `api` while tomlj
 remains `implementation` inside `config`.
 
 Neither needed me to remember the rule.
+
+### 5.10 — The stack run, and the six things it found
+
+The Phase 5 gate needed a real client against a real proxy. Building it found
+six defects, none of which any unit test could have.
+
+**The plugin jar contained no dependencies.** `NoClassDefFoundError` on the SDK:
+a proxy plugin gets one file and no classpath, and the plain jar carried only
+this module's classes. Now a fat jar — soulbind's own modules plus Jackson,
+tomlj and slf4j, all Apache-2.0 or MIT, with velocity-api excluded because the
+proxy supplies it and two copies is a classloader argument.
+
+**And the harness reported the gate WORKING while it was unloaded.**
+`connectExpectingRefusal` accepted *any* kick as proof, and was being satisfied
+by "Unable to connect to lobby". Two defects that hid each other: the plugin was
+absent, and the test could not tell. It now requires the text the refusal must
+contain, and refuses to run without it.
+
+**Core logged to stdout, where its output is.** `register --quiet` prints a
+credential for scripts to read; a connection-pool line on the same stream was
+read as the credential and sent as an HTTP header, which the client rejected as
+invalid. Logging moved to stderr. A CLI meant to be scripted cannot share a
+stream between its output and its commentary.
+
+**An illegal XML comment in logback.xml.** `--` inside `<!-- -->`, which logback
+answers by dumping its parser diagnostics to stdout — reintroducing the exact
+problem the file was written to fix.
+
+**The jar task read the runtime classpath without declaring it.** It passed
+repeatedly on a tree where the other jars happened to be built, and failed the
+first time the tree was clean.
+
+**The harness credential lacked `enforcement-point`**, and the run failed
+there — correctly. Granting the harness everything would have hidden the
+capability model rather than exercised it.
+
+### 5.11 — The chicken and egg the gate creates, solved as designed
+
+A join gate refuses everybody who has not linked, including the player who needs
+to get in to run `/link`. The harness solves it the way the system intends: an
+**override** admits one player before they have linked, which is the documented
+reason overrides exist.
+
+The alternative — turning the gate off for the harness — would have tested a
+configuration that no deployment runs.
+
+The final assertion asks core directly rather than reconnecting, because the
+override is still in force and a successful join would prove nothing about the
+rule. The graph is then read back, because a response can be right about work
+that did not persist.
+
+### 5.12 — What the stack pins, and what it costs
+
+Velocity 3.5.1 and Paper 1.21.11 by **checksum**, not just URL: a URL is a
+promise somebody else keeps. The fetch refuses on a mismatch rather than
+warning, because a jar nobody reviewed makes every result below it meaningless
+while looking exactly like a passing run.
+
+Paper is **not** the newest. mineflayer's bundled data tops out at 1.21.11, and
+26.2 was refused outright. That costs less than it looks: the plugin runs on the
+proxy and never talks to Paper. Worth re-pinning upward when the client catches
+up, because "the backend is old" is a difference from production even when it is
+not a load-bearing one.
+
+The client speaks the **backend's** protocol rather than the proxy's newest —
+a proxy accepts a range, and autodetection refused before anything under test
+ran.
+
+The proxy's login rate limit is disabled **for the harness only**, with the
+reason stated in the generated config: this harness is one address making
+several connections in seconds, which no real deployment is. It weakens nothing
+under test — it is a proxy DoS control, not part of linking or the gate.
+
+### 5.13 — npm is broken on this workstation; yarn is not
+
+`npm install` fails for any package with `MODULE_NOT_FOUND: imurmurhash` inside
+npm's own dependency tree. Not a soulbind problem and not fixable from inside
+this repository — repairing it means touching `/usr/local/lib/node_modules`.
+
+`yarn` is installed and works, so the harness uses it and commits a
+`yarn.lock`. Recorded because `npm --version` answers perfectly well, so the
+breakage is invisible until something tries to install.

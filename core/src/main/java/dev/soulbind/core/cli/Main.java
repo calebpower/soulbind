@@ -115,9 +115,23 @@ public final class Main {
                 ? List.of()
                 : Arrays.stream(capabilities.split(",")).map(String::strip).toList();
 
+        // --quiet prints ONLY the credential, for scripts.
+        //
+        // Added because a stack script parsed the human report with awk and
+        // picked up a log line that also contained the word "credential" --
+        // producing a multi-line "credential" that the HTTP client then refused
+        // as an invalid header. A command meant to be scripted should not need
+        // fragile parsing to be scripted.
+        boolean quiet = argv.contains("--quiet");
+
         Config config = CoreConfig.load(configFile);
         try (Storage storage = Bootstrap.open(config)) {
-            Bootstrap.report(Bootstrap.register(storage, name, claimed), out);
+            Bootstrap.Registered registered = Bootstrap.register(storage, name, claimed);
+            if (quiet) {
+                out.println(registered.credential());
+            } else {
+                Bootstrap.report(registered, out);
+            }
         }
         return Doctor.EXIT_HEALTHY;
     }
@@ -149,6 +163,7 @@ public final class Main {
                             storage.identities(),
                             storage.policy(),
                             storage.events(),
+                            storage.runtimeConfig(),
                             new LinkingService(
                                     new EventEmitter(storage.events(), clock),
                                     storage.identities(), storage.linkCodes(),
@@ -200,8 +215,9 @@ public final class Main {
         out.println("        Judge this installation and say what is wrong.");
         out.println("        Exit 0 healthy (warnings permitted), 1 unhealthy, 2 cannot run.");
         out.println();
-        out.println("  soulbind register --name <n> [--capabilities a,b] [--config <file>]");
+        out.println("  soulbind register --name <n> [--capabilities a,b] [--quiet]");
         out.println("        Register a connector and print its credential ONCE.");
+        out.println("        --quiet prints only the credential, for scripts.");
         out.println();
         out.println("  soulbind serve    [--config <file>]");
         out.println("        Run the dispatcher.");
