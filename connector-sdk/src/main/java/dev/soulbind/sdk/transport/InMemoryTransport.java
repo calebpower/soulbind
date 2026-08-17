@@ -15,8 +15,9 @@
  */
 package dev.soulbind.sdk.transport;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Function;
 
 /**
@@ -35,7 +36,22 @@ import java.util.function.Function;
  */
 public final class InMemoryTransport implements Transport {
 
-    private final List<String> sent = new ArrayList<>();
+    /**
+     * What was sent, in order — and safe to send from several threads.
+     *
+     * <p>A plain {@code ArrayList} here threw
+     * {@code ArrayIndexOutOfBoundsException} from inside {@code add} when a
+     * connector test drove eight threads through one transport, and the stack
+     * trace pointed at this class rather than at the code under test. A test
+     * double that corrupts under concurrent use makes every concurrency test
+     * built on it untrustworthy: the loud failure is an exception, and the quiet
+     * one is {@link #sent()} returning a list that is missing entries nobody
+     * will notice.
+     *
+     * <p>A queue rather than a copy-on-write list, because a test that sends
+     * thousands of requests would otherwise copy the whole array on every one.
+     */
+    private final Queue<String> sent = new ConcurrentLinkedQueue<>();
     private Function<String, String> responder;
     private boolean connected = true;
     private TransportException failure;
@@ -87,7 +103,13 @@ public final class InMemoryTransport implements Transport {
         return this;
     }
 
-    /** Every request body sent, in order. */
+    /**
+     * Every request body sent, in order.
+     *
+     * <p>A snapshot. Taken while other threads may still be sending, it is
+     * whatever had arrived by then — which is the honest answer, and the reason
+     * an assertion on this should be made after the senders have finished.
+     */
     public List<String> sent() {
         return List.copyOf(sent);
     }

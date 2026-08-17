@@ -75,7 +75,9 @@ public final class MigrationFingerprint {
     private static final int SMALL_TABLE_ROWS = 200;
 
     /** A floor on how much the fingerprint must have measured to mean anything. */
-    private static final int MINIMUM_FINGERPRINT_LINES = 20;
+    // 12, not 20: the schema has 16 tables today, and this is a floor against
+    // measuring nothing, not an assertion about how many migrations exist.
+    private static final int MINIMUM_FINGERPRINT_LINES = 12;
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
@@ -110,7 +112,14 @@ public final class MigrationFingerprint {
         // difference between the two backends -- would print "migrations are
         // idempotent" having compared no schema at all. The number is a floor,
         // not the exact count, so adding a migration does not edit this file.
-        long tableLines = before.lines().filter(l -> l.startsWith("  ") && !l.startsWith("    ")).count();
+        // Counted from the SCHEMA section alone.
+        //
+        // The floor previously counted every two-space line, which on sqlite
+        // meant flyway history + schema + row counts (39 for a 16-table
+        // schema), and on MariaDB was satisfied several times over by
+        // system-catalog tables this check could not even read. A floor met by
+        // noise is not a floor.
+        long tableLines = schemaTableCount(before);
         if (tableLines < MINIMUM_FINGERPRINT_LINES) {
             System.err.println("the fingerprint measured almost nothing (" + tableLines
                     + " lines), so comparing it to itself would prove nothing. Expected at least "
@@ -185,8 +194,27 @@ public final class MigrationFingerprint {
             // their spelling would report a difference that is not one.
             sb.append("schema:\n");
             DatabaseMetaData md = c.getMetaData();
+
+            // SCOPED to this connection's catalog.
+            //
+            // A null catalog means "the one file" on SQLite and "every database
+            // on the server" on MariaDB. The first session run enumerated 144
+            // tables instead of 16: mysql, performance_schema and sys, each
+            // queried unqualified and recorded as -1 -- plus every soulbind
+            // table TWICE, because the unit tier's `soulbind` database lives in
+            // the same container as this tier's `soulbind_fullstack`. The
+            // manifest separates those two deliberately, and this reached
+            // straight back across the separation.
+            //
+            // Worse, it made the anti-vacuity floor inert: 112 unreadable
+            // system-catalog entries satisfied MINIMUM_FINGERPRINT_LINES five
+            // times over, so every soulbind table could have vanished and the
+            // check would still have reported "migrations are idempotent". The
+            // floor's own comment names catalog scoping as the thing it guards
+            // against.
+            String catalog = c.getCatalog();
             List<String> tables = new ArrayList<>();
-            try (ResultSet rs = md.getTables(null, null, "%", new String[] {"TABLE"})) {
+            try (ResultSet rs = md.getTables(catalog, null, "%", new String[] {"TABLE"})) {
                 while (rs.next()) {
                     tables.add(rs.getString("TABLE_NAME"));
                 }
@@ -201,7 +229,7 @@ public final class MigrationFingerprint {
                 // match a `linkXcode` if one ever appeared.
                 String pattern = md.getSearchStringEscape();
                 String escaped = table.replace("_", pattern + "_").replace("%", pattern + "%");
-                try (ResultSet rs = md.getColumns(null, null, escaped, "%")) {
+                try (ResultSet rs = md.getColumns(catalog, null, escaped, "%")) {
                     while (rs.next()) {
                         // Size, default and ordinal included: a VARCHAR(64)
                         // widened to VARCHAR(255), a default appearing, or a
@@ -220,9 +248,9 @@ public final class MigrationFingerprint {
                     sb.append("    ").append(column).append('\n');
                 }
 
-                appendSorted(sb, "    index ", indexes(md, table));
-                appendSorted(sb, "    pk ", primaryKeys(md, table));
-                appendSorted(sb, "    fk ", foreignKeys(md, table));
+                appendSorted(sb, "    index ", indexes(md, catalog, table));
+                appendSorted(sb, "    pk ", primaryKeys(md, catalog, table));
+                appendSorted(sb, "    fk ", foreignKeys(md, catalog, table));
             }
 
 
@@ -353,6 +381,25 @@ public final class MigrationFingerprint {
         }
     }
 
+    /** Table headings in the `schema:` section, which is what the floor is about. */
+    private static long schemaTableCount(String fingerprint) {
+        boolean inSchema = false;
+        long count = 0;
+        for (String line : fingerprint.split("\n", -1)) {
+            if (line.equals("schema:")) {
+                inSchema = true;
+                continue;
+            }
+            if (!line.startsWith(" ") && !line.isEmpty()) {
+                inSchema = false;
+            }
+            if (inSchema && line.startsWith("  ") && !line.startsWith("    ")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private static void appendSorted(StringBuilder sb, String prefix, List<String> values) {
         Collections.sort(values);
         for (String value : values) {
@@ -360,12 +407,13 @@ public final class MigrationFingerprint {
         }
     }
 
-    private static List<String> indexes(DatabaseMetaData md, String table) throws Exception {
+    private static List<String> indexes(DatabaseMetaData md, String catalog, String table)
+            throws Exception {
         List<String> out = new ArrayList<>();
         // approximate=false, so the answer is read rather than estimated. unique
         // is part of the key: dropping a UNIQUE constraint is the difference
         // between "one identity per platform account" and "as many as you like".
-        try (ResultSet rs = md.getIndexInfo(null, null, table, false, false)) {
+        try (ResultSet rs = md.getIndexInfo(catalog, null, table, false, false)) {
             while (rs.next()) {
                 String name = rs.getString("INDEX_NAME");
                 if (name == null) {
@@ -379,9 +427,10 @@ public final class MigrationFingerprint {
         return out;
     }
 
-    private static List<String> primaryKeys(DatabaseMetaData md, String table) throws Exception {
+    private static List<String> primaryKeys(DatabaseMetaData md, String catalog, String table)
+            throws Exception {
         List<String> out = new ArrayList<>();
-        try (ResultSet rs = md.getPrimaryKeys(null, null, table)) {
+        try (ResultSet rs = md.getPrimaryKeys(catalog, null, table)) {
             while (rs.next()) {
                 out.add(rs.getShort("KEY_SEQ") + ":" + rs.getString("COLUMN_NAME"));
             }
@@ -389,12 +438,13 @@ public final class MigrationFingerprint {
         return out;
     }
 
-    private static List<String> foreignKeys(DatabaseMetaData md, String table) throws Exception {
+    private static List<String> foreignKeys(DatabaseMetaData md, String catalog, String table)
+            throws Exception {
         List<String> out = new ArrayList<>();
         // The delete rule is included because ON DELETE CASCADE quietly becoming
         // NO ACTION changes what a deletion does to the identity graph, and
         // leaves every column exactly where it was.
-        try (ResultSet rs = md.getImportedKeys(null, null, table)) {
+        try (ResultSet rs = md.getImportedKeys(catalog, null, table)) {
             while (rs.next()) {
                 // UPDATE_RULE too, the direct sibling of DELETE_RULE: two
                 // schemas differing only in ON UPDATE rendered identically.

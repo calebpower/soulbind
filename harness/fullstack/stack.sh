@@ -42,48 +42,32 @@ NODE=${NODE:-node}
 # with `class file version 69.0` because the start script used $JAVA_HOME. The
 # check validated one JVM while Gradle used another. That is the same defect the
 # comment above describes, surviving its own fix.
-if [ -n "$JAVA_CHOSEN" ] || [ -z "${JAVA_HOME:-}" ]; then
-    JAVA_HOME=$(cd "$(dirname "$JAVA")/.." && pwd)
-    export JAVA_HOME
-fi
+# Only derived from a JAVA that is an actual PATH. `dirname java` is ".", so a
+# bare `java` would set JAVA_HOME to the parent of the working directory -- a
+# real directory, so nothing would complain, and every Gradle start script would
+# look for a JVM inside the repository.
+case "$JAVA" in
+    */*)
+        if [ -n "$JAVA_CHOSEN" ] || [ -z "${JAVA_HOME:-}" ]; then
+            # Checked, so a bad JAVA says what is wrong. Without this the script
+            # died on `cd: /nonexistent/bin/..: No such file or directory` --
+            # true, and no help at all to somebody who mistyped a path.
+            if [ ! -x "$JAVA" ]; then
+                echo "JAVA is set to '$JAVA', which is not an executable file." >&2
+                echo "Set it to a Java 25 launcher, or unset it to use the pinned toolchain." >&2
+                exit 1
+            fi
+            JAVA_HOME=$(cd "$(dirname "$JAVA")/.." && pwd)
+            export JAVA_HOME
+        fi
+        ;;
+esac
 
 . "$HERE/pins.env"
-
-# Prefer the pinned toolchains when they are present. Checked AFTER pins.env, so
-# the paths come from the pins rather than from a second copy of the versions.
-if [ -x "$CACHE/jdk-$JDK_VERSION/bin/java" ] && [ -z "$JAVA_CHOSEN" ]; then
-    JAVA="$CACHE/jdk-$JDK_VERSION/bin/java"
-    JAVA_HOME="$CACHE/jdk-$JDK_VERSION"
-    export JAVA_HOME
-fi
-if [ -x "$CACHE/node-$NODE_VERSION/bin/node" ] && [ -z "$NODE_CHOSEN" ]; then
-    NODE="$CACHE/node-$NODE_VERSION/bin/node"
-    PATH="$CACHE/node-$NODE_VERSION/bin:$PATH"
-    export PATH
-fi
-
-CORE_PORT=${CORE_PORT:-7100}
-PAPER_PORT=${PAPER_PORT:-25566}
-PROXY_PORT=${PROXY_PORT:-25577}
-
 log() { echo "[stack] $*"; }
 
-# --keep leaves the stack RUNNING on success.
-#
-# Without it this script is a one-shot smoke: it brings everything up, proves a
-# flow, and the EXIT trap tears it all down again -- on success as much as on
-# failure. run.sh was built on top assuming `up` left a stack behind, so `up`
-# reported PASS on a stack that was already dead, the @pristine snapshot was
-# taken on that dead stack, `journeys` could not reach core, and `down` reported
-# success having killed nothing but dead pidfiles.
-#
-# The trap stays armed for every failure path and for INT/TERM. It is disarmed
-# only at the very end, only on success, only when asked.
-KEEP=0
-if [ "${1:-}" = "--keep" ]; then
-    KEEP=1
-    shift
-fi
+
+
 
 # --down tears down whatever is running and stops. Without it the only way to
 # stop a stack is to start another one, which is not a teardown.
@@ -153,6 +137,61 @@ if [ "${1:-}" = "--down" ]; then
         down_failed=1
     fi
     exit $down_failed
+fi
+
+
+
+# The artefacts are fetched BEFORE the toolchain is resolved or checked.
+#
+# fetch.sh downloads the pinned JDK and Node, and it used to run near the end of
+# this script -- after the Java version check. On a machine with no system Java
+# that is a deadlock: the check exits because there is no JVM, so fetch.sh never
+# runs, so the JVM is never downloaded. Exactly the guest this pinning exists
+# for, and it would have failed on the very first session run.
+#
+# fetch.sh itself needs no JVM: curl, tar and a checksum.
+"$HERE/fetch.sh"
+
+# Prefer the pinned toolchains when they are present. Checked AFTER pins.env, so
+# the paths come from the pins rather than from a second copy of the versions.
+if [ -x "$CACHE/jdk-$JDK_VERSION/bin/java" ] && [ -z "$JAVA_CHOSEN" ]; then
+    JAVA="$CACHE/jdk-$JDK_VERSION/bin/java"
+    JAVA_HOME="$CACHE/jdk-$JDK_VERSION"
+    export JAVA_HOME
+fi
+if [ -x "$CACHE/node-$NODE_VERSION/bin/node" ] && [ -z "$NODE_CHOSEN" ]; then
+    NODE="$CACHE/node-$NODE_VERSION/bin/node"
+fi
+# PATH follows whichever node was resolved, pinned OR caller-set.
+#
+# It used to be prepended only in the pinned branch, so setting NODE explicitly
+# left PATH untouched -- and the smoke, which ran a bare `node`, then executed on
+# whatever happened to be first on PATH rather than on the runtime the
+# dependency check had just approved. That is the $JAVA versus $JAVA_HOME/bin/java
+# defect this file documents three times over, reappearing on the Node axis.
+case "$NODE" in
+    */*) PATH="$(cd "$(dirname "$NODE")" && pwd):$PATH"; export PATH ;;
+esac
+
+CORE_PORT=${CORE_PORT:-7100}
+PAPER_PORT=${PAPER_PORT:-25566}
+PROXY_PORT=${PROXY_PORT:-25577}
+
+# --keep leaves the stack RUNNING on success.
+#
+# Without it this script is a one-shot smoke: it brings everything up, proves a
+# flow, and the EXIT trap tears it all down again -- on success as much as on
+# failure. run.sh was built on top assuming `up` left a stack behind, so `up`
+# reported PASS on a stack that was already dead, the @pristine snapshot was
+# taken on that dead stack, `journeys` could not reach core, and `down` reported
+# success having killed nothing but dead pidfiles.
+#
+# The trap stays armed for every failure path and for INT/TERM. It is disarmed
+# only at the very end, only on success, only when asked.
+KEEP=0
+if [ "${1:-}" = "--keep" ]; then
+    KEEP=1
+    shift
 fi
 
 cleanup() {
@@ -239,8 +278,6 @@ if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
     fi
     log "java $HOME_VERSION at \$JAVA_HOME/bin/java (what the start scripts use)"
 fi
-
-"$HERE/fetch.sh"
 
 rm -rf "$RUN"
 mkdir -p "$RUN/paper" "$RUN/proxy/plugins" "$RUN/core"
@@ -419,8 +456,69 @@ log "configuring the join gate"
 "$HERE/set-rule.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" game.join
 
 # --- the smoke --------------------------------------------------------------
+# The driver's dependencies, from a COMMITTED lock.
+#
+# stack.sh used to run `node smoke.js` with nothing installing mineflayer -- it
+# worked only because node_modules/ happened to be present on this workstation.
+# `[sync].exclude` drops node_modules/, so on the guest the smoke would have
+# failed with "Cannot find module 'mineflayer'", and the tier this whole harness
+# exists for would never have run there.
+#
+# npm ci, which honours a lock and refuses without one. Same discipline as the
+# image digests and the jar checksums: a harness whose dependencies resolve
+# fresh on every run is a harness whose green is about whatever npm felt like.
+#
+# Generate-and-emit when the lock is absent, which is the forum tier's pattern
+# and exists for the same reason: npm is broken on this workstation
+# (MODULE_NOT_FOUND inside npm's own tree, for any package), so the lock has to
+# be produced where it will be used and copied out to be committed.
+DRIVER="$REPO/harness/player-driver"
+DRIVER_LOCK="$DRIVER/package-lock.json"
+
+# VERIFY before installing, rather than installing unconditionally.
+#
+# `npm ci` is right on the guest, where node_modules/ is sync-excluded and the
+# tree starts empty. It is not runnable on this workstation at all: npm here
+# fails with MODULE_NOT_FOUND inside its own dependency tree, for any package --
+# the same breakage the forum tier documents. An unconditional `npm ci` made the
+# workstation run fail at a step whose work was already done.
+#
+# So driver-lock-check.js compares every package the lock names against what is
+# installed, and an install happens only if something is missing or at the wrong
+# version. That is stronger than assuming a present node_modules is correct --
+# which is the unpinned resolution this block exists to prevent -- and it needs
+# no npm when the tree is already right.
+#
+# ONE implementation, used both to decide and to explain. A second copy for the
+# failure message would be a second definition of "matches", and the two would
+# disagree the first time either changed.
+
+if [ -f "$DRIVER_LOCK" ] && "$NODE" "$HERE/driver-lock-check.js" "$DRIVER" >/dev/null 2>&1; then
+    log "player driver already matches its committed lock; nothing to install"
+elif [ -f "$DRIVER_LOCK" ]; then
+    log "player driver does not match its committed lock; installing"
+    if ! (cd "$DRIVER" && npm ci --no-audit --no-fund >/dev/null 2>&1); then
+        echo "" >&2
+        echo "npm ci failed, and the installed player-driver tree does not match" >&2
+        echo "harness/player-driver/package-lock.json. What differs:" >&2
+        "$NODE" "$HERE/driver-lock-check.js" "$DRIVER" >&2 || true
+        echo "" >&2
+        echo "On a machine with a working npm: cd harness/player-driver && npm ci" >&2
+        echo "This workstation's npm is broken -- MODULE_NOT_FOUND inside its own" >&2
+        echo "dependency tree, for any package -- so the tier runs in a reaper" >&2
+        echo "session, where npm works and node_modules starts empty." >&2
+        exit 1
+    fi
+else
+    log "NO committed player-driver lock; resolving fresh and emitting one to out/"
+    (cd "$DRIVER" && npm install --no-audit --no-fund >/dev/null)
+    mkdir -p "$REPO/out"
+    cp "$DRIVER_LOCK" "$REPO/out/player-driver-package-lock.json"
+    log "lock written to out/player-driver-package-lock.json -- review and commit it"
+fi
+
 log "running the player-driver smoke"
-(cd "$REPO/harness/player-driver" && node smoke.js \
+(cd "$REPO/harness/player-driver" && "$NODE" smoke.js \
     --host 127.0.0.1 --port "$PROXY_PORT" \
     --core "http://127.0.0.1:$CORE_PORT" \
     --entry-credential "$HARNESS_CRED" \

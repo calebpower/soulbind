@@ -99,6 +99,16 @@ Both are recorded in the README departures table with the section they override.
 
 ## Known gaps
 
+**A failed session leaves the previous run's results on the workstation.**
+reaper's backward sync merges rather than mirrors, so when `reaper test` fails
+before the run stage, `out/fullstack/` still holds whatever the last successful
+run put there — eight green stage XMLs, in the case that surfaced this. The exit
+status is right and the artefacts contradict it. `run.sh` clears `$OUT` at the
+start of every invocation for exactly this reason, but that is guest-side and
+cannot reach a workstation copy for a run that never happened. Each result now
+carries a `timestamp` attribute, which is the only thing distinguishing them, and
+nothing enforces reading it. Logged against reaper in `reaper_bugs.md`.
+
 **The `migrate` stage has never run against MariaDB.** `.reaper.toml` does not
 yet invoke `harness/fullstack/run.sh`, and no MariaDB is reachable from the
 workstation, so the fingerprint has only ever been exercised on SQLite. Two
@@ -301,8 +311,8 @@ units one.
 | Gate item | State |
 |---|---|
 | `harness/fullstack/` compose + stage scripts (§12) | **Green on SQLite, end to end.** `run.sh up migrate journeys down` passes against a real stack: Paper and Velocity up, a mineflayer client refused by the gate, admitted by an override, running `/link`, redeeming, and admitted — then migrate against the live used database, the Tier 11 transcript, and a teardown that genuinely stops all three ports. JDK and Node are now checksum-pinned so the same script runs on the guest. MariaDB axis and the `.reaper.toml` wiring outstanding |
-| `.reaper.toml` run verb becomes real | Not started |
-| Run images digest-pinned | Not started |
+| `.reaper.toml` run verb becomes real | **Wired** — the run verb now calls `harness/fullstack/run.sh` for both storage axes, MariaDB on its own database so the tier's rows cannot be mistaken for the unit suite's. Green in a session is not yet claimed |
+| Run images digest-pinned | **Done, with departure 8** — the container images are digest-pinned; Paper, Velocity, the JDK and Node are SHA-256 pinned jars and tarballs, because that is how they ship |
 | T6 staged battery, both backends, MariaDB started latin1 | **Partial** — migration idempotence lands as the `migrate` stage, in-session against a used database, mutation-checked. Latin1 start, astral-plane pushes and no-backdoor state building outstanding |
 | T7 fuzz against the real deployment | Not started |
 | T8 scenarios re-run in-session | Not started |

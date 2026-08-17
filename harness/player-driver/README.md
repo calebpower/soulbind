@@ -38,7 +38,9 @@ harness cannot conjure an online-mode account.
 ## Running it
 
 ```sh
-npm install
+# npm ci, not npm install: package-lock.json is committed and the harness
+# installs from it. See harness/fullstack/driver-lock-check.js.
+npm ci
 node smoke.js --host 127.0.0.1 --port 25577 --username Alex
 ```
 

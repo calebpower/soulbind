@@ -15,6 +15,18 @@
 # that could agree with itself while disagreeing with the server.
 set -eu
 
+# EXIT STATUS is part of this script's contract, because run.sh maps it to a
+# verdict:
+#
+#   1  a second apply changed the database -- migrations are not idempotent
+#   2  the fingerprint measured too little for the comparison to mean anything
+#   3  a PRECONDITION failed: no core, no JVM, no config, no migrated database
+#
+# The first session run reported "re-applying migrations was not a no-op" when
+# the truth was that no JVM existed and nothing had been applied at all. run.sh
+# already had the vocabulary; this script had never been taught to speak it, so
+# every precondition came back as 1 and was read as an idempotence failure.
+
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 RUN=$1
@@ -33,13 +45,13 @@ JAVA_VERSION=$("$JAVA" -version 2>&1 | head -1 | sed -n 's/.*version "\([0-9]*\)
 if [ -z "$JAVA_VERSION" ] || [ "$JAVA_VERSION" -lt 25 ]; then
     echo "[migrate] this check needs Java 25 or newer; '$JAVA' is ${JAVA_VERSION:-unknown}." >&2
     echo "[migrate] Set JAVA=/path/to/java25/bin/java." >&2
-    exit 1
+    exit 3
 fi
 
 LIB="$REPO/core/build/install/core/lib"
 if [ ! -d "$LIB" ]; then
     echo "[migrate] core is not installed at $LIB -- run the up stage first" >&2
-    exit 1
+    exit 3
 fi
 
 # The same coordinates the running core was configured with, read from the
@@ -47,7 +59,7 @@ fi
 # decides where the database is, and the two would disagree the first time one
 # changed.
 CONFIG="$RUN/core/soulbind.toml"
-[ -f "$CONFIG" ] || { echo "[migrate] no config at $CONFIG" >&2; exit 1; }
+[ -f "$CONFIG" ] || { echo "[migrate] no config at $CONFIG" >&2; exit 3; }
 
 # Parsed with tomllib, the standard library's TOML reader.
 #
@@ -92,7 +104,7 @@ print(value if value is not None else "")
 STORAGE_URL=$(read_storage url)
 STORAGE_USER=$(read_storage user)
 STORAGE_PASSWORD=$(read_storage password)
-[ -n "$STORAGE_URL" ] || { echo "[migrate] no url in the [storage] section of $CONFIG" >&2; exit 1; }
+[ -n "$STORAGE_URL" ] || { echo "[migrate] no url in the [storage] section of $CONFIG" >&2; exit 3; }
 
 echo "[migrate] re-applying migrations to the live $DB database"
 # The classpath is core's install lib, so the drivers and Flyway are the

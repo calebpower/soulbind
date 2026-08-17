@@ -43,25 +43,60 @@ esac
 STATE_ROOT=${REAPER_STATE:-$HERE}
 RUN=${SOULBIND_STACK_RUN:-$STATE_ROOT/run-$DB}
 CACHE=${SOULBIND_STACK_CACHE:-$HERE/.cache}
-# The JVM is exported for every stage, not left to each one to rediscover.
-# core targets Java 25 and the bare `java` on a BSD workstation is dispatched to
-# an older install, so the README's advertised one-liner failed at `migrate`
-# while `up` had already succeeded -- a confusing place to learn it.
-JAVA=${JAVA:-java}
-export JAVA
+# Toolchain resolution lives HERE, and is deliberately LAZY.
+#
+# Two mistakes to avoid, both already made once:
+#
+#   * Never default JAVA to the bare string. stack.sh treats a set JAVA as "the
+#     operator chose a JVM" and skips its pinned-toolchain branch, so defaulting
+#     and exporting it here meant the pinned JDK was fetched, checksum-verified,
+#     extracted -- and then ignored, on the one machine that has no other JVM.
+#     The sentinel worked; this file defeated it.
+#   * Resolve LAZILY, not once at startup. On a cold guest the cache is empty
+#     until `up` runs fetch.sh, so a single resolution at the top finds nothing
+#     and every later stage falls back to a launcher that does not exist.
+#
+# A caller-set JAVA always wins, and JAVA_HOME is derived FROM it -- this
+# workstation carries JAVA_HOME=/usr/local/openjdk17, and honouring that over an
+# explicit JAVA is how Gradle start scripts ended up on Java 17 while the
+# version check cheerfully reported 25.
+CACHE_DIR=${SOULBIND_STACK_CACHE:-$HERE/.cache}
+JAVA_FROM_CALLER=${JAVA:-}
+NODE_FROM_CALLER=${NODE:-}
 
-# JAVA_HOME as well, because Gradle's generated start scripts ignore $JAVA
-# entirely and use $JAVA_HOME/bin/java or a bare `java`. Exporting only JAVA got
-# `up` through (stack.sh sets JAVA_HOME for itself) and then failed `journeys`
-# with an UnsupportedClassVersionError from the chat driver -- the identical trap
-# stack.sh documents, reintroduced in the one stage the export did not reach.
-# An explicit JAVA overrides an inherited JAVA_HOME, for the reason stack.sh
-# records at length: this workstation carries JAVA_HOME=/usr/local/openjdk17, so
-# deriving it only when unset kept Java 17 and every Gradle start script used it.
-if [ "$JAVA" != "java" ]; then
-    JAVA_HOME=$(cd "$(dirname "$JAVA")/.." && pwd)
-fi
-[ -n "${JAVA_HOME:-}" ] && export JAVA_HOME
+resolve_toolchain() {
+    # shellcheck disable=SC1090
+    . "$HERE/pins.env"
+
+    if [ -n "$JAVA_FROM_CALLER" ]; then
+        JAVA="$JAVA_FROM_CALLER"
+    elif [ -x "$CACHE_DIR/jdk-$JDK_VERSION/bin/java" ]; then
+        JAVA="$CACHE_DIR/jdk-$JDK_VERSION/bin/java"
+    else
+        JAVA=""
+    fi
+
+    if [ -n "$JAVA" ]; then
+        export JAVA
+        JAVA_HOME=$(cd "$(dirname "$JAVA")/.." && pwd)
+        export JAVA_HOME
+    fi
+
+    if [ -n "$NODE_FROM_CALLER" ]; then
+        NODE="$NODE_FROM_CALLER"
+    elif [ -x "$CACHE_DIR/node-$NODE_VERSION/bin/node" ]; then
+        NODE="$CACHE_DIR/node-$NODE_VERSION/bin/node"
+    else
+        NODE=""
+    fi
+    if [ -n "$NODE" ]; then
+        export NODE
+        PATH="$(dirname "$NODE"):$PATH"
+        export PATH
+    fi
+}
+
+resolve_toolchain
 
 export SOULBIND_STACK_RUN="$RUN"
 export SOULBIND_STACK_CACHE="$CACHE"
@@ -71,6 +106,11 @@ export CORE_BACKEND="$DB"
 # artifact written anywhere else is an artifact destroyed with the VM. That
 # lesson cost a red battery whose only trace died with the machine.
 OUT="$REPO/out/fullstack/$DB"
+
+# The bring-up status file is RUN state, not a result. Kept out of $OUT so it is
+# not rsynced back as though it were evidence, and so clearing the results
+# directory cannot silently delete or preserve it.
+RUN_STATUS="${TMPDIR:-/tmp}/soulbind-stack-status-$DB.$$"
 
 # The path is validated HERE, at its definition, because everything below
 # creates or deletes under it.
@@ -225,15 +265,19 @@ stage_up() {
     # filename away from the loop written to prevent stale reads. Clearing it
     # first and failing closed on absence covers both the set -e death and any
     # other way that write never happens.
-    rm -f "$OUT/.stack-status"
-    ( "$HERE/stack.sh" --keep 2>&1; echo $? > "$OUT/.stack-status" ) | tee "$OUT/stack.log"
-    if [ "$(cat "$OUT/.stack-status" 2>/dev/null || echo 1)" -eq 0 ] && core_is_listening; then
+    rm -f "$RUN_STATUS"
+    ( "$HERE/stack.sh" --keep 2>&1; echo $? > "$RUN_STATUS" ) | tee "$OUT/stack.log"
+    if [ "$(cat "$RUN_STATUS" 2>/dev/null || echo 1)" -eq 0 ] && core_is_listening; then
         # Pristine is STACK-UP, not end-of-run (§12): a later stage that dirties
         # the databases must be able to roll back to a healthy stack rather than
         # to an empty machine, or every reset pays for the whole bring-up again.
         if [ -n "${REAPER_CONTROL:-}" ] && [ -x "$REAPER_CONTROL/snapshot" ]; then
-            "$REAPER_CONTROL/snapshot"
-            log "snapshot taken: the stack is up and this point is pristine"
+            # NAMED per backend. Both axes run in one session, so an unnamed
+            # snapshot means the mariadb bring-up silently replaces the sqlite
+            # one and @pristine ends up naming whichever ran last -- a stack
+            # that has since been torn down, which `reset` can no longer reach.
+            "$REAPER_CONTROL/snapshot" "stack-$DB"
+            log "snapshot taken as stack-$DB: the stack is up and this point is pristine"
         else
             log "no REAPER_CONTROL; not snapshotting (running outside a session)"
         fi
@@ -246,6 +290,9 @@ stage_up() {
 }
 
 stage_migrate() {
+    # Re-resolved: `up` ran fetch.sh, so the pinned toolchain exists by now even
+    # if it did not when this script started.
+    resolve_toolchain
     result_open migrate
     log "migration idempotence on $DB"
     # The exit STATUS is distinguished, so the verdict matches the failure.
@@ -268,6 +315,7 @@ stage_migrate() {
 }
 
 stage_journeys() {
+    resolve_toolchain
     result_open journeys
     log "journeys: real flows, emitting evidence"
     if "$HERE/journeys.sh" "$RUN" "$DB" "$OUT/evidence"; then

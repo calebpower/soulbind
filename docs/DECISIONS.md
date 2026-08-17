@@ -3123,3 +3123,45 @@ severity fell each round. It is that **static review of code that has never run
 converges on the wrong things.** Three rounds hardened guards, and the first
 execution found a JVM mismatch, an inverted condition and a misattributed
 verdict — none of them visible to any amount of reading.
+
+### 8.10 — A test double that corrupts under the concurrency it is used to test
+
+`LinkDataSourceTest`'s concurrency case drives eight threads through one
+`InMemoryTransport` — which held its record of sent requests in a plain
+`ArrayList`. On a contended guest it threw `ArrayIndexOutOfBoundsException` from
+inside `ArrayList.add`, and the stack trace named the SDK's test double rather
+than the code under test.
+
+The loud failure is the exception. The quiet one is worse: `sent()` returning a
+list missing entries, so an assertion about what a connector sent is wrong and
+nothing says so. A test double that cannot survive the concurrency it exists to
+exercise makes every concurrency test built on it untrustworthy — including the
+one written to prove `LinkDataSource` is safe under Plan's threads.
+
+Now a `ConcurrentLinkedQueue`: correct under concurrent senders, and without the
+whole-array copy per send that a copy-on-write list would cost a test sending
+thousands of requests.
+
+It reproduced 1 run in 5 on the guest under load and 0 in 15 on the workstation
+alone — 6 cores against 8, and the window only opens when the machine is busy.
+Worth stating plainly: **this fix cannot be mutation-checked on the workstation**,
+because the defect it repairs does not reproduce there. The verification is the
+session.
+
+### 8.11 — The same defect, a fourth time, on a third axis
+
+`stack.sh` resolves `$NODE` from the pinned toolchain, and the player-driver
+dependency check runs `"$NODE"`. The smoke then ran a bare `node`.
+
+The `PATH` prepend that makes a bare `node` mean the pinned one was inside the
+branch that only fires when the caller did *not* set `NODE` — so setting `NODE`
+explicitly left `PATH` untouched and the smoke executed on whatever was first on
+`PATH`, a different runtime from the one whose dependency tree had just been
+verified.
+
+This is the `$JAVA` versus `$JAVA_HOME/bin/java` defect, which this same file
+documents in three separate comments, reappearing on the Node axis. The pattern
+is now unmistakable: **when a script resolves an interpreter into a variable, every
+invocation must use that variable, and any `PATH` that stands in for it must follow
+the same resolution.** `PATH` now follows whichever `node` was chosen, pinned or
+caller-set, and the smoke invokes `"$NODE"` directly.

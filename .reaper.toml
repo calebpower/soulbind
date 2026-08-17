@@ -224,6 +224,41 @@ podman run --rm --network host \
   "$TOOLCHAIN" \
   ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache :core:test :core:fuzzTest
 
+# ---------------------------------------------------------------------------
+# The full-stack tier (specification §12).
+#
+# Runs on the GUEST HOST, not in a container: core, Paper and Velocity are host
+# processes driven by harness/fullstack/run.sh, on the JDK and Node that
+# harness/fullstack/pins.env pins by checksum and fetch.sh downloads. The guest
+# ships no language toolchains, and for a while that looked like a reason to
+# containerise this whole tier -- it was not. fetch.sh already ran in both
+# places by design.
+#
+# Both axes, because the gate asks for the battery green on both backends in one
+# session. MariaDB gets its OWN database here rather than sharing `soulbind`
+# with the unit suite above: the fullstack tier migrates, links and audits into
+# it, and a storage test asserting on rows it did not create is a storage test
+# that fails for reasons nobody can find.
+#
+# Ordered after the unit suite deliberately. This tier is the slowest thing in
+# the manifest -- a Paper world has to generate -- and a failure in the cheap
+# checks should not have to wait for it.
+# ---------------------------------------------------------------------------
+echo "run: full-stack tier (core on sqlite)"
+SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys down
+
+podman exec -i soulbind-mariadb \
+  mariadb -h 127.0.0.1 -uroot -psoulbind-test <<'SQL'
+CREATE DATABASE IF NOT EXISTS soulbind_fullstack CHARACTER SET utf8mb4;
+SQL
+
+echo "run: full-stack tier (core on mariadb)"
+SOULBIND_DB=mariadb \
+  SOULBIND_MARIADB_URL="jdbc:mariadb://127.0.0.1:3306/soulbind_fullstack" \
+  SOULBIND_MARIADB_USER=root \
+  SOULBIND_MARIADB_PASSWORD=soulbind-test \
+  sh harness/fullstack/run.sh up migrate journeys down
+
 podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 """
 
@@ -268,6 +303,25 @@ exclude = [
     "node_modules/",
     "vendor/",
     "/out/",
+    # The full-stack tier's live state: a generated Paper world, a SQLite
+    # database, pidfiles. Gitignored, but .gitignore is not what rsync reads --
+    # 182 MB of stale world from a workstation run was copied to the guest on
+    # every sync, along with pidfiles naming processes that died on another
+    # machine. The guest writes its own under $REAPER_STATE and never wants
+    # these.
+    "/harness/fullstack/run/",
+    "/harness/fullstack/run-*/",
+    # The fetched artefact cache. NOT synced, in either direction.
+    #
+    # Syncing it in ships 69 MB of jars the guest can fetch itself, and -- worse
+    # -- rsync's --delete then removes the JDK and Node that fetch.sh EXTRACTED
+    # there, because those directories do not exist on the workstation. Every
+    # sync would silently undo the previous run's toolchain install and pay for
+    # it again.
+    #
+    # Everything in this directory is reproducible from pins.env by checksum,
+    # which is the whole point of pinning it that way.
+    "/harness/fullstack/.cache/",
 ]
 
 [reset]
