@@ -2824,3 +2824,302 @@ task at a tag that matches nothing, and a real tag whose tests stop being
 discovered — while modules with no tagged tests still pass, and a module whose
 only occurrence of the tag is in a comment is correctly treated as having
 none.
+
+### 8.6 — A stage cannot report success for work it did not do
+
+`harness/fullstack/run.sh` runs the battery's tiers against one live
+deployment. The rule it is built around is one sentence: **every stage must
+emit a result, and a stage that returns without emitting one fails the run.**
+
+That is not defensive habit. It is the specific failure this repository keeps
+hitting, in four different disguises so far: `fuzzTest` wired into `check` and
+discovering zero tests; `charsetHostilityTest` skipped as up-to-date with its
+own zero-tests guard inside it; a browser tier whose only failure evidence died
+with the VM; and `:connector-plan:test` reporting UP-TO-DATE on the guest across
+two full batteries. Every one of them reported green. None was caught by a red
+run.
+
+So the runner treats "no result" as a failure rather than as success, and says
+so in the result it writes: *the stage returned without emitting a result, so
+nothing it claims can be trusted*. `journeys.sh` holds the same invariant one
+level down — a journey that emits no transcript fails, because silence is not
+evidence.
+
+**There is deliberately no skip result.** Every narrowing this project has
+needed — MariaDB with no server, PHPUnit without ext-xmlwriter — is expressed as
+a narrowing with a stated reason at the point that narrows it. A green result
+carrying the word "skipped" is how a tier stops running without anybody
+noticing.
+
+**The invariant had a hole, found by probing it rather than by reading it.**
+`result_open` clears the file it is about to write — which does nothing for a
+stage that dies *before* reaching it, and a stage can die early for the most
+ordinary reasons: a missing binary, an unreadable config. The previous run's
+result then survives, and since the check only asked whether a result EXISTS,
+last run's PASS was counted as this run's.
+
+Two variants, both reproduced. A stage that failed early exited 1 but left a
+stale PASS in `out/`. A stage that returned 0 having done nothing exited **0**,
+reported as passing, with evidence from a run that had already finished. Since
+`out/` is the only thing reaper syncs back, that stale file is exactly what a
+reader sees — and evidence which outlives the run that produced it is worse than
+no evidence, because it looks current.
+
+Results are now cleared for every requested stage before any stage runs.
+
+`FullstackStagesGuardTest` covers what run time cannot: that the stage list, the
+implementations and the README's table name the same set, that no `stage_`
+function is unreachable, that the resultless-stage check is still present and
+still tests for the result file, and that no `result_skip` has appeared. Ten mutations, all caught — including deleting the invariant
+itself and moving the clearing loop after the stages, neither of which changes
+anything visible on a green run. That is exactly why a static guard is worth
+having for a shell script.
+
+One of those assertions was itself wrong when written: it anchored the ordering
+check on `"stage_$requested"`, which also appears in the pre-flight validation
+loop, so it compared the wrong pair and failed on the correct tree. Both
+mutations "passed" while it was broken — a mutation result is only as good as
+the assertion's own health, and one run against a red assertion tells you
+nothing.
+
+**And the guard's own must-fail fixture proved nothing.** It re-derived `STAGES`
+with its own regex and re-applied its own containment test, so disabling the
+real detection left all seven cases green. `SourceTree`'s javadoc states the
+rule this broke — *a fixture checked by a second, parallel implementation would
+prove only that the second implementation works* — and the fixture was written
+in violation of it anyway. There is now one detector, called by both.
+
+Three further holes an adversarial review found, all of which made a stage
+report success for work it did not do — the file's stated subject:
+
+- `result_pass` never checked that the write succeeded, so an unwritable `out/`
+  produced a PASS over a stale file. A failed write now leaves the stage marked
+  in-progress, which the existing invariant catches.
+- `stage_down` ran `stack.sh --down || true` and then reported PASS
+  unconditionally. It was green with `stack.sh` deleted from disk — a green
+  result for work not done, produced by the one construct this project forbids
+  outright, in the file whose whole subject is that failure mode.
+- Nothing set `exit $failed` under test, so changing it to `exit 0` left every
+  assertion green while a recorded failure never reached the caller.
+
+A fourth was self-inflicted while fixing the third: `if "$HERE/stack.sh" | tee
+"$OUT/stack.log"` tests *tee's* exit status, so a failed bring-up would have
+read as a pass. Written minutes after catching the identical shape in a
+verification command of my own.
+
+**And the fix for that introduced a fifth.** The status was routed through
+`$OUT/.stack-status` — a file the up-front clearing loop did not clear, one
+filename away from the loop written to stop stale reads. Under FreeBSD's
+`/bin/sh`, `set -e` is not suspended inside that subshell, so a failing
+`stack.sh` killed it before `echo $?` ran and the *previous* run's `0` was read:
+`up` reported PASS on a bring-up that failed, and the pristine snapshot was
+taken on a broken stack. The file is now removed first and a missing file means
+failure.
+
+A second review round found four more of the same family, and the pattern in
+them is worth naming: **each fix relocated the defect rather than removing it.**
+
+- `stage_down` stopped using `|| true` — and `stack.sh --down` started. It ran
+  `kill || true`, removed the pidfile regardless, logged "stopped pid N", and
+  exited 0 whether anything had been running, whether the pid was dead, or
+  whether the JVM ignored TERM. It now checks the process is alive, waits,
+  escalates to KILL, and fails if the process survives.
+- Clearing per-stage results was not enough: a `run.sh up down` followed by a
+  failing `run.sh up` left a green `down.xml` beside the failure, and
+  `evidence/` was never cleared at all, so a journeys stage that died early
+  pointed the reader at the *previous* run's complete, passing transcript. The
+  whole result directory now belongs to the invocation. The cost is stated:
+  results do not accumulate across invocations.
+- Two guard assertions could not fail. `body.contains("HARNESS FAULT")` was
+  satisfied by `result_pass`'s and `result_fail`'s own logs, and
+  `body.contains("failed=1")` by the ordinary stage-failure branch twelve lines
+  above the fault branch it was written for — so flipping that branch to
+  `failed=0` left all 44 guard cases green while the runner recorded a failure
+  and exited 0.
+- `journeys.sh` had no guard coverage at all. Deleting its refusal assertion,
+  its admission assertion and its step-count fault left every guard case green.
+
+A third round found the root cause of all of it, and it was architectural rather
+than a slip. **`stack.sh` is a one-shot smoke.** It carries
+`trap cleanup EXIT INT TERM` and never disarms it, so on SUCCESS it tears the
+whole stack down and leaves the pidfiles behind. `run.sh` was built on top
+assuming `up` left a stack running. So:
+
+- `up` reported PASS on a stack that was already dead;
+- the `@pristine` snapshot was taken on that dead stack, making the README's
+  "roll back to a working stack" false;
+- `journeys` could not reach core — round one's finding surviving through an
+  entirely different mechanism;
+- `down` reported PASS having killed nothing but dead pidfiles, **on every
+  run**, which is the sixth route to unearned success in this one file.
+
+`stack.sh --keep` now disarms the trap at the very end, only on success, only
+when asked — every failure path and both signals still tear down. And `stage_up`
+no longer trusts an exit status: it probes core's port afterwards, because a
+script finishing is not a stack existing.
+
+Three more from the same round, each the same shape one step over:
+
+- `rm -rf "$OUT"` — the blunter instrument that replaced per-stage clearing —
+  destroyed data outside the repository when `run.sh` was reached through a
+  symlink (`$HERE` resolves the link's directory), and destroyed the LIVE
+  `creds.env` and database when the caller pointed `SOULBIND_STACK_RUN` inside
+  `out/`, which the forum tier already does. `$REPO` is now checked to be this
+  repository and a run directory inside the results directory is refused.
+- `note()` was the unfenced sibling of the `fail_journey()` fixed the round
+  before, and it interpolates core's own `reason` into the transcript.
+- The `--down` loop trusted pidfile contents. `kill -0 -1` succeeds, so a
+  pidfile containing `-1` read as alive — and the escalation-to-SIGKILL added
+  that same round would then have signalled every process the user owns. A
+  one-shot `kill || true` merely failed; a loop that insists is what made
+  validation necessary.
+
+And a third inert guard assertion, plus a surviving one-character mutation:
+`assertTrue(body.contains("write_coverage"))` was satisfied by the function
+DEFINITION, so deleting the call stayed green — the lesson recorded four methods
+above in `staleResultsAreClearedUpFront` and not applied here. Changing the
+invariant's `||` to `&&` also left all eleven cases green while turning a
+resultless stage from "HARNESS FAULT, exit 1" into silence and exit 0.
+
+The guard strips shell comments before matching. Four instances of a check
+matching its own explanatory prose have now happened here, so that is written in
+from the start rather than after.
+
+### 8.7 — Migration idempotence is a claim about restarts, not about fresh databases
+
+Core migrates on every `Storage.open`, so a deployed server re-runs migrations
+every time it starts. If a second apply were not a no-op, the schema would drift
+once per restart — a failure visible only on a long-lived server, and invisible
+to any test that migrates a fresh database and stops.
+
+So the check runs **in-session, against a database that has already been
+migrated and used**, and it does the work through core's own installed
+classpath: the same Flyway, the same drivers, the same `Storage.open` the server
+calls. A shell re-implementation of "apply the migrations" would be a second
+definition that could agree with itself while disagreeing with the server.
+
+The fingerprint is dialect-neutral on purpose — Flyway's history rows plus JDBC
+`DatabaseMetaData` for tables and columns. Comparing DDL text would compare
+SQLite's and MariaDB's spelling of the same schema and report differences that
+are not defects.
+
+**The first fingerprint was far weaker than the claim made for it.** It read
+Flyway's history plus table and column names, and I mutation-checked it by
+adding a table and adding a column — the two things it was always going to see.
+An adversarial review then dropped an index and inserted a row into
+`audit_seq`, and it reported the database unchanged.
+
+The seed-row case is the one that matters. A migration that re-inserts or
+resets a sequence-emulation row on every apply hands out audit and event
+identifiers that were already used — drift on every restart, with no schema
+change at all, which is *exactly* what this check exists to catch. It passed.
+
+It now also reads indexes (with uniqueness — dropping a UNIQUE constraint is the
+difference between one identity per platform account and any number), primary
+keys, foreign keys with their delete rule, column size, default and ordinal
+position, and the contents of the sequence tables. Five mutations caught: a
+dropped index, an inserted seed row, a **reset sequence counter**, an added
+table and an added column.
+
+What it still cannot see is written down rather than implied: views and triggers
+(the schema has none) and CHECK constraints, which JDBC metadata does not expose
+portably.
+
+A second round found it still blind to **table contents**: resetting
+`runtime_config.config_value` — an operator's configured code TTL — and
+emptying `platform_kind` both left the fingerprint identical. The seed-table
+list was also hand-written and skipped missing tables silently, and nothing
+asserted the fingerprint had measured anything at all, so a metadata call
+returning nothing would have compared two empty strings and printed
+"idempotent".
+
+It now records a row count for every table, dumps the contents of every small
+one — derived by size rather than named, so the next config or sequence table is
+covered the day it exists — reads the FK `UPDATE_RULE` beside the `DELETE_RULE`,
+and refuses to report anything if it measured less than a floor.
+
+A third round found two more, both of which would have made the whole
+contents-and-counts half worthless:
+
+- The 200-row threshold was a **silent coverage cliff**. Rewriting every row of
+  `audit` was caught at 200 rows and invisible at 201 — and `audit` and
+  `event_outbox`, where reused identifiers actually hurt, are precisely the
+  tables that cross it on a long-lived server. Worse, the cliff is
+  data-dependent, so the same drift is caught on a fresh database and missed on
+  the used one this file exists to test. Large tables now get a streamed,
+  order-insensitive digest instead of a bare count; the boundary was re-tested at
+  200, 201, 250 and 1000 rows and all four are caught.
+- Every count and contents read was written `SELECT COUNT(*) FROM "table"`.
+  MariaDB reads a double-quoted token as a string LITERAL without `ANSI_QUOTES`,
+  which nothing sets — so on the backend this had never run against, every one
+  of those queries would have been a syntax error, swallowed by the broad
+  handler, reported as `-1` in both fingerprints, and compared equal. The
+  identifier quote string now comes from the driver. Core itself never quotes,
+  for the same dialect reason.
+
+The lesson is the same one this phase keeps teaching: mutation-checking against
+the cases you already had in mind measures your imagination, not the check. Two
+of those mutations first read as SURVIVED for a reason that was not the
+fingerprint's fault — the tables were empty on a database created by `register`
+alone, so the mutation changed nothing. A mutation run against the wrong setup
+is as uninformative as one run against a red assertion, and both happened in the
+same afternoon.
+
+### 8.8 — The toolchains are pinned artefacts, not a reason to containerise
+
+The Linux guest ships "ZFS, podman, rsync, guest agent. No language
+toolchains." That was treated for some time as a wall: the game tier would have
+to be rebuilt to run every component in a container, the way the forum tier
+does.
+
+It was not a wall. `harness/fullstack/fetch.sh` already fetches
+checksum-pinned artefacts and refuses to continue on a mismatch, and it was
+written from the start to run on the workstation **and** in the guest — it
+carries an explicit branch for FreeBSD's `sha256 -q` versus Linux's
+`sha256sum`, with a comment saying exactly that. A JDK and a Node are simply two
+more pinned artefacts, and one `stack.sh` then runs in both places.
+
+Not `apt-get install openjdk`. An unpinned toolchain is precisely what
+`pins.env`'s own header argues against — *"a stack that silently changed proxy
+build underneath a test is a stack whose green result means nothing"* — and a
+JDK is more load-bearing than a proxy jar, not less. (reaper's `host_packages`
+escape hatch is unimplemented in any case: no source references it, and the plan
+says "implement last, if at all.")
+
+**Platform asymmetry, stated rather than hidden.** Neither Temurin nor
+nodejs.org publishes a FreeBSD build, so the tarballs are linux-x64 and are
+fetched only there. The workstation uses its own toolchains and gets a
+*minimum-version assertion* instead of a pin. The guest — where nobody is
+watching — gets the pinned bytes.
+
+### 8.9 — What running it once found that three review rounds did not
+
+The stage runner was reviewed adversarially three times before it had ever
+executed. Running it twice found three defects in about ten minutes, none of
+which any review had surfaced:
+
+- The toolchain selection read `[ -z "$JAVA" ]` **after** `JAVA=${JAVA:-java}`,
+  so the pinned JDK would have been fetched, verified, extracted and never used.
+  On the guest that failure would have read as "no JVM on the guest" all over
+  again — the very belief that made the containerisation look necessary.
+- **This workstation exports `JAVA_HOME=/usr/local/openjdk17`.** Both scripts
+  derived `JAVA_HOME` only when it was unset, so Java 17 won, while the version
+  check tested `$JAVA` and logged a cheerful "java 25". The check validated one
+  JVM and Gradle's start scripts used another. The comment directly above that
+  code already described this exact failure — the fix had been written for the
+  case where `JAVA_HOME` was absent, not the case where it was wrong.
+- `migrate` reported "re-applying migrations was not a no-op" when the truth was
+  that `up` had failed and there was no database at all. It now exits 3 and says
+  so.
+
+And `git status` offered 182 MB of generated Paper world as committable:
+`.gitignore` named `harness/fullstack/run/` while the runner creates
+`run-<db>`. The instance, not the class — the third time in this repository a
+rule written for one filename missed its successor, which the `.gitignore`
+comment for `pins.env` already records twice. Now a glob, and guarded.
+
+The lesson is not that the reviews were wasted; they found real defects and the
+severity fell each round. It is that **static review of code that has never run
+converges on the wrong things.** Three rounds hardened guards, and the first
+execution found a JVM mismatch, an inverted condition and a misattributed
+verdict — none of them visible to any amount of reading.

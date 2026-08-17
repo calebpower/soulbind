@@ -99,6 +99,15 @@ Both are recorded in the README departures table with the section they override.
 
 ## Known gaps
 
+**The `migrate` stage has never run against MariaDB.** `.reaper.toml` does not
+yet invoke `harness/fullstack/run.sh`, and no MariaDB is reachable from the
+workstation, so the fingerprint has only ever been exercised on SQLite. Two
+things in it are dialect-sensitive and untested: `getTables(null, null, …)`
+catalog semantics under the MariaDB driver, and the table-name matching that
+gates the per-table reads. The backends' metadata genuinely diverge — MariaDB
+discards primary-key constraint names, which the reaper log shows — so this is
+not a formality.
+
 **No storage-backend evidence survives a session.** The battery runs both
 backends — the parameterised names say `SQLITE` and `MARIADB`, and the counts
 differ (471 tests on the guest against 402 on the workstation) — but the JUnit
@@ -291,13 +300,13 @@ units one.
 
 | Gate item | State |
 |---|---|
-| `harness/fullstack/` compose + stage scripts (§12) | Not started |
+| `harness/fullstack/` compose + stage scripts (§12) | **Green on SQLite, end to end.** `run.sh up migrate journeys down` passes against a real stack: Paper and Velocity up, a mineflayer client refused by the gate, admitted by an override, running `/link`, redeeming, and admitted — then migrate against the live used database, the Tier 11 transcript, and a teardown that genuinely stops all three ports. JDK and Node are now checksum-pinned so the same script runs on the guest. MariaDB axis and the `.reaper.toml` wiring outstanding |
 | `.reaper.toml` run verb becomes real | Not started |
 | Run images digest-pinned | Not started |
-| T6 staged battery, both backends, MariaDB started latin1 | Not started |
+| T6 staged battery, both backends, MariaDB started latin1 | **Partial** — migration idempotence lands as the `migrate` stage, in-session against a used database, mutation-checked. Latin1 start, astral-plane pushes and no-backdoor state building outstanding |
 | T7 fuzz against the real deployment | Not started |
 | T8 scenarios re-run in-session | Not started |
-| `journeys` emits the T11 evidence directory | Not started |
+| `journeys` emits the T11 evidence directory | **Green for 1 of the 3 journeys the plan names.** `first-time-player` runs against the live stack and emits a real per-step transcript; `COVERAGE.md` is generated from the recorded outcomes and names the other two as uncovered. No screenshots yet |
 | T5 suite against the real stack, 5xx watchdog on | Not started |
 | Plan pages render link data for players created through real flows | Not started |
 
@@ -319,6 +328,7 @@ units one.
 | Harness pins | Every `harness/*/pins.env` escapes the `*.env` rule, so a clone can still reproduce a stack run |
 | Copyleft packaging | No LGPL artifact the specification pins to a non-bundling scope is declared in a configuration that would bundle it |
 | Non-vacuous tiers | A tag-selected task whose module declares that tag must execute at least one test, so a tier cannot silently become zero coverage |
+| Full-stack stages | The stage list, the implementations and the README table name one set; the runner still fails a stage that emits no result; no stage can report a skip |
 
 Every one is paired with a deliberately-broken fixture and has been
 mutation-checked against the real tree, not only the fixture.

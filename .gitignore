@@ -19,7 +19,13 @@
 # so the pin is committed and the bytes are not -- a 100MB jar in git is a jar
 # somebody clones every time to run one test.
 /harness/fullstack/.cache/
+# A GLOB again, and for the same reason the pins.env line below records: the
+# runner creates run-sqlite/ and run-mariadb/, one per storage axis, and a rule
+# naming `run/` covers the instance rather than the class. Caught by `git status`
+# showing 182 MB of generated Paper world as untracked-and-committable, one
+# `git add -A` from the repository.
 /harness/fullstack/run/
+/harness/fullstack/run-*/
 
 # Local tooling state
 .DS_Store
