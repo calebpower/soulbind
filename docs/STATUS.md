@@ -321,6 +321,76 @@ units one.
 | T5 suite against the real stack, 5xx watchdog on | Not started |
 | Plan pages render link data for players created through real flows | Not started |
 
+## Where to pick up
+
+Written at the end of a working session so the next one does not have to
+reconstruct it. Everything below is true at `a15ac9a`.
+
+### The state of things
+
+Phase 8's **first gate clause is met**: `reaper test` runs the full battery
+green on both storage backends in one session — verified four times, most
+recently exit 0 in 16m05s with 1055 tests on the guest against 983 on the
+workstation. The **second clause is not**: *"Plan pages render link data for
+players created through real flows"* has never been demonstrated. No Plan
+instance has ever run in this project.
+
+### Next, in the order I would do it
+
+1. **Plan pages rendering real link data.** The other half of the gate. Needs a
+   Plan instance against the full-stack tier, and `connector-plan` registered as
+   a `DataExtension` in a running Plan. Everything under it is tested; nothing
+   has rendered.
+2. **T6's remaining items** — MariaDB started **latin1** (the point is that core
+   specifies charset explicitly rather than inheriting the server default),
+   astral-plane pushes, no-backdoor state building.
+3. **T7 fuzz and T8 scenarios as run stages.** `run.sh`'s `STAGES` list is
+   deliberately short; adding a name without a `stage_` function is rejected
+   before anything runs, and `FullstackStagesGuardTest` asserts the list, the
+   functions and the README agree.
+4. **T5 against the real stack** — the browser suite, 5xx watchdog on, no
+   injection.
+5. **The two uncovered journeys**, `forum-first-user` and `bedrock-player`,
+   which the generated `COVERAGE.md` names on every run.
+
+### What will bite you
+
+- **The workstation cannot run the full-stack tier.** `harness/player-driver/`'s
+  `node_modules` is a yarn-era flat tree that disagrees with the committed npm
+  lock (`uuid` 10.0.0 installed, 8.3.2 locked), and npm here fails with
+  `MODULE_NOT_FOUND` inside its own tree. `stack.sh` says so precisely and exits.
+  Fix it with `npm ci` on a machine with a working npm, or accept that this tier
+  is session-only. **This cost the fast local loop that found most of the good
+  defects** — worth restoring before doing much more.
+- **`reaper test` does not provision.** Run `reaper up` first, or it exits 1
+  immediately with "no sessions".
+- **`JAVA_HOME=/usr/local/openjdk17` is exported on this workstation.** Set
+  `JAVA=/usr/local/openjdk25/bin/java`; the harness derives `JAVA_HOME` from it
+  and overrides the inherited one, but anything outside the harness will not.
+- **A session left up is reused by every `reaper test`.** That is fast and it is
+  also how a 24-hour-old guest came to make a stash-based baseline untrustworthy
+  (`reaper_bugs.md` #2). Tear it down when the work pauses.
+- **`out/` on the workstation is never truncated**, only overwritten — so after a
+  run that fails before the run stage, it still holds the last green result.
+  `reaper_bugs.md` #3.
+
+### The pattern this phase kept producing
+
+Recorded because it will recur, not as commentary. Three families, each found
+several times:
+
+- **A check inside a task cannot say whether the task ran.** Cost three defects:
+  `fuzzTest` discovering nothing, `charsetHostilityTest` skipped with its guard
+  inside it, and `:core:test` served `FROM-CACHE` past a guard that never
+  executed. Whatever decides "did the work happen" has to sit outside the work.
+- **A fix written for the instance misses the class.** `.gitignore` naming
+  `run/` when the runner creates `run-<db>`; the interpreter-resolution defect
+  appearing four times across `$JAVA`, `JAVA_HOME`, the pinned JDK and `$NODE`.
+- **Static review of code that has never run converges on the wrong things.**
+  Three adversarial rounds hardened guards; the first execution found a JVM
+  mismatch, an inverted condition and a misattributed verdict, none of them
+  visible to any amount of reading.
+
 ## Guards in force
 
 | Guard | Holds |
