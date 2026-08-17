@@ -3209,3 +3209,33 @@ What this does *not* catch is a cached result standing in for a real run. The
 run stage's `:core:test` re-executes only because its project cache dir is inside
 a `--rm` container; that dependence is now written into the manifest, since
 nothing enforces it.
+
+### 8.13 — A guard the build cache can walk around
+
+`SOULBIND_REQUIRE_MARIADB` (8.12) makes a session that promised a MariaDB server
+fail when it has none. It cannot make a session that never runs the task fail at
+all.
+
+`gradle.properties` sets `org.gradle.caching=true`, the run stage's
+`GRADLE_USER_HOME` lives inside the guest work tree, `[reset]` rolls back only
+`state`, and **an environment variable is not a task input**. So with the flag
+set, no URL, and no MariaDB container running whatsoever, `:core:test` came back
+`FROM-CACHE` — BUILD SUCCESSFUL, exit 0, and result XML claiming 471 tests and
+seventy `MARIADB` cases, replayed from a previous session. `available()` never
+ran, so the guard never spoke.
+
+`:core:test` is the one `Test` task without `outputs.upToDateWhen { false }`, and
+it is the task carrying the two-backend claim.
+
+The fix is to declare the storage environment as an input rather than to disable
+the cache: a SQLite-only result and a two-backend result now have different keys,
+so each remains reusable and neither can stand in for the other. Verified —
+same environment hits cache, setting the MariaDB URL forces a real run, clearing
+it hits the first result again.
+
+**The general shape, which has now cost three separate defects:** a check that
+lives *inside* a task cannot defend a claim about *whether the task ran*.
+`failIfTaggedTestsExistButNoneRan` had to be paired with `upToDateWhen { false }`
+for the same reason, and the resultless-stage invariant in `run.sh` exists
+because a stage that returns without emitting proves nothing. Whatever decides
+"did the work happen" has to sit outside the work.

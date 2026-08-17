@@ -171,11 +171,18 @@ fi
 # defect this file documents three times over, reappearing on the Node axis.
 case "$NODE" in
     */*)
-        # Checked, exactly as the JAVA branch is. Without it a mistyped NODE
-        # died on `cd: /nonexistent: No such file or directory` -- the same
-        # unhelpful failure the JAVA branch was fixed for, three comments above
-        # this one, reproduced on the Node axis because the fix was copied
-        # without the check that made it useful.
+        # Checked, as the JAVA branch is -- though NOT as early.
+        #
+        # JAVA is validated before pins.env and before fetch.sh; this runs after
+        # the artefacts are fetched, because $NODE_VERSION comes from pins.env.
+        # So a mistyped NODE pays for a JDK and Node download before being told,
+        # where a mistyped JAVA is rejected immediately. Stated because the first
+        # version of this comment claimed parity that does not exist.
+        #
+        # The check itself matters either way: without it a mistyped NODE died on
+        # `cd: /nonexistent: No such file or directory`, the same unhelpful
+        # failure the JAVA branch was fixed for, reproduced on the Node axis
+        # because the fix was copied without the check that made it useful.
         if [ ! -x "$NODE" ]; then
             echo "NODE is set to '$NODE', which is not an executable file." >&2
             echo "Set it to a Node launcher, or unset it to use the pinned toolchain." >&2
@@ -299,8 +306,10 @@ mkdir -p "$RUN/paper" "$RUN/proxy/plugins" "$RUN/core"
 log "building"
 # GRADLE_USER_HOME is set, and prefers reaper's declared cache.
 #
-# This was the only ./gradlew invocation in the repository without one -- the
-# flarum tier and the run stage both set it -- so on the guest it wrote to
+# This invocation had none -- the flarum tier and the run stage both set one,
+# and the build stage has since been given one too, so the claim that this was
+# "the only" such invocation was itself false when written, inside the comment
+# retiring a different false premise -- so on the guest it wrote to
 # /root/.gradle: 835 MB on a root filesystem sitting at 72% with 2.2 GB free,
 # rebuilt from scratch every session because `reset` does not reach it and
 # nothing else does either. reaper's tenants.md is explicit that anything large
@@ -314,7 +323,12 @@ GRADLE_USER_HOME=${REAPER_CACHE_GRADLE:-$RUN/.gradle-home}
 export GRADLE_USER_HOME
 log "gradle user home: $GRADLE_USER_HOME"
 
-(cd "$REPO" && ./gradlew --quiet :core:installDist :connector-velocity:jar \
+# --no-daemon, like every other gradlew invocation here.
+#
+# Without it each run left a daemon alive for three hours holding about a
+# gigabyte; two were resident at once on an 11 GB guest, and the older one was
+# the sole remaining writer to the root disk this stage had just been moved off.
+(cd "$REPO" && ./gradlew --no-daemon --quiet :core:installDist :connector-velocity:jar \
     :connector-discord:installDist)
 
 # The storage axis. The gate asks for the battery green on BOTH backends in one

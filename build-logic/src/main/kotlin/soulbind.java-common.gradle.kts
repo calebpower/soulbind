@@ -88,6 +88,25 @@ tasks.withType<Test>().configureEach {
     // without editing code.
     systemProperty("soulbind.seed", System.getenv("SOULBIND_SEED") ?: "")
 
+    // The storage environment is a task INPUT, so the build cache cannot serve
+    // a run that had one backend to a run that has two.
+    //
+    // Gradle keys a cached Test result on its declared inputs, and an
+    // environment variable is not one of them. The default `test` task is the
+    // only Test task here without `outputs.upToDateWhen { false }`, and it is
+    // the task carrying the two-backend claim -- so with `org.gradle.caching`
+    // on and a GRADLE_USER_HOME inside the persistent guest work tree, a second
+    // session at an unchanged commit replayed the previous result and reported
+    // `:core:test FROM-CACHE` with **no MariaDB running at all**, leaving XML
+    // that claimed 471 tests and seventy MARIADB cases. SOULBIND_REQUIRE_MARIADB
+    // could not catch it, because the task never ran.
+    //
+    // Declared rather than disabling the cache: a SQLite-only result and a
+    // two-backend result now have different keys, so each is reusable and
+    // neither can stand in for the other.
+    inputs.property("mariadbUrl", System.getenv("SOULBIND_TEST_MARIADB_URL") ?: "")
+    inputs.property("mariadbRequired", System.getenv("SOULBIND_REQUIRE_MARIADB") ?: "")
+
     testLogging {
         events("failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

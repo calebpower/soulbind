@@ -116,7 +116,8 @@ axes, and `migrate` has passed against MariaDB in consecutive sessions, with the
 fingerprint's identifier quoting and catalog scoping verified there. What
 remains true is that a local `./gradlew build` proves neither — 402 tests here
 against 471 on the guest — so a claim about the second backend is only ever a
-claim about the last session.
+claim about the last session. The figures that differ are `:core:test` alone —
+402 here against 471 on the guest; a whole local `./gradlew build` is 983.
 
 **No storage-backend evidence survives a session.** The battery runs both
 backends — the parameterised names say `SQLITE` and `MARIADB`, and the counts

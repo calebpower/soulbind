@@ -33,7 +33,9 @@ image = "docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c0125
 # $REAPER_CACHE_GRADLE, so /tank/cache/gradle sat empty while Gradle wrote to
 # the guest's root disk. The narrowing below was still safe -- it only ever runs
 # MORE -- but a narrowing justified by a false premise is one nobody can
-# re-evaluate. harness/fullstack/stack.sh now uses the cache. That is fine for a compile and wrong for this stage: the entire
+# re-evaluate. harness/fullstack/stack.sh and the run stage below now use it.
+#
+# UP-TO-DATE is fine for a compile and wrong for this stage: the entire
 # reason these tests run again in a session is that a real MariaDB is reachable
 # here and is not on the workstation. A cached "success" from a run where
 # MariaDB was absent is exactly the claim this stage exists to make and cannot
@@ -42,7 +44,12 @@ image = "docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c0125
 #
 # The narrowing is the test half alone. The compile half keeps its incremental
 # behaviour, because a cached compile of unchanged sources is the same compile.
-cmd = "./gradlew --no-daemon build -x test && ./gradlew --no-daemon test --rerun-tasks"
+# GRADLE_USER_HOME points at the declared cache, which is the whole reason
+# `cache = ["gradle"]` is below. Without it this stage re-downloaded the entire
+# Gradle distribution into a container-local /root/.gradle that dies with
+# `--rm`, every session -- while /tank/cache/gradle sat empty. reaper exports
+# REAPER_CACHE_GRADLE to container jobs as well as host ones.
+cmd = "GRADLE_USER_HOME=${REAPER_CACHE_GRADLE:-$HOME/.gradle} ./gradlew --no-daemon build -x test && GRADLE_USER_HOME=${REAPER_CACHE_GRADLE:-$HOME/.gradle} ./gradlew --no-daemon test --rerun-tasks"
 
 cache = ["gradle"]
 
@@ -76,6 +83,17 @@ exec = "host"
 cmd = """
 set -o pipefail
 set -e
+
+# The results directory is cleared at the START of the run, on the guest.
+#
+# reaper copies back whatever is in out/ and never deletes, so without this a
+# stage that does not run this session is reported with the result it produced
+# in a previous one -- a full green both-backends result set was observed
+# sitting in a freshly-emptied local out/ an hour before the tier that writes it
+# had started. run.sh clears its own subdirectory, but only once it runs; this
+# covers the run that never gets that far.
+rm -rf out
+mkdir -p out
 
 MARIADB=docker.io/library/mariadb@sha256:67873d30a17f6a9c331f06363b2fa15f38abca415529966d67c84f87f82439fe
 TOOLCHAIN=docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012526d6fb31cc78123c740ebdc1cfd2dced12
