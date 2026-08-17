@@ -3142,11 +3142,31 @@ Now a `ConcurrentLinkedQueue`: correct under concurrent senders, and without the
 whole-array copy per send that a copy-on-write list would cost a test sending
 thousands of requests.
 
-It reproduced 1 run in 5 on the guest under load and 0 in 15 on the workstation
-alone — 6 cores against 8, and the window only opens when the machine is busy.
-Worth stating plainly: **this fix cannot be mutation-checked on the workstation**,
-because the defect it repairs does not reproduce there. The verification is the
-session.
+**The first version of this entry was wrong, and the way it was wrong matters.**
+It said the fix "cannot be mutation-checked on the workstation, because the
+defect it repairs does not reproduce there". A review measured it: driving the
+class directly, eight threads by four hundred sends, the broken version reported
+a wrong count **4999 times in 5000 on this workstation**. It reproduces here
+almost every time.
+
+What did not reproduce was the *test's* failure — 0 detections in 16 contended
+runs — because the test asserted on `LinkDataSource`'s cache and never on the
+transport, and the cache is correct even when the record of what was sent is
+not. I read "the test does not fail here" as "the defect does not occur here",
+and wrote the second into the record.
+
+So the fix had shipped with **no test that would have caught it**, which is the
+standing rule this project holds on every commit. The concurrency test now
+asserts `transport.sendCount()` as well: with that line, the broken transport is
+caught **8 times in 8** on the workstation, deterministically. A test that drives
+a double from eight threads and never checks the double is a test standing on an
+assumption.
+
+One measurement worth keeping, because it contradicts the obvious model:
+contention *lowered* the class-level failure rate — 87% idle against 6.5% under
+load. The window is inside `ArrayList.add`, and a busier machine spends
+proportionally more time elsewhere. "Run it under load to shake out a race" is
+not reliably true.
 
 ### 8.11 — The same defect, a fourth time, on a third axis
 
@@ -3165,3 +3185,27 @@ is now unmistakable: **when a script resolves an interpreter into a variable, ev
 invocation must use that variable, and any `PATH` that stands in for it must follow
 the same resolution.** `PATH` now follows whichever `node` was chosen, pinned or
 caller-set, and the smoke invokes `"$NODE"` directly.
+
+### 8.12 — The environment that supplies a capability is the environment that asserts it
+
+`StorageBackends.available()` returned one backend or two depending on whether
+`SOULBIND_TEST_MARIADB_URL` was set, and nothing anywhere checked that a session
+which was *supposed* to have MariaDB actually did. Drop that variable — a typo in
+the manifest, a container that failed to start — and the storage battery halves
+from 471 tests to 402, in silence, and the session reports green having proven
+half of what its gate asks for.
+
+The workstation legitimately has no MariaDB, so the requirement cannot be
+unconditional. So the run stage, which starts the server, now also sets
+`SOULBIND_REQUIRE_MARIADB=1` — and `available()` refuses to fall back to SQLite
+alone when that promise is present.
+
+Same shape as the tag-selected task guard: **whoever supplies a capability is
+whoever asserts it arrived.** A narrowing is legitimate where it is honest about
+the environment; it is not legitimate as a silent fallback in an environment that
+declared it would not need one.
+
+What this does *not* catch is a cached result standing in for a real run. The
+run stage's `:core:test` re-executes only because its project cache dir is inside
+a `--rm` container; that dependence is now written into the manifest, since
+nothing enforces it.

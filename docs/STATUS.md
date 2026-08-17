@@ -109,14 +109,14 @@ cannot reach a workstation copy for a run that never happened. Each result now
 carries a `timestamp` attribute, which is the only thing distinguishing them, and
 nothing enforces reading it. Logged against reaper in `reaper_bugs.md`.
 
-**The `migrate` stage has never run against MariaDB.** `.reaper.toml` does not
-yet invoke `harness/fullstack/run.sh`, and no MariaDB is reachable from the
-workstation, so the fingerprint has only ever been exercised on SQLite. Two
-things in it are dialect-sensitive and untested: `getTables(null, null, …)`
-catalog semantics under the MariaDB driver, and the table-name matching that
-gates the per-table reads. The backends' metadata genuinely diverge — MariaDB
-discards primary-key constraint names, which the reaper log shows — so this is
-not a formality.
+**No MariaDB is reachable from the workstation**, so the storage
+parameterisations and the `migrate` stage's MariaDB half can only be exercised
+in a session. They are: the run verb invokes `harness/fullstack/run.sh` on both
+axes, and `migrate` has passed against MariaDB in consecutive sessions, with the
+fingerprint's identifier quoting and catalog scoping verified there. What
+remains true is that a local `./gradlew build` proves neither — 402 tests here
+against 471 on the guest — so a claim about the second backend is only ever a
+claim about the last session.
 
 **No storage-backend evidence survives a session.** The battery runs both
 backends — the parameterised names say `SQLITE` and `MARIADB`, and the counts

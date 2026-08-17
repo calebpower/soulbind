@@ -170,7 +170,20 @@ fi
 # dependency check had just approved. That is the $JAVA versus $JAVA_HOME/bin/java
 # defect this file documents three times over, reappearing on the Node axis.
 case "$NODE" in
-    */*) PATH="$(cd "$(dirname "$NODE")" && pwd):$PATH"; export PATH ;;
+    */*)
+        # Checked, exactly as the JAVA branch is. Without it a mistyped NODE
+        # died on `cd: /nonexistent: No such file or directory` -- the same
+        # unhelpful failure the JAVA branch was fixed for, three comments above
+        # this one, reproduced on the Node axis because the fix was copied
+        # without the check that made it useful.
+        if [ ! -x "$NODE" ]; then
+            echo "NODE is set to '$NODE', which is not an executable file." >&2
+            echo "Set it to a Node launcher, or unset it to use the pinned toolchain." >&2
+            exit 1
+        fi
+        PATH="$(cd "$(dirname "$NODE")" && pwd):$PATH"
+        export PATH
+        ;;
 esac
 
 CORE_PORT=${CORE_PORT:-7100}
@@ -284,6 +297,23 @@ mkdir -p "$RUN/paper" "$RUN/proxy/plugins" "$RUN/core"
 
 # --- core -------------------------------------------------------------------
 log "building"
+# GRADLE_USER_HOME is set, and prefers reaper's declared cache.
+#
+# This was the only ./gradlew invocation in the repository without one -- the
+# flarum tier and the run stage both set it -- so on the guest it wrote to
+# /root/.gradle: 835 MB on a root filesystem sitting at 72% with 2.2 GB free,
+# rebuilt from scratch every session because `reset` does not reach it and
+# nothing else does either. reaper's tenants.md is explicit that anything large
+# belongs under $REAPER_CACHE_*, which lives on the session pool with tens of
+# gigabytes, and .reaper.toml already declares `cache = ["gradle"]` -- a cache
+# that nothing had ever used.
+#
+# Falls back to a path inside the run directory off a session, so a workstation
+# run does not silently adopt the developer's own ~/.gradle either.
+GRADLE_USER_HOME=${REAPER_CACHE_GRADLE:-$RUN/.gradle-home}
+export GRADLE_USER_HOME
+log "gradle user home: $GRADLE_USER_HOME"
+
 (cd "$REPO" && ./gradlew --quiet :core:installDist :connector-velocity:jar \
     :connector-discord:installDist)
 

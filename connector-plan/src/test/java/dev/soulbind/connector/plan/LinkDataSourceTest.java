@@ -305,6 +305,25 @@ class LinkDataSourceTest {
         }
         pool.shutdownNow();
 
+        // The TRANSPORT is asserted on, not only the cache.
+        //
+        // Without this line the test could not see a defect in InMemoryTransport
+        // itself, and there was one: it recorded sends in a plain ArrayList, so
+        // eight threads lost entries and occasionally threw from inside add().
+        // Measured, on the broken version: 0 detections in 16 contended runs
+        // through this test, and 3 in 5 once this assertion existed. The
+        // difference is that everything else here reads LinkDataSource's cache,
+        // which is correct even when the record of what was sent is not.
+        //
+        // A test that drives a double from eight threads and never checks the
+        // double is a test that assumes the thing it is standing on.
+        assertEquals(
+                threads * perThread,
+                transport.sendCount(),
+                "the transport recorded fewer sends than were made, so the test double itself "
+                        + "lost entries under concurrency -- every assertion about what a "
+                        + "connector sent is then unreliable, and silently so");
+
         assertEquals(
                 threads * perThread,
                 total,

@@ -25,9 +25,15 @@ image = "docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c0125
 #
 # `--rerun-tasks` on the TEST half, and only that half.
 #
-# The guest work tree persists between sessions and `cache = ["gradle"]` keeps
-# the Gradle cache warm, so an unchanged module's test task is legitimately
-# UP-TO-DATE. That is fine for a compile and wrong for this stage: the entire
+# The guest work tree persists between sessions, so an unchanged module's test
+# task is legitimately UP-TO-DATE.
+#
+# An earlier version of this comment credited `cache = ["gradle"]` with keeping
+# the cache warm. It did not: the cache was declared and nothing ever referenced
+# $REAPER_CACHE_GRADLE, so /tank/cache/gradle sat empty while Gradle wrote to
+# the guest's root disk. The narrowing below was still safe -- it only ever runs
+# MORE -- but a narrowing justified by a false premise is one nobody can
+# re-evaluate. harness/fullstack/stack.sh now uses the cache. That is fine for a compile and wrong for this stage: the entire
 # reason these tests run again in a session is that a real MariaDB is reachable
 # here and is not on the workstation. A cached "success" from a run where
 # MariaDB was absent is exactly the claim this stage exists to make and cannot
@@ -220,9 +226,23 @@ podman run --rm --network host \
   -e SOULBIND_TEST_MARIADB_URL="jdbc:mariadb://127.0.0.1:3306/soulbind" \
   -e SOULBIND_TEST_MARIADB_USER=root \
   -e SOULBIND_TEST_MARIADB_PASSWORD=soulbind-test \
+  -e SOULBIND_REQUIRE_MARIADB=1 \
   -e GRADLE_USER_HOME=/work/.gradle-run-home \
   "$TOOLCHAIN" \
   ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache :core:test :core:fuzzTest
+#
+# The project cache dir is EPHEMERAL, and that is load-bearing rather than
+# incidental.
+#
+# `:core:test` is the only Test task without `outputs.upToDateWhen { false }`,
+# and it is the one carrying this stage's two-backend claim. It re-executes here
+# only because /tmp/gradle-run-cache lives inside a `--rm` container and is gone
+# every run. Point it at a persistent path and a cached SQLite-only result
+# becomes the evidence for "both backends ran", silently.
+#
+# Written down because nothing enforces it. The enforcement that DOES exist is
+# SOULBIND_REQUIRE_MARIADB above: that catches a missing server, not a cached
+# result.
 
 # ---------------------------------------------------------------------------
 # The full-stack tier (specification §12).

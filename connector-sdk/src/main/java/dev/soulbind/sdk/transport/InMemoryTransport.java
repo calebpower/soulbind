@@ -30,7 +30,7 @@ import java.util.function.Function;
  * reachable for one call and gone for the next, a response that is truncated, a
  * refusal arriving where a success was expected.
  *
- * <p>Not a mock framework. It is a {@link Function} and a list of what was
+ * <p>Not a mock framework. It is a {@link Function} and a record of what was
  * sent, because a connector test wants to assert what went out and control what
  * comes back, and anything more would be a second thing to learn.
  */
@@ -52,9 +52,16 @@ public final class InMemoryTransport implements Transport {
      * thousands of requests would otherwise copy the whole array on every one.
      */
     private final Queue<String> sent = new ConcurrentLinkedQueue<>();
-    private Function<String, String> responder;
-    private boolean connected = true;
-    private TransportException failure;
+    // Volatile, because this class now advertises itself as safe to send from
+    // several threads and these three decide what a send DOES. Every test today
+    // mutates them before starting its threads, so the executor's own
+    // happens-before covers it -- but goDown() or respondWith() called from
+    // another thread mid-run would otherwise have no guarantee of being seen,
+    // and the symptom would be a fault-injection test that silently did not
+    // inject.
+    private volatile Function<String, String> responder;
+    private volatile boolean connected = true;
+    private volatile TransportException failure;
 
     public InMemoryTransport(Function<String, String> responder) {
         this.responder = responder;

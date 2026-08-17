@@ -241,10 +241,37 @@ public final class StorageBackends {
         };
     }
 
-    /** The backends available in this environment. Always at least SQLite. */
+    /**
+     * The backends available in this environment. Always at least SQLite.
+     *
+     * <p><b>Where both are REQUIRED, absence is a failure rather than a
+     * narrowing.</b> `SOULBIND_TEST_MARIADB_URL` being unset silently halves the
+     * storage battery — 402 tests instead of 471 — and a session that lost it
+     * would stay green while proving half of what its gate asks for. The
+     * workstation legitimately has no MariaDB, so the requirement cannot be
+     * unconditional; the run stage that provides one sets
+     * {@code SOULBIND_REQUIRE_MARIADB=1} and thereby promises it.
+     *
+     * <p>Same shape as the tag-selected task guard in the build conventions: the
+     * environment that supplies a capability is the environment that asserts it
+     * arrived.
+     */
     public static Stream<Arguments> available() {
+        if (mariadbRequired() && !mariadbAvailable()) {
+            throw new IllegalStateException(
+                    "SOULBIND_REQUIRE_MARIADB is set, so this environment promised a MariaDB "
+                            + "server, but SOULBIND_TEST_MARIADB_URL is unset. Running only "
+                            + "SQLite here would quietly halve the storage battery and report "
+                            + "green for half the coverage the gate asks for.");
+        }
         return mariadbAvailable()
                 ? Stream.of(Arguments.of(Backend.SQLITE), Arguments.of(Backend.MARIADB))
                 : Stream.of(Arguments.of(Backend.SQLITE));
+    }
+
+    /** Whether this environment has promised a MariaDB server. */
+    public static boolean mariadbRequired() {
+        String flag = System.getenv("SOULBIND_REQUIRE_MARIADB");
+        return flag != null && !flag.isBlank() && !flag.equals("0");
     }
 }
