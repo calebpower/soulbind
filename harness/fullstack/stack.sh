@@ -502,6 +502,14 @@ if [ -n "${SOULBIND_PLAN_DB_HOST:-}" ]; then
     # Plan merges missing keys into an existing file, so pre-writing the database
     # block is what stops it generating a localhost default, failing to connect,
     # and disabling itself before anything can register with it.
+    # Pre-seeded, so Plan finds its driver already present and downloads
+    # nothing. The filenames are the ones Plan's own downloader writes, which is
+    # what makes this indistinguishable from a cache it populated itself.
+    mkdir -p "$RUN/proxy/plugins/plan/libraries"
+    cp "$CACHE/com.mysql-mysql-connector-j-$PLAN_MYSQL_DRIVER_VERSION.jar" \
+       "$CACHE/com.google.protobuf-protobuf-java-$PLAN_PROTOBUF_VERSION.jar" \
+       "$RUN/proxy/plugins/plan/libraries/"
+
     mkdir -p "$RUN/proxy/plugins/plan"
     cat > "$RUN/proxy/plugins/plan/config.yml" <<PLANYML
 Server:

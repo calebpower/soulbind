@@ -19,7 +19,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
 | 6 | connector-discord | **In progress** — seam, scripted surface, connector, role effector and the client-library implementation landed; scripted-surface link flow green in the stack. The manual smoke against a real server is outstanding and is named as evidence, not a tier |
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
-| 8 | connector-plan + full-stack battery | **In progress** — the Plan connector has landed: data layer, `DataExtension`, and the provider bodies under test. The full-stack battery and its gate are outstanding |
+| 8 | connector-plan + full-stack battery | **In progress — both gate clauses demonstrated.** The battery runs green on both backends in one session, and Plan renders link data for a player linked through the real flow. Outstanding: T6's latin1 start and astral-plane pushes, T7 and T8 as stages, T5 against the real stack, and 2 of the 3 named journeys |
 | 9 | Simulated users | Not started |
 | 10 | Hardening and release | Not started |
 
@@ -317,7 +317,7 @@ units one.
 | T6 staged battery, both backends, MariaDB started latin1 | **Partial** — migration idempotence lands as the `migrate` stage, in-session against a used database, mutation-checked. Latin1 start, astral-plane pushes and no-backdoor state building outstanding |
 | T7 fuzz against the real deployment | Not started |
 | T8 scenarios re-run in-session | Not started |
-| Plan pages render link data | **In progress** — Plan 5.8.3605 pinned and installed on the proxy, `connector-plan` bootstraps on Velocity and registers with `ExtensionService`, and a `plan` stage asks Plan's own API whether the extension rendered. mariadb axis only: Plan on a proxy takes MySQL (DECISIONS 8.15). Not yet verified in a session |
+| Plan pages render link data | **Demonstrated in a session.** Plan renders `linked=true`, `linkStatus="linked"`, `platforms="game, harness"`, `proof="link-code"`, the subject id and `linkedSince` in milliseconds, for a player linked by a real client running `/link` and redeeming a code — with Plan's own log reporting `Registered extension: soulbind`. mariadb axis only (DECISIONS 8.15). The check has since been rewritten to assert values rather than labels and to cover the server-wide providers, which the passing version did not (8.16) |
 | `journeys` emits the T11 evidence directory | **Green for 1 of the 3 journeys the plan names.** `first-time-player` runs against the live stack and emits a real per-step transcript; `COVERAGE.md` is generated from the recorded outcomes and names the other two as uncovered. No screenshots yet |
 | T5 suite against the real stack, 5xx watchdog on | Not started |
 | Plan pages render link data for players created through real flows | Not started |

@@ -159,12 +159,17 @@ public final class SoulbindPlanPlugin {
                             () -> logger.error(
                                     "Plan accepted no extension. Its pages will show no soulbind "
                                             + "data, and Plan itself will report nothing wrong."));
-        } catch (IllegalStateException e) {
-            // Thrown when Plan is not enabled. Reported rather than swallowed:
-            // the symptom otherwise is a page that renders perfectly with one
-            // section absent, which nobody reads as a failure.
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // IllegalState when Plan is not enabled; IllegalArgument when Plan
+            // rejects the extension itself -- a provider signature it cannot
+            // scan, say. Catching only the first left the second to Velocity's
+            // generic handler, which reports a stack trace and not the one thing
+            // worth saying: that the pages will now be silently short a section.
             logger.error(
-                    "Plan is not available, so nothing was registered: {}", e.getMessage());
+                    "the soulbind extension was NOT registered ({}): {}. Plan's pages will show "
+                            + "no soulbind data, and Plan itself will report nothing wrong.",
+                    e.getClass().getSimpleName(),
+                    e.getMessage());
         }
     }
 

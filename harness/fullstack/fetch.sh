@@ -52,6 +52,12 @@ fetch() {
 fetch "$VELOCITY_URL" "$VELOCITY_SHA256" "$CACHE/velocity-$VELOCITY_VERSION-$VELOCITY_BUILD.jar"
 fetch "$PAPER_URL" "$PAPER_SHA256" "$CACHE/paper-$PAPER_VERSION-$PAPER_BUILD.jar"
 fetch "$PLAN_URL" "$PLAN_SHA256" "$CACHE/plan-$PLAN_VERSION.jar"
+# Named exactly as Plan's downloader names them, so pre-seeding the directory is
+# indistinguishable from Plan having fetched them itself: <group>-<artifact>-<version>.jar
+fetch "$PLAN_MYSQL_DRIVER_URL" "$PLAN_MYSQL_DRIVER_SHA256" \
+    "$CACHE/com.mysql-mysql-connector-j-$PLAN_MYSQL_DRIVER_VERSION.jar"
+fetch "$PLAN_PROTOBUF_URL" "$PLAN_PROTOBUF_SHA256" \
+    "$CACHE/com.google.protobuf-protobuf-java-$PLAN_PROTOBUF_VERSION.jar"
 
 # --- toolchains -------------------------------------------------------------
 #

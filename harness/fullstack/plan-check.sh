@@ -71,51 +71,152 @@ log "asking Plan about $PLAYER"
 # Everything Plan returns is kept, pass or fail. A gate clause about what a page
 # shows is answerable only from what the page actually said, and an assertion
 # that leaves no artifact behind cannot be re-read when somebody doubts it.
+#
+# `--compressed`, which is NOT optional. Plan's JettyResponseSender gzips every
+# application/json response and sets Content-Encoding: gzip -- on mime type
+# alone, never looking at Accept-Encoding. curl's default is to send no
+# Accept-Encoding and hand back whatever arrives verbatim, so the first run of
+# this stage wrote 2 KB of gzip into the evidence file, every grep missed, and it
+# reported "no soulbind extension" about a page that had rendered all six
+# providers correctly. The failure was here, not in the connector.
+#
+# DEPENDS ON Plan having no certificate. Plan disables web authorization only
+# because it is serving HTTP; a deployment with a Cert.jks would answer every
+# /v1/ call with a redirect or a 403 and this stage would fail for a reason
+# having nothing to do with soulbind. Stated because it is invisible otherwise.
 fetch() {
-    curl -sS --max-time 20 -o "$2" -w '%{http_code}' "$1" 2>/dev/null || echo "000"
+    curl -sS --compressed --max-time 20 -o "$2" -w '%{http_code}' "$1" 2>/dev/null || echo "000"
 }
 
-SERVER_JSON="$EVIDENCE/plan-server.json"
+# Reads a provider's VALUE out of Plan's JSON, by provider name.
+value_of() {
+    python3 -c '
+import json, sys
+name = sys.argv[1]
+try:
+    doc = json.load(open(sys.argv[2], encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+
+def walk(node):
+    if isinstance(node, dict):
+        # Plan renders a provider as an object carrying its name and value.
+        if node.get("name") == name and "value" in node:
+            print(node["value"])
+            raise SystemExit(0)
+        for v in node.values():
+            walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            walk(v)
+
+walk(doc)
+sys.exit(1)
+' "$1" "$2" 2>/dev/null
+}
+
 PLAYER_JSON="$EVIDENCE/plan-player.json"
+SERVER_JSON="$EVIDENCE/plan-server.json"
 
-server_code=$(fetch "$BASE/v1/serverOverview?server=soulbind-harness" "$SERVER_JSON")
 player_code=$(fetch "$BASE/v1/player?player=$PLAYER" "$PLAYER_JSON")
-log "serverOverview: HTTP $server_code, player: HTTP $player_code"
+log "player page: HTTP $player_code"
 
-# --- assert ------------------------------------------------------------------
-#
-# On the EXTENSION's own values, not on the word "soulbind" appearing somewhere.
-# The plugin name is in Plan's page whether or not a single provider ran, so
-# matching it would pass for an extension that registered and returned nothing --
-# which is precisely the silent failure this tier exists to catch.
-#
-# `requirements-met` and the platform kinds come from core through the
-# connector's providers. Nothing else in Plan produces them.
-if [ ! -s "$PLAYER_JSON" ]; then
-    log "Plan returned no body for the player (HTTP $player_code)"
-    exit 1
-fi
-
-if grep -q 'soulbind' "$PLAYER_JSON" 2>/dev/null; then
-    log "the extension is present on the player page"
-else
-    log "no soulbind extension on the player page (HTTP $player_code)"
-    log "what Plan returned, first 400 bytes:"
-    head -c 400 "$PLAYER_JSON" | sed 's/^/  /'
+# Whatever happens below, the body is on disk and readable. The first version
+# dumped it on only ONE of its failure branches -- the least likely one -- so the
+# likelier failure produced a verdict with no evidence behind it.
+dump_and_fail() {
+    log "$1"
+    log "HTTP $player_code; first 600 bytes of what Plan returned:"
+    head -c 600 "$PLAYER_JSON" 2>/dev/null | sed 's/^/  /'
     echo
     log "kept in full at $PLAYER_JSON"
     exit 1
+}
+
+[ -s "$PLAYER_JSON" ] || dump_and_fail "Plan returned no body for the player"
+
+# --- assert, on VALUES ---------------------------------------------------
+#
+# Not on the labels. `Linked` and `Link status` are the annotations' text= --
+# Plan renders them whether the provider returned true or false, so an extension
+# reporting "not linked" for a player who IS linked passed the first version of
+# this check identically. The unlinked bot in the same run produced exactly those
+# rows.
+#
+# Not on the plugin name either. `soulbind` appears in extensionInformation
+# whether or not a single provider ever ran, which is precisely the silent
+# failure -- a registered extension that renders nothing -- this tier exists to
+# catch.
+linked=$(value_of linked "$PLAYER_JSON" || true)
+status=$(value_of linkStatus "$PLAYER_JSON" || true)
+platforms=$(value_of platforms "$PLAYER_JSON" || true)
+proof=$(value_of proof "$PLAYER_JSON" || true)
+since=$(value_of linkedSince "$PLAYER_JSON" || true)
+
+log "linked=$linked linkStatus=$status platforms=$platforms proof=$proof linkedSince=$since"
+
+[ "$linked" = "True" ] || [ "$linked" = "true" ] \
+    || dump_and_fail "Plan does not show this player as linked (linked=$linked), but the smoke linked them through the real flow"
+[ "$status" = "linked" ] \
+    || dump_and_fail "link status reads '$status', expected 'linked'"
+case "$platforms" in
+    *game*) ;;
+    *) dump_and_fail "platforms reads '$platforms' and does not include the game kind" ;;
+esac
+[ -n "$proof" ] && [ "$proof" != "-" ] \
+    || dump_and_fail "no proof method rendered (got '$proof')"
+
+# Milliseconds, not seconds. Core speaks seconds and Plan's DATE_YEAR expects
+# ms; getting it wrong renders 1970 on every page, which reads as a data problem
+# rather than a units one. A seconds value would be ~1.7e9; ms is ~1.7e12.
+case "$since" in
+    ''|*[!0-9]*) dump_and_fail "linkedSince is not a number: '$since'" ;;
+esac
+if [ "$since" -lt 100000000000 ]; then
+    dump_and_fail "linkedSince=$since looks like SECONDS, not milliseconds -- Plan would render 1970"
 fi
 
-# The values, not just the presence of the section.
-missing=""
-for needle in 'Linked' 'Link status'; do
-    grep -q "$needle" "$PLAYER_JSON" 2>/dev/null || missing="$missing $needle"
+log "the player page renders real link state, in the right units"
+
+# --- the server-wide providers -------------------------------------------
+#
+# /v1/extensionData, NOT /v1/serverOverview. The first version asked
+# serverOverview?server=soulbind-harness, which returned HTTP 400 on every run
+# and was never asserted on -- so the four server-wide providers and the table
+# were covered by nothing at all while the stage reported green.
+#
+# Two reasons it could never have worked: Server.ServerName is ignored on a
+# proxy (Plan registers it as `Velocity`), and serverOverview carries no
+# extension data even when it succeeds.
+#
+# Retried, because Plan gathers SERVER_PERIODICAL on its own schedule and the
+# values are absent for a minute or two after stack-up. A single shot here would
+# be a flake that looks like a defect.
+server_ok=0
+i=0
+while [ "$i" -lt 24 ]; do
+    server_code=$(fetch "$BASE/v1/extensionData?server=Velocity" "$SERVER_JSON")
+    if [ "$server_code" = "200" ] && grep -q 'linkedPlayers' "$SERVER_JSON" 2>/dev/null; then
+        server_ok=1
+        break
+    fi
+    i=$((i + 1))
+    sleep 5
 done
-if [ -n "$missing" ]; then
-    log "the extension is registered but these providers are absent:$missing"
-    log "an extension that registers and renders nothing is the failure this checks for"
+
+if [ "$server_ok" -ne 1 ]; then
+    log "the server-wide providers never appeared (last HTTP $server_code after $((i * 5))s)"
+    head -c 600 "$SERVER_JSON" 2>/dev/null | sed 's/^/  /'
+    echo
     exit 1
 fi
 
+for provider in linkedPlayers unlinkedPlayers unknownPlayers; do
+    grep -q "$provider" "$SERVER_JSON" \
+        || { log "server page is missing the $provider provider"; exit 1; }
+done
+grep -q 'unlinkedTable' "$SERVER_JSON" \
+    || { log "server page is missing the unlinked-players table"; exit 1; }
+
+log "the server page renders all four server-wide providers"
 log "Plan renders soulbind link data for a player linked through the real flow"

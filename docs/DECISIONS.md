@@ -3312,3 +3312,69 @@ Two smaller things the first run taught, both invisible from source:
   loads it second. Without that, `ExtensionService.getInstance()` races Plan's
   startup and the extension is silently absent — a page with a missing panel and
   no error anywhere, which is this connector's whole failure mode.
+
+### 8.16 — Plan renders it, and the check that said so could not have said otherwise
+
+The gate's second clause is met. Plan, running on Velocity against MariaDB,
+renders for a player linked by a real client running `/link` and redeeming a
+code:
+
+```
+linked = true            linkStatus = "linked"     platforms = "game, harness"
+proof  = "link-code"     subject = 2081dcaa-…      linkedSince = 1787148246000
+```
+
+Plan's own log corroborates the connector rather than the other way round:
+`Registered extension: soulbind`. And it proves the capability change from 8.14
+end to end — `LinkDataSource` reached `identity.describe` holding `code-display`
+alone and got real data, so nothing silently failed authorization.
+
+**The first run of the check went red for a reason entirely inside the harness.**
+Plan's `JettyResponseSender` gzips every `application/json` response and sets
+`Content-Encoding: gzip` — on mime type alone, never reading `Accept-Encoding`.
+`curl` without `--compressed` therefore wrote two kilobytes of gzip into the
+evidence file, every grep missed, and the stage reported "no soulbind extension
+on the player page" about a page that had rendered all six providers correctly.
+
+**Then the check passed, and it was under-earned in three ways** — all the same
+family this phase keeps producing:
+
+- It asserted on `Linked` and `Link status`, which are the annotations' `text=`
+  **labels**. Plan renders those whether the provider returned true or false, so
+  an extension reporting "not linked" for a linked player passed identically —
+  and the unlinked bot in the same run produced exactly those rows. It now reads
+  the **values**, including that `linkedSince` is milliseconds rather than
+  seconds, which is the difference between a date and 1970.
+- It matched the string `soulbind`, which appears in `extensionInformation`
+  whether or not a single provider ever ran — the precise silent failure the
+  tier exists to catch, and the check's own comment said it was avoiding it.
+- It asked `/v1/serverOverview?server=soulbind-harness`, which returned **HTTP
+  400 on every run and was never asserted on**. It could not have worked:
+  `Server.ServerName` is ignored on a proxy (Plan registers it as `Velocity`),
+  and `serverOverview` carries no extension data even when it succeeds. So the
+  four server-wide providers and the table were covered by nothing while the
+  stage reported green. Now `/v1/extensionData`, with a bounded retry because
+  Plan gathers `SERVER_PERIODICAL` on its own schedule.
+
+### 8.17 — Pinning the dependency somebody else already pinned
+
+Plan fetches its MySQL driver at every startup through a dependency downloader:
+`com.mysql:mysql-connector-j` and `com.google.protobuf:protobuf-java`, into
+`plugins/plan/libraries`.
+
+It **does** verify them — `assets/plan/dependencies/mysqlDriver.txt` inside the
+Plan jar carries SHA-256 for both — so this was never an unverified download.
+It was a verified one this repository did not control and could not reproduce
+offline: a stack-up that reaches the internet on every run fails when the
+network does, for a reason unrelated to anything under test.
+
+Both are now pinned here and pre-seeded into the directory under the exact
+filenames Plan's downloader writes, so Plan finds them present and fetches
+nothing. The checksums were taken from Maven Central and **cross-checked against
+Plan's own manifest** — two independent statements of the same value, which is a
+better guarantee than either alone, and they matched exactly.
+
+The general point: a harness whose discipline is "the bytes are pinned or the
+green means nothing" should not have one component exempt because somebody else
+did the pinning. Their pin is not ours to rely on, and it does not survive an
+offline run.
