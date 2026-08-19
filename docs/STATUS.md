@@ -355,13 +355,13 @@ instance has ever run in this project.
 
 ### What will bite you
 
-- **The workstation cannot run the full-stack tier.** `harness/player-driver/`'s
-  `node_modules` is a yarn-era flat tree that disagrees with the committed npm
-  lock (`uuid` 10.0.0 installed, 8.3.2 locked), and npm here fails with
-  `MODULE_NOT_FOUND` inside its own tree. `stack.sh` says so precisely and exits.
-  Fix it with `npm ci` on a machine with a working npm, or accept that this tier
-  is session-only. **This cost the fast local loop that found most of the good
-  defects** — worth restoring before doing much more.
+- **The workstation's npm is broken** — `MODULE_NOT_FOUND` inside npm's own
+  dependency tree, for any package. It cannot repair itself. The way round it,
+  should `harness/player-driver` ever drift from its lock again: npm ships as a
+  self-contained tarball, so fetch one from the registry, verify its shasum
+  against the registry metadata, and run `node <extracted>/bin/npm-cli.js ci`.
+  No system change and no bootstrap-by-npm paradox. The tree was reconciled that
+  way on 2026-08-17 and the local loop works again.
 - **`reaper test` does not provision.** Run `reaper up` first, or it exits 1
   immediately with "no sessions".
 - **`JAVA_HOME=/usr/local/openjdk17` is exported on this workstation.** Set

@@ -317,9 +317,18 @@ log "building"
 # gigabytes, and .reaper.toml already declares `cache = ["gradle"]` -- a cache
 # that nothing had ever used.
 #
-# Falls back to a path inside the run directory off a session, so a workstation
-# run does not silently adopt the developer's own ~/.gradle either.
-GRADLE_USER_HOME=${REAPER_CACHE_GRADLE:-$RUN/.gradle-home}
+# Falls back to the artefact CACHE off a session, not to $RUN.
+#
+# $RUN is wiped by the `rm -rf "$RUN"` below on every single run, so a fallback
+# there meant a workstation re-downloaded the whole Gradle distribution and every
+# dependency each time -- turning the fast local loop into a slow one, which is
+# precisely the loop this harness depends on for quick feedback. .cache/ is
+# deliberately outside reaper state for the same reason: it holds things that are
+# expensive to fetch and cheap to keep.
+#
+# Still not the developer's own ~/.gradle: a harness that silently adopts it
+# would let a local build state leak into a result nobody can reproduce.
+GRADLE_USER_HOME=${REAPER_CACHE_GRADLE:-$CACHE/gradle-home}
 export GRADLE_USER_HOME
 log "gradle user home: $GRADLE_USER_HOME"
 
