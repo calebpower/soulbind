@@ -35,11 +35,27 @@ import java.util.concurrent.ConcurrentHashMap;
  * one-line providers, which keeps every judgement here — where it is testable
  * without a Minecraft server, a Plan installation or a database.
  *
- * <p><b>Read-only, by construction.</b> This class calls two operations and
- * neither of them changes anything. A dashboard that could mutate the identity
- * graph would need a credential that could, and the connector is registered
- * without one: the plan's "mutations stay on the admin API" is enforced by the
- * capability grant, not by this class remembering to be careful.
+ * <p><b>Read-only, and precise about what that costs.</b> This class calls one
+ * operation and it changes nothing. But soulbind has no read-only capability —
+ * the seven are identity-provider, code-display, code-entry, enforcement-point,
+ * effector, audit-source and config-management — so a connector that reads link
+ * state must hold one of two:
+ *
+ * <ul>
+ *   <li>{@code config-management}, via {@code subject.inspect}. Also unlocks
+ *       {@code rule.set}, {@code override.set}, {@code config.set},
+ *       {@code audit.query} and {@code identity.unlink}. A dashboard holding it
+ *       can rewrite every rule and unlink anybody.
+ *   <li>{@code code-display}, via {@code identity.describe}, which returns
+ *       exactly the same thing. Also unlocks {@code code.issue} — minting a link
+ *       code for an account.
+ * </ul>
+ *
+ * <p>This asks {@code identity.describe}, so the deployment grants
+ * {@code code-display}. That is dramatically less than admin and still more
+ * than nothing: the honest claim is that this connector <b>cannot mutate the
+ * identity graph or change policy</b>, not that it can do nothing but read. The
+ * absent read-only capability is recorded in {@code docs/DECISIONS.md} 8.14.
  */
 public final class LinkDataSource {
 
@@ -162,8 +178,21 @@ public final class LinkDataSource {
             cache.remove(platformId, cached);
         }
 
+        // identity.describe, NOT subject.inspect.
+        //
+        // They return the same thing -- core's own handler says so, and both
+        // bind the same request type. They differ only in which capability
+        // reaches them, and that difference is the whole security posture of
+        // this connector: `subject.inspect` requires `config-management`, which
+        // also unlocks rule.set, override.set, config.set, audit.query and
+        // identity.unlink. A read-only dashboard asking that way would hold a
+        // credential that can rewrite every rule and unlink anybody.
+        //
+        // protocol.md names this exact trap: "granting it config-management to
+        // do so would let it rewrite every rule -- the capability model being
+        // correct and the deployment being wrong."
         SoulbindClient.Outcome outcome = client.call(
-                "subject.inspect",
+                "identity.describe",
                 Map.of("platformKind", platformKind, "platformId", platformId));
 
         if (!(outcome instanceof SoulbindClient.Outcome.Ok ok)) {

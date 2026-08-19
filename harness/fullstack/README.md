@@ -41,6 +41,7 @@ narrows it, never as a green result carrying the word "skipped".
 | `up` | Brings the stack up via `stack.sh --keep` — which disarms its teardown trap on success, since `stack.sh` alone is a one-shot smoke that tears down even when it passes — then **probes core's port** before reporting, because a script finishing is not a stack existing. Takes the `@pristine` snapshot once it is healthy — stack-up, not end-of-run (§12), so a stage that dirties the databases can roll back to a working stack instead of an empty machine. |
 | `migrate` | Migration idempotence against the **live, already-used** database. Core migrates on every `Storage.open`, so a deployment re-migrates on every restart; a second apply that is not a no-op is drift per restart, invisible to any test against a fresh database. |
 | `journeys` | Tier 11 human evidence: a per-step transcript per linking journey, emitted so "would a newcomer understand this?" is answered from evidence rather than memory. |
+| `plan` | The gate's second clause: asks Plan's own HTTP API whether the soulbind extension rendered link data for a player the smoke linked through the real flow. Asserts on the extension's *values*, not on the plugin name — that appears whether or not a provider ever ran. **mariadb axis only**: Plan on a proxy supports MySQL, and the sqlite axis has no server for it. |
 | `down` | Stops what `up` started. |
 
 Adding a name to `STAGES` without a `stage_<name>` function is rejected by the

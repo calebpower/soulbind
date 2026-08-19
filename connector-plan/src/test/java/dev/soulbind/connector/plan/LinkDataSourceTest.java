@@ -70,6 +70,39 @@ class LinkDataSourceTest {
     }
 
     @Test
+    @DisplayName("it asks the read-side operation, not the admin one")
+    void itAsksTheOperationThatNeedsNoAdminCapability() {
+        // The whole security posture of this connector is one string.
+        //
+        // `subject.inspect` and `identity.describe` return the same thing --
+        // core binds the same request type for both and its handler says so in
+        // as many words. They differ only in which capability reaches them:
+        // subject.inspect needs `config-management`, which also unlocks
+        // rule.set, override.set, config.set, audit.query and identity.unlink.
+        //
+        // So a dashboard asking the wrong one holds a credential that can
+        // rewrite every rule and unlink anybody, while every other assertion in
+        // this file stays green -- the responses are identical. Nothing else
+        // here can tell the difference, which is exactly why this exists.
+        InMemoryTransport transport = InMemoryTransport.always(
+                ok("{\"linked\":false,\"identities\":[]}"));
+        source(transport).player("p1");
+
+        assertEquals(1, transport.sendCount(), "expected exactly one call to core");
+        String request = transport.sent().get(0);
+
+        assertTrue(
+                request.contains("identity.describe"),
+                () -> "the dashboard must ask identity.describe, which needs only code-display. "
+                        + "Sent: " + request);
+        assertFalse(
+                request.contains("subject.inspect"),
+                () -> "subject.inspect requires config-management -- an admin capability that "
+                        + "also permits unlinking identities and rewriting every rule. A "
+                        + "read-only dashboard must never need it. Sent: " + request);
+    }
+
+    @Test
     @DisplayName("an outage is UNKNOWN, never 'not linked'")
     void anOutageIsNotAnAnswer() {
         PlayerLinkView view = source(InMemoryTransport.always(ok("{}")).goDown()).player("p1");

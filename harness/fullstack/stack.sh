@@ -337,7 +337,7 @@ log "gradle user home: $GRADLE_USER_HOME"
 # Without it each run left a daemon alive for three hours holding about a
 # gigabyte; two were resident at once on an 11 GB guest, and the older one was
 # the sole remaining writer to the root disk this stage had just been moved off.
-(cd "$REPO" && ./gradlew --no-daemon --quiet :core:installDist :connector-velocity:jar \
+(cd "$REPO" && ./gradlew --no-daemon --quiet :core:installDist :connector-velocity:jar :connector-plan:jar \
     :connector-discord:installDist)
 
 # The storage axis. The gate asks for the battery green on BOTH backends in one
@@ -405,7 +405,21 @@ CHAT_CRED=$("$CORE_CLI" register --name chat --quiet \
     --capabilities code-display,code-entry \
     --config "$RUN/core/soulbind.toml")
 
-if [ -z "$PROXY_CRED" ] || [ -z "$HARNESS_CRED" ]; then
+# The dashboard connector, with the LEAST capability that can answer its
+# question -- code-display, which reaches identity.describe.
+#
+# Deliberately not config-management. subject.inspect returns the same data and
+# needs that, which also unlocks rule.set, override.set, config.set,
+# audit.query and identity.unlink: a read-only dashboard would hold a credential
+# that can rewrite every rule and unlink anybody. Granting it here would prove
+# the flow works for something holding admin, which is not what a deployment
+# should run. See DECISIONS 8.14 -- soulbind has no read-only capability, and
+# this is the closest available.
+PLAN_CRED=$("$CORE_CLI" register --name plan --quiet \
+    --capabilities code-display \
+    --config "$RUN/core/soulbind.toml")
+
+if [ -z "$PROXY_CRED" ] || [ -z "$HARNESS_CRED" ] || [ -z "$PLAN_CRED" ]; then
     log "a credential did not come back from register; refusing to continue"
     exit 1
 fi
@@ -456,6 +470,60 @@ wait_for_port paper "$PAPER_PORT" 240
 log "starting velocity"
 cp "$REPO/connector-velocity/build/libs"/*.jar "$RUN/proxy/plugins/"
 
+# Plan itself, and the connector that registers with it.
+#
+# Both on the PROXY: §16 prefers bootstrapping the Plan connector on Velocity
+# because velocity-api is MIT where paper-api is GPLv3, and Plan supports the
+# platform. The connector declares a Velocity plugin dependency on `plan`, so
+# the proxy loads it second -- without that ExtensionService.getInstance()
+# races Plan's startup and the extension is silently absent, which is a page
+# with a missing panel and no error anywhere.
+#
+# Only where Plan can actually run. Plan on a PROXY supports MySQL only -- its
+# own generated config says "Supported databases: MySQL" -- so the sqlite axis
+# has no database for it and installing it there produces a plugin that fails to
+# initialise, disables itself, and leaves the extension unregistered. That is a
+# stack reporting a dashboard it does not have.
+#
+# NARROWING, stated: Plan and its connector are installed on the mariadb axis
+# only, because that axis has a MySQL-family server and the sqlite axis does
+# not. It covers Plan and the soulbind-plan connector and nothing else -- every
+# other component runs on both axes exactly as before. Bootstrapping the
+# connector on Paper instead would let Plan use SQLite and run on both, at the
+# cost of a GPLv3 compile dependency; §16 permits that only if paper-api becomes
+# unavoidable, and it has not.
+if [ -n "${SOULBIND_PLAN_DB_HOST:-}" ]; then
+    log "installing Plan and the soulbind-plan connector"
+    cp "$CACHE/plan-$PLAN_VERSION.jar" "$RUN/proxy/plugins/"
+    cp "$REPO/connector-plan/build/libs"/*.jar "$RUN/proxy/plugins/"
+
+    # Plan's config, written BEFORE first start.
+    #
+    # Plan merges missing keys into an existing file, so pre-writing the database
+    # block is what stops it generating a localhost default, failing to connect,
+    # and disabling itself before anything can register with it.
+    mkdir -p "$RUN/proxy/plugins/plan"
+    cat > "$RUN/proxy/plugins/plan/config.yml" <<PLANYML
+Server:
+  ServerName: soulbind-harness
+Database:
+  MySQL:
+    Host: ${SOULBIND_PLAN_DB_HOST}
+    Port: ${SOULBIND_PLAN_DB_PORT:-3306}
+    User: ${SOULBIND_PLAN_DB_USER:-root}
+    Password: ${SOULBIND_PLAN_DB_PASSWORD:-}
+    Database: ${SOULBIND_PLAN_DB_NAME:-plan}
+    Launch_options: "?rewriteBatchedStatements=true&serverTimezone=UTC"
+    Max_connections: 4
+Webserver:
+  Port: ${PLAN_PORT:-8804}
+Plugins:
+  Update_notifications: false
+PLANYML
+else
+    log "no Plan: this axis has no MySQL-family server, which Plan on a proxy requires"
+fi
+
 cat > "$RUN/proxy/velocity.toml" <<TOML
 config-version = "2.7"
 bind = "0.0.0.0:$PROXY_PORT"
@@ -496,6 +564,22 @@ decisiontimeoutmillis = 2000
 [platform]
 kind = "game"
 TOML
+
+if [ -n "${SOULBIND_PLAN_DB_HOST:-}" ]; then
+mkdir -p "$RUN/proxy/plugins/soulbind-plan"
+cat > "$RUN/proxy/plugins/soulbind-plan/soulbind-plan.toml" <<TOML
+[core]
+url = "http://127.0.0.1:$CORE_PORT"
+credential = "$PLAN_CRED"
+
+[plan]
+platformkind = "game"
+# Short, so a test that links a player and then reads the page does not wait a
+# refresh cadence tuned for humans.
+cachettlseconds = 5
+showsubjectid = true
+TOML
+fi
 
 (cd "$RUN/proxy" && "$JAVA" -Xms512M -Xmx1G -jar "$CACHE/velocity-$VELOCITY_VERSION-$VELOCITY_BUILD.jar" \
     > "$RUN/velocity.log" 2>&1) &
@@ -576,6 +660,7 @@ log "running the player-driver smoke"
     --core "http://127.0.0.1:$CORE_PORT" \
     --entry-credential "$HARNESS_CRED" \
     --mc-version "$MC_PROTOCOL" \
+    --record-player "$RUN/core/linked-player.txt" \
     --kick-contains "link your account")
 
 # --- the chat side, through the REAL connector ---------------------------

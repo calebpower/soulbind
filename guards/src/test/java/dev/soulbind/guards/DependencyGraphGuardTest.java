@@ -55,6 +55,53 @@ import org.junit.jupiter.api.Test;
 class DependencyGraphGuardTest {
 
     /**
+     * A build file with its comments removed, BOTH kinds.
+     *
+     * <p>These scans read build files for coordinates, and a build file's
+     * comments discuss coordinates by name — so a guard that reads them raw
+     * reports a violation that is only a sentence about the violation. Stripping
+     * `//` alone was not enough: `connector-plan`'s jar comment names `tomlj` in
+     * a block comment, and the TOML check duly failed on a module that declares
+     * no parser at all. `connector-velocity` carries the same sentence in `//`
+     * comments and was never caught, which is why this went unnoticed.
+     *
+     * <p>Fifth instance of this family in this repository. The others are
+     * recorded in DECISIONS 8.3, 8.5 and the guards' own comments.
+     */
+    private static String withoutComments(String text) {
+        StringBuilder sb = new StringBuilder();
+        boolean inBlock = false;
+        for (String line : text.split("\n", -1)) {
+            StringBuilder out = new StringBuilder();
+            int i = 0;
+            while (i < line.length()) {
+                if (inBlock) {
+                    int close = line.indexOf("*/", i);
+                    if (close < 0) {
+                        i = line.length();
+                    } else {
+                        inBlock = false;
+                        i = close + 2;
+                    }
+                    continue;
+                }
+                if (line.startsWith("//", i)) {
+                    break;
+                }
+                if (line.startsWith("/*", i)) {
+                    inBlock = true;
+                    i += 2;
+                    continue;
+                }
+                out.append(line.charAt(i));
+                i++;
+            }
+            sb.append(out).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /**
      * Coordinates that indicate a YAML parser. Substring match on the declared
      * dependency line, because a coordinate is not prose and a partial match
      * here is a true positive.
@@ -124,8 +171,7 @@ class DependencyGraphGuardTest {
             if (!Files.isRegularFile(buildFile)) {
                 continue;
             }
-            for (String line : SourceTree.read(buildFile).split("\n", -1)) {
-                String code = line.contains("//") ? line.substring(0, line.indexOf("//")) : line;
+            for (String code : withoutComments(SourceTree.read(buildFile)).split("\n", -1)) {
                 if (code.toLowerCase(Locale.ROOT).contains("libs.toml")
                         || code.toLowerCase(Locale.ROOT).contains("tomlj")) {
                     declaring.add(module);
@@ -370,18 +416,16 @@ class DependencyGraphGuardTest {
             if (!Files.isRegularFile(buildFile)) {
                 continue;
             }
-            String[] lines = SourceTree.read(buildFile).split("\n", -1);
+            // A commented-out dependency is not in the graph, and neither is one
+            // merely discussed. Both comment forms are stripped: see
+            // withoutComments.
+            String[] lines = withoutComments(SourceTree.read(buildFile)).split("\n", -1);
             for (int i = 0; i < lines.length; i++) {
-                String line = lines[i];
-                // A commented-out dependency is not in the graph. Skipping comments
-                // keeps the guard honest rather than pedantic -- it exists to stop a
-                // parser being USED, not discussed.
-                String withoutComment = line.contains("//") ? line.substring(0, line.indexOf("//")) : line;
-                String lower = withoutComment.toLowerCase(Locale.ROOT);
+                String lower = lines[i].toLowerCase(Locale.ROOT);
                 for (String parser : YAML_PARSERS) {
                     if (lower.contains(parser)) {
                         violations.add("%s/build.gradle.kts:%d declares %s -> %s"
-                                .formatted(module, i + 1, parser, line.strip()));
+                                .formatted(module, i + 1, parser, lines[i].strip()));
                     }
                 }
             }

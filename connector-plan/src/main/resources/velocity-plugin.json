@@ -1,0 +1,14 @@
+{
+  "id": "soulbind-plan",
+  "name": "soulbind-plan",
+  "version": "0.1.0",
+  "description": "Puts soulbind link state on Plan's pages",
+  "authors": ["Caleb L. Power"],
+  "dependencies": [
+    {
+      "id": "plan",
+      "optional": false
+    }
+  ],
+  "main": "dev.soulbind.connector.plan.SoulbindPlanPlugin"
+}

@@ -222,7 +222,7 @@ XML
 # below, and FullstackStagesGuardTest asserts this list matches both the
 # functions defined and the stages documented in the README. A stage that is
 # listed but does no work is the exact shape this file exists to prevent.
-STAGES="up migrate journeys down"
+STAGES="up migrate journeys plan down"
 
 # The post-condition, checked rather than assumed.
 #
@@ -323,6 +323,19 @@ stage_journeys() {
     else
         result_fail journeys "a player links through the real flow, and core agrees" \
             "see $OUT/evidence for what the run recorded before it stopped"
+        return 1
+    fi
+}
+
+stage_plan() {
+    resolve_toolchain
+    result_open plan
+    log "does Plan render the link data?"
+    if "$HERE/plan-check.sh" "$RUN" "$OUT/evidence"; then
+        result_pass plan "Plan renders link data for a player linked through the real flow"
+    else
+        result_fail plan "Plan renders link data for a player linked through the real flow" \
+            "see $OUT/evidence/plan-player.json for exactly what Plan returned"
         return 1
     fi
 }

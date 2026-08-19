@@ -32,17 +32,38 @@ class-load time in a deployed server. A guard asserts both the declared
 convention and the class-file version actually emitted, because getting it wrong
 surfaces as an `UnsupportedClassVersionError` far from its cause.
 
-## Read-only, and not by politeness
+## Read-only, and precise about what that costs
 
-The connector is registered with capabilities that permit inspection and nothing
-else. A provider here **cannot** mutate the identity graph even if somebody
-added one that tried — the credential refuses it at core, not this file.
+A provider here **cannot** mutate the identity graph or change policy — the
+credential refuses it at core, not this file. That much is enforced by the
+deployment rather than by this module remembering to be careful, which matters:
+the dashboard is the most-installed, least-audited surface in the system.
 
-That is deliberate. "Mutations stay on the admin API" enforced by a comment is a
-rule this module has to keep remembering; enforced by the credential it is a
-property of the deployment. The dashboard is the most-installed, least-audited
-surface in the system, and the one place where a read-only guarantee is worth
-paying for structurally.
+But the claim stops there, and the reason is worth stating rather than glossing.
+**soulbind has no read-only capability.** The seven are `identity-provider`,
+`code-display`, `code-entry`, `enforcement-point`, `effector`, `audit-source`
+and `config-management`. A connector that reads link state must hold one of two:
+
+| Operation | Capability | What else it unlocks |
+|---|---|---|
+| `subject.inspect` | `config-management` | `rule.set`, `override.set`, `config.set`, `audit.query`, **`identity.unlink`** |
+| `identity.describe` | `code-display` | `code.issue` — minting a link code |
+
+The two **return exactly the same thing** — core binds the same request type for
+both, and its handler says so outright. They differ only in who may ask.
+
+This connector asks `identity.describe`, so a deployment grants it
+`code-display`. That is dramatically less than admin, and it is not nothing: the
+dashboard could mint a link code, which still requires somebody controlling the
+other account to redeem it. `protocol.md` names the alternative as the trap it
+is — *"granting it `config-management` to do so would let it rewrite every rule
+— the capability model being correct and the deployment being wrong."*
+
+`LinkDataSourceTest` pins the operation name, because the two responses are
+identical and **no other assertion in the module can tell them apart**. The real
+fix — a capability that grants reading and only reading — is recorded as
+DECISIONS 8.14 and is a decision for the owner, not one to make late in a
+phase.
 
 ## Unknown is a state, and the whole module is built around it
 

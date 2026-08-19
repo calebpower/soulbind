@@ -51,6 +51,7 @@ fetch() {
 
 fetch "$VELOCITY_URL" "$VELOCITY_SHA256" "$CACHE/velocity-$VELOCITY_VERSION-$VELOCITY_BUILD.jar"
 fetch "$PAPER_URL" "$PAPER_SHA256" "$CACHE/paper-$PAPER_VERSION-$PAPER_BUILD.jar"
+fetch "$PLAN_URL" "$PLAN_SHA256" "$CACHE/plan-$PLAN_VERSION.jar"
 
 # --- toolchains -------------------------------------------------------------
 #

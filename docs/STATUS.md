@@ -317,6 +317,7 @@ units one.
 | T6 staged battery, both backends, MariaDB started latin1 | **Partial** — migration idempotence lands as the `migrate` stage, in-session against a used database, mutation-checked. Latin1 start, astral-plane pushes and no-backdoor state building outstanding |
 | T7 fuzz against the real deployment | Not started |
 | T8 scenarios re-run in-session | Not started |
+| Plan pages render link data | **In progress** — Plan 5.8.3605 pinned and installed on the proxy, `connector-plan` bootstraps on Velocity and registers with `ExtensionService`, and a `plan` stage asks Plan's own API whether the extension rendered. mariadb axis only: Plan on a proxy takes MySQL (DECISIONS 8.15). Not yet verified in a session |
 | `journeys` emits the T11 evidence directory | **Green for 1 of the 3 journeys the plan names.** `first-time-player` runs against the live stack and emits a real per-step transcript; `COVERAGE.md` is generated from the recorded outcomes and names the other two as uncovered. No screenshots yet |
 | T5 suite against the real stack, 5xx watchdog on | Not started |
 | Plan pages render link data for players created through real flows | Not started |

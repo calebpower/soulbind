@@ -288,14 +288,27 @@ SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys down
 podman exec -i soulbind-mariadb \
   mariadb -h 127.0.0.1 -uroot -psoulbind-test <<'SQL'
 CREATE DATABASE IF NOT EXISTS soulbind_fullstack CHARACTER SET utf8mb4;
+-- Plan's own database, separate from soulbind's for the same reason
+-- soulbind_fullstack is separate from soulbind: a tier asserting on rows it did
+-- not create is a tier that fails for reasons nobody can find. Plan writes a
+-- great deal.
+CREATE DATABASE IF NOT EXISTS plan CHARACTER SET utf8mb4;
 SQL
 
-echo "run: full-stack tier (core on mariadb)"
+# Plan runs on THIS axis only, because Plan on a proxy supports MySQL and the
+# sqlite axis has no server for it. Passing the coordinates is what switches it
+# on; the sqlite invocation above passes none and stack.sh installs no Plan.
+echo "run: full-stack tier (core on mariadb, with Plan)"
 SOULBIND_DB=mariadb \
   SOULBIND_MARIADB_URL="jdbc:mariadb://127.0.0.1:3306/soulbind_fullstack" \
   SOULBIND_MARIADB_USER=root \
   SOULBIND_MARIADB_PASSWORD=soulbind-test \
-  sh harness/fullstack/run.sh up migrate journeys down
+  SOULBIND_PLAN_DB_HOST=127.0.0.1 \
+  SOULBIND_PLAN_DB_PORT=3306 \
+  SOULBIND_PLAN_DB_USER=root \
+  SOULBIND_PLAN_DB_PASSWORD=soulbind-test \
+  SOULBIND_PLAN_DB_NAME=plan \
+  sh harness/fullstack/run.sh up migrate journeys plan down
 
 podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 """

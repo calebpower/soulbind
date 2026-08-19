@@ -30,6 +30,8 @@
 
 import process from 'node:process';
 import { Player } from './driver.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import { extractCode, looksLikeOutage, offlineUuid } from './codes.js';
 
 function arg(name, fallback) {
@@ -47,6 +49,14 @@ const VERSION = arg('mc-version', undefined);
 // The text the gate's refusal must contain. Not optional: accepting any kick
 // let a run pass while the plugin had failed to load.
 const KICK_CONTAINS = arg('kick-contains', 'link your account');
+
+// Where to record the player this smoke links, for stages that run afterwards.
+//
+// Written by the smoke rather than derived again by the caller: the identity is
+// offlineUuid(LINKER), and a second computation of it in shell is a second
+// definition that drifts the first time either changes. The plan stage reads
+// this file and refuses to guess.
+const RECORD_PLAYER = arg('record-player', null);
 
 const steps = [];
 
@@ -124,6 +134,14 @@ async function main() {
 
   const LINKER = 'Linker';
   const linkerRef = `game:${offlineUuid(LINKER)}`;
+
+  // Recorded HERE, where the identity is decided, and before anything can fail
+  // later -- a stage that reads this file needs to know which player was
+  // attempted even when the flow did not finish.
+  if (RECORD_PLAYER) {
+    fs.mkdirSync(path.dirname(RECORD_PLAYER), { recursive: true });
+    fs.writeFileSync(RECORD_PLAYER, offlineUuid(LINKER));
+  }
 
   // --- 1. the gate refuses an unlinked player ------------------------------
   const unlinked = new Player({
