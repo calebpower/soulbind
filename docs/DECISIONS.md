@@ -3866,3 +3866,64 @@ A guard that shells out has an **environment dependency**, and an environment
 dependency is a thing to declare and satisfy — not a thing to describe. The
 build container is a JVM toolchain; nothing entitles it to an interpreter, and
 the first guard to want one should have said so somewhere that fails.
+
+## Phase 10 — hardening and release
+
+### 10.1 — NOTICE claimed a generator that was never written
+
+From Phase 0 until Phase 8, `NOTICE` — the legal file that accompanies every
+copy of this software — said:
+
+> This product includes software developed by third parties. A complete
+> third-party licence inventory **is generated at build time and ships in every
+> distributed artifact**; see docs/ and the generated inventory for the
+> authoritative list of dependencies and their licences.
+
+No such generator was ever written. There is no task in `build-logic/` that
+produces an inventory, and no artifact has ever contained one. The file also
+pointed at "docs/ and the generated inventory", neither of which held the list
+either.
+
+#### Why it survived eight phases
+
+Because nothing read it.
+
+Every other claim this repository makes about itself is held to the code by a
+guard — the release levels, the storage seam, the transport seam, the dependency
+graph, the protocol document, the stage list, the pinned artefacts. `NOTICE` was
+prose in a file nobody's tests opened, and prose drifts silently. It is the same
+shape as an assertion that cannot fail, relocated into a document.
+
+It is also the worst file in the repository to be wrong in. Its entire purpose
+is to be relied on by somebody who is **not** reading the code: a redistributor,
+an operator's legal review, anyone assembling their own third-party disclosures.
+An inventory that does not exist cannot be consulted, and a reader who trusts the
+sentence has no way to discover that.
+
+#### What it says now
+
+The actual list, inline: twelve third-party components with their licences, the
+two LGPL/EPL ones marked as shipped unmodified and unbundled in `lib/`, and the
+two `compileOnly` ones marked as not distributed at all. That is a real
+inventory. It is hand-maintained, which is exactly the weakness the generator
+would remove — so `NoticeGuardTest` holds it to the catalogue instead.
+
+**Two assertions, and they are different claims.** First, nothing in
+`gradle/libs.versions.toml` may be missing from `NOTICE`: the catalogue is where
+a dependency is added, so it is the side that moves, and an addition that never
+reaches `NOTICE` is an undisclosed third party. Second, `NOTICE` may not claim a
+generated inventory while no generator exists — so when Phase 10's packaging
+work lands one, updating the claim is part of landing it rather than something
+to remember.
+
+The generator check looks for a **task**, not for an output file. An output file
+can be left behind by a run that no longer happens, and the guard would then
+agree with a `NOTICE` that had quietly become untrue again.
+
+#### The historical note lives here, not there
+
+The first version of the corrected `NOTICE` quoted the old sentence, so the
+claim was recorded where it had shipped. The new guard immediately failed on it:
+the matcher is deliberately loose, and a quoted false claim is still the false
+sentence sitting in the legal file. It was right to fail. History belongs in
+this document; `NOTICE` states only what is true today.

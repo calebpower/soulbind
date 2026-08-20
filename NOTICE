@@ -1,7 +1,44 @@
 soulbind
 Copyright (c) 2026 Caleb L. Power
 
-This product includes software developed by third parties. A complete
-third-party licence inventory is generated at build time and ships in every
-distributed artifact; see docs/ and the generated inventory for the authoritative
-list of dependencies and their licences.
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+This product includes software developed by third parties. They are listed
+below with their licences.
+
+  io.javalin:javalin ......................... Apache-2.0
+      Jetty, beneath it, is EPL-2.0 / Apache-2.0 dual-licensed and is taken
+      under Apache-2.0.
+  com.fasterxml.jackson.core:jackson-databind  Apache-2.0
+  com.fasterxml.jackson.datatype:jackson-datatype-jsr310
+                                               Apache-2.0
+  com.zaxxer:HikariCP ........................ Apache-2.0
+  org.flywaydb:flyway-core ................... Apache-2.0
+  org.flywaydb:flyway-mysql .................. Apache-2.0
+  org.xerial:sqlite-jdbc ..................... Apache-2.0
+  org.tomlj:tomlj ............................ Apache-2.0
+  net.dv8tion:JDA ............................ Apache-2.0
+  org.slf4j:slf4j-api ........................ MIT
+
+  org.mariadb.jdbc:mariadb-java-client ....... LGPL-2.1
+      NEVER shaded. Shipped unmodified in lib/ beside the fat jar so an
+      operator can replace it, which is what satisfies the relink requirement
+      in practice.
+  ch.qos.logback:logback-classic ............. EPL-1.0 / LGPL-2.1 dual
+      Unmodified and unbundled, for the same reason.
+
+  com.velocitypowered:velocity-api ........... MIT
+      compileOnly. Not distributed: the proxy supplies it at runtime. The proxy
+      itself is GPLv3 and is never distributed by this project.
+  com.djrapitops:Plan ........................ LGPL-3.0
+      compileOnly. Not distributed: the analytics plugin is the host and
+      supplies it at runtime.
+
+The authoritative machine-readable source for this list is
+gradle/libs.versions.toml, where every entry carries its licence, and a guard
+asserts that nothing there is missing from this file.
+
+There is no build-time licence-inventory generator yet; §16 makes one a Phase 10
+deliverable. Until it exists, the list above is what ships, and a guard keeps it
+in step with the catalogue. docs/DECISIONS.md 10.1 records what this file
+claimed before, and for how long.
