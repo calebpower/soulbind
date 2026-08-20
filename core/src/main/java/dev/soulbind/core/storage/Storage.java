@@ -18,6 +18,8 @@ package dev.soulbind.core.storage;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import javax.sql.DataSource;
@@ -227,6 +229,72 @@ public final class Storage implements AutoCloseable {
         }
     }
 
+    /**
+     * Refuses to serve a schema that cannot hold four-byte text.
+     *
+     * <p>{@link #setDatabaseCharset} fixes the database default before Flyway
+     * creates anything, so tables are born utf8mb4. It cannot repair tables an
+     * earlier boot already created latin1 — only {@code CONVERT} does that, and
+     * {@code CONVERT} is refused by the server whenever a foreign key crosses
+     * the column (8.24).
+     *
+     * <p>That leaves exactly one uncovered case, and it is the case the whole
+     * exercise was about: **an installation that ran an older soulbind against a
+     * latin1 server**. Its tables are latin1, the fix above changes nothing for
+     * them, and every test in the suite would miss it because the harness drops
+     * and recreates the schema for each test — a fresh database is the only kind
+     * any test has ever seen.
+     *
+     * <p>So the assumption is enforced instead of assumed. If a table cannot
+     * hold four-byte text, core refuses to start and says which ones. The
+     * alternative is silent truncation of somebody's display name, surfacing
+     * later as an error naming a column rather than a charset.
+     *
+     * <p>Loud, not automatic: repairing it means dropping and rebuilding the
+     * foreign keys around a conversion, which is a migration somebody writes
+     * against the schema in front of them, having read this message.
+     */
+    private static void requireFourByteCapableSchema(DataSource ds) {
+        List<String> latin = new ArrayList<>();
+        try (java.sql.Connection c = ds.getConnection();
+                java.sql.Statement s = c.createStatement();
+                java.sql.ResultSet rs = s.executeQuery(
+                        "SELECT TABLE_NAME, TABLE_COLLATION FROM information_schema.TABLES"
+                                + " WHERE TABLE_SCHEMA = DATABASE()"
+                                + " AND TABLE_TYPE = 'BASE TABLE'")) {
+            while (rs.next()) {
+                String table = rs.getString(1);
+                String collation = rs.getString(2);
+                // Flyway's own bookkeeping is excluded, and the exclusion covers
+                // exactly it: on a database predating this check it was created
+                // before the charset was set, and it holds migration versions,
+                // descriptions and filenames authored in this repository — all
+                // ASCII. Nothing a user supplies reaches it.
+                if ("flyway_schema_history".equals(table)) {
+                    continue;
+                }
+                if (collation == null || !collation.startsWith("utf8mb4")) {
+                    latin.add(table + " (" + collation + ")");
+                }
+            }
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(
+                    "could not read the schema's charset back. Refusing to serve a schema"
+                            + " that cannot be shown to hold four-byte text.", e);
+        }
+
+        if (!latin.isEmpty()) {
+            throw new IllegalStateException(
+                    "these tables cannot hold four-byte text: " + latin + ". They were"
+                            + " created while the database default was latin1, and setting"
+                            + " the default now does not change existing tables. soulbind is"
+                            + " refusing to start rather than truncate the first emoji in"
+                            + " somebody's display name. Repairing this means converting"
+                            + " each table with its foreign keys dropped and rebuilt around"
+                            + " the conversion -- see docs/DECISIONS.md 8.24.");
+        }
+    }
+
     private static void migrate(Backend backend, DataSource ds) {
         if (backend == Backend.MARIADB) {
             setDatabaseCharset(ds);
@@ -243,6 +311,10 @@ public final class Storage implements AutoCloseable {
                 .baselineOnMigrate(true)
                 .load()
                 .migrate();
+
+        if (backend == Backend.MARIADB) {
+            requireFourByteCapableSchema(ds);
+        }
     }
 
     public Backend backend() {

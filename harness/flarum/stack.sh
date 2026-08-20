@@ -99,15 +99,45 @@ keep_browser_evidence() {
     rm -rf "$dest"
     mkdir -p "$dest" || return 0
 
-    if [ -d "$REPO/harness/flarum/browser/test-results" ]; then
-        cp -r "$REPO/harness/flarum/browser/test-results/." "$dest/" 2>/dev/null || true
+    if [ "${EVIDENCE_STATUS:-unknown}" != "passed" ]; then
+        if [ -d "$REPO/harness/flarum/browser/test-results" ]; then
+            cp -r "$REPO/harness/flarum/browser/test-results/." "$dest/" 2>/dev/null || true
+        fi
+        cp "$RUN"/playwright-*.json "$dest/" 2>/dev/null || true
     fi
-    cp "$RUN"/playwright-*.json "$dest/" 2>/dev/null || true
+
+    # A stamp, on EVERY run including a green one.
+    #
+    # Two problems it solves, both found by a QA pass over a session that had
+    # just gone green. First, a passing run kept nothing at all, so "N of M
+    # specs ran" existed only as a line in a log nobody keeps -- the claim with
+    # the least corroboration in the tier was the one it makes most often.
+    # Second, reaper's backward sync never deletes, so a directory left by an
+    # EARLIER FAILED run sat in out/ reporting itself as passed; the artifact
+    # from run 3, which failed, read as current after run 4 succeeded.
+    #
+    # Recording the outcome and the spec count unconditionally fixes both: a
+    # green run leaves proof it ran, and there is no way for last time's verdict
+    # to be mistaken for this one's.
+    printf '{"backend":"%s","status":"%s","specsRan":%s,"specsExpected":%s}\n' \
+        "${CORE_BACKEND:-sqlite}" \
+        "${EVIDENCE_STATUS:-unknown}" \
+        "${ACTUAL_SPECS:-0}" \
+        "${EXPECTED_SPECS:-0}" \
+        > "$dest/run.json"
 
     if [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
         log "browser evidence kept in out/browser-evidence/${CORE_BACKEND:-sqlite}"
-    else
-        rmdir "$dest" 2>/dev/null || true
+    fi
+
+    # Loud, where it used to be silent. A FAILING run that captured no report is
+    # the case where evidence matters most, and rmdir-ing the empty directory
+    # made it indistinguishable from a run that was never asked for one.
+    if [ "${EVIDENCE_STATUS:-unknown}" != "passed" ] \
+        && [ ! -f "$dest/results.json" ] \
+        && [ -z "$(ls "$dest"/playwright-*.json 2>/dev/null)" ]; then
+        log "WARNING: the browser tier failed and produced no playwright report."
+        log "Nothing here explains the failure; look at the tier's own log output."
     fi
 }
 
@@ -116,8 +146,15 @@ cleanup() {
     # Before the containers go, and only when something went wrong -- a green
     # run has nothing to explain and out/ is rsynced back on every run.
     if [ "$status" -ne 0 ]; then
-        keep_browser_evidence
+        EVIDENCE_STATUS=failed
+    else
+        EVIDENCE_STATUS=passed
     fi
+    # Called on BOTH paths now. A green run keeps only the stamp -- the full
+    # reports are megabytes and a passing run has nothing to explain -- but it
+    # keeps something, which is the difference between "no evidence" and "no
+    # evidence because nothing ran".
+    keep_browser_evidence
     log "tearing down"
     for c in "$WEB_C" "$CORE_C" "$DB_C"; do
         podman rm -f "$c" >/dev/null 2>&1 || true

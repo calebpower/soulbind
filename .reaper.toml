@@ -310,6 +310,27 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
+# The hostile axis is only hostile if the server actually did what it was told.
+#
+# Passing --character-set-server=latin1 is a REQUEST. Nothing until now checked
+# the answer, so a flag silently dropped -- a typo, an image whose entrypoint
+# reorders arguments, a future MariaDB that refuses latin1 -- would leave every
+# charset assertion in this repository passing against a utf8mb4 server, proving
+# exactly nothing. The whole point of 8.18 is that a green charset test on a
+# friendly server is the defect.
+#
+# The PHP side already does this: its vector runner prints "hostility took
+# effect" and a test asserts it. This is the database's equivalent, and its
+# absence was a finding in the run that first went green.
+actual=$(podman exec soulbind-mariadb mariadb -h 127.0.0.1 -uroot -psoulbind-test \
+  --batch --skip-column-names -e "SELECT @@GLOBAL.character_set_server" 2>/dev/null | tr -d '\r')
+if [ "$actual" != "latin1" ]; then
+  echo "the database axis is NOT hostile: character_set_server is '$actual', expected latin1." >&2
+  echo "Every charset assertion would pass against this server without exercising anything." >&2
+  exit 1
+fi
+echo "mariadb hostility took effect: character_set_server=$actual"
+
 # Both tiers, both backends. StorageBackends.available() now yields two, so
 # every parameterised storage and fuzz test runs twice instead of once.
 # $PWD, not a hardcoded path: /reaper/work is where the tree appears INSIDE
@@ -326,6 +347,27 @@ podman run --rm --network host \
   -e GRADLE_USER_HOME=/work/.gradle-run-home \
   "$TOOLCHAIN" \
   ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache :core:test :core:fuzzTest
+
+# The results, copied OUT.
+#
+# `build/` is excluded from reaper's backward sync -- deliberately, it is
+# megabytes of class files -- so until now nothing about WHICH tests ran on the
+# guest ever left it. Gradle prints only SKIPPED and FAILED, so a green run said
+# "45 tasks executed" and could not say whether the MariaDB half of a
+# parameterised storage test had executed or quietly yielded one backend.
+#
+# That is the difference between "did not fail" and "ran and passed", and this
+# repository has been wrong about that distinction repeatedly. The XML is small,
+# it names every test and every parameter, and out/ is what comes home.
+#
+# This tier is the one that matters for it: :core:test here runs with
+# SOULBIND_TEST_MARIADB_URL set, so it is the only place the second backend is
+# ever exercised.
+mkdir -p out/test-results
+cp -r core/build/test-results/. out/test-results/ 2>/dev/null || {
+  echo "no test results to copy back -- :core:test produced none, which it must" >&2
+  exit 1
+}
 #
 # The project cache dir is EPHEMERAL, and that is load-bearing rather than
 # incidental.

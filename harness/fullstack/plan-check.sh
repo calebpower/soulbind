@@ -309,6 +309,14 @@ for provider in linkedPlayers unlinkedPlayers unknownPlayers; do
             exit 1 ;;
     esac
     log "server page: $provider=$count"
+    if [ "$count" = "0" ]; then
+        # Said out loud at RUN time, not only in a comment. The KNOWN GAP block
+        # below explains why these are legitimately zero here; without a line in
+        # the output an operator reads three zeros followed by a green PASS and
+        # reasonably concludes the check verified them.
+        log "  (0 is expected here and is NOT asserted -- these count players"
+        log "   currently connected, and none are at gather time. See below.)"
+    fi
 done
 
 table_present unlinkedTable "$SERVER_JSON" \

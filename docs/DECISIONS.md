@@ -4117,3 +4117,87 @@ looking for in the other before assuming it is local.
 Both sides now carry a test built from a pair chosen to collide, and both were
 mutation-checked by restoring the old key format: red on the collision
 assertion, green on restore.
+
+### 8.26 — What a green run still could not prove
+
+The battery went green on its fourth attempt. A QA pass over that green run
+produced six findings, and the useful thing about them is that **none is about a
+test failing** — they are all about what a passing run does and does not
+establish.
+
+#### The axis was never checked for being hostile
+
+`--character-set-server=latin1` is a *request*. Nothing read the answer back, so
+a flag silently dropped — a typo, an image whose entrypoint reorders arguments,
+a future MariaDB that declines latin1 — would leave every charset assertion in
+this repository passing against a friendly server, proving nothing. **The entire
+point of 8.18 is that a green charset test on a utf8mb4 server is the defect**,
+and the harness had no way to tell the two situations apart.
+
+Confirmed by direct probe that the server really does start latin1 today, and
+the manifest now asserts `@@GLOBAL.character_set_server` after the readiness
+ping and refuses to continue otherwise. The PHP side has done this for phases —
+its vector runner prints "hostility took effect" — and the database axis simply
+never got the equivalent.
+
+#### The fix had quietly narrowed to fresh databases
+
+Deleting `V8` in 8.24 was correct and it moved the boundary. Setting the
+database default before Flyway makes tables *born* utf8mb4; it cannot repair
+tables an earlier boot created latin1, because that needs `CONVERT` and
+`CONVERT` is what the server refuses.
+
+That leaves exactly one uncovered case, and it is the case the whole exercise
+was about: **an installation that ran an older soulbind against a latin1
+server.** Worse, no test could ever catch it — `StorageBackends.open` drops and
+recreates the schema for every test, so a fresh database is the only kind any
+test has ever seen. The narrowing was documented in a comment and invisible
+everywhere else.
+
+So it is enforced instead: after migrating, core reads `information_schema`
+back and **refuses to start** if any table cannot hold four-byte text, naming
+them. Loud rather than automatic, because repairing it means dropping and
+rebuilding foreign keys around a conversion — a migration somebody writes
+against the schema in front of them, having read the message.
+
+#### "Did not fail" is not "ran and passed"
+
+`build/` is excluded from reaper's backward sync, and Gradle prints only SKIPPED
+and FAILED. So nothing about *which* tests ran on the guest ever left it: a
+green run reported "45 tasks executed" and could not say whether the MariaDB
+half of a parameterised storage test had executed or quietly yielded one
+backend. `StorageBackends` has carried a comment admitting this since Phase 1.
+
+The run verb now copies `core/build/test-results/` into `out/`. That tier is the
+one that matters — it is the only place `SOULBIND_TEST_MARIADB_URL` is set — and
+the XML names every test and every parameter. This closes the whole
+"did it actually run?" class of question rather than one instance of it.
+
+#### Last time's verdict, read as this time's
+
+`out/browser-evidence/mariadb/.last-run.json` said `passed` while being an
+artifact of run 3, which **failed**. reaper's backward sync never deletes, and
+the tier kept evidence only on failure — so a passing run left nothing to
+overwrite the stale verdict with.
+
+Two changes, both small: a `run.json` stamp is written on every run including a
+green one, so a pass leaves proof it ran and cannot be confused with last time's
+result; and a failing run that captured no report now says so loudly instead of
+`rmdir`-ing the empty directory, which had made "failed and produced nothing"
+indistinguishable from "was never asked for anything".
+
+#### A documented gap that only the source could see
+
+`plan-check.sh` explains at length why Plan's three server-wide counters are
+legitimately zero. It explained it only in a comment — so the run output showed
+three zeros followed by a green PASS, and an operator would reasonably conclude
+the check had verified them. It now says so in the output, where the person
+reading the result is.
+
+#### The pattern
+
+Every one of these is the same shape: **a claim whose evidence lives somewhere
+the reader is not.** In a comment, in a log that is not kept, in an artifact
+from a different run, in the absence of a failure. The tests were fine. What was
+missing was any way for a passing run to distinguish itself from a run that had
+not happened.
