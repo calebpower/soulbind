@@ -4653,7 +4653,49 @@ Fixed by granting it, with a note at the registration saying why — the grant i
 not obvious from the capability list alone, since the harness stands in for an
 operator's tooling and reading link state is exactly what such tooling does.
 
-No guard added. One that parsed shell to match credential variables against the
-operations they invoke would be brittle enough to cost more than it caught, and
-the failure it would prevent is loud, immediate and correctly attributed by the
-error message. The session found it in the first tier that ran.
+#### Four callers, found one session run at a time
+
+It was not one credential. The exhaustive search — every language, not just the
+shell scripts I checked first — gives five call sites of `identity.describe`
+that need a granted credential:
+
+| Caller | Credential |
+|---|---|
+| `harness/flarum/stack.sh` | the forum tier's `HARNESS_CRED` |
+| `connector-flarum/src/Link/LinkService.php` | `FORUM_CRED` |
+| `connector-plan`'s `LinkDataSource` | `PLAN_CRED` |
+| `connector-discord`'s `ChatConnector` (`/whoami`) | `CHAT_CRED` |
+| `harness/sim`'s `SdkCore` | the sim cast |
+
+8.27 granted two of them. Run 5 found the third. Run 6 found the fourth — the
+chat connector's `/whoami`, which describes the account and so failed the
+fullstack smoke with *"the chat connector does not see the link it just made"*.
+
+Two session runs, roughly an hour, to learn something a single repository-wide
+grep would have said in a second. **The lesson is not "add a guard" — it is that
+a capability change is a search problem, and the search has to run across every
+language before the first run, not after each failure.**
+
+#### The guard I nearly built, and why I did not
+
+The obvious protection is an enumeration: a checked-in list of every call site
+of the capability-sensitive operations, with the credential covering each, and a
+guard asserting the list matches reality.
+
+It would not have caught this. That guard fails when a **call site** is added or
+removed. Here the call sites never changed — only the capability did — so it
+would have stayed green through the entire incident while looking like
+protection. Building it would have been worse than building nothing, because the
+next person would have trusted it.
+
+What *would* catch the class is a **credential smoke**: start core on SQLite,
+register the same credentials the harnesses register, and assert each expected
+operation succeeds. `harness/sim/acceptance.sh` already proves core-on-SQLite is
+a workstation-runnable fixture, so this would move detection from a
+thirty-minute session to about thirty seconds — genuinely valuable, and not
+built here because it needs the caller-to-credential mapping to live in one
+place rather than being duplicated out of two `stack.sh` files, which is a
+design question rather than an afternoon.
+
+Recorded as the thing to build, with the reason the cheaper-looking option is a
+trap.
