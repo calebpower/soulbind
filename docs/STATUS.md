@@ -23,6 +23,35 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 9 | Simulated users | Not started |
 | 10 | Hardening and release | Not started |
 
+## Mutation coverage
+
+Added 2026-08-20, because every vacuous assertion this project has found was
+found by breaking the covered code by hand — the operation a mutation tool
+performs exhaustively.
+
+| Tier | Tool | Where it runs |
+|---|---|---|
+| Java | PIT, invoked directly | `./gradlew :<module>:mutationTest`, workstation |
+| PHP | Infection, pinned PHAR | `reaper test`, session only — this machine has no coverage driver |
+| Shell | recorded fixtures + replay | `harness/fullstack/mutation/run.sh`, workstation |
+
+**First sweep: 1,630 mutants, 1,015 killed, 416 never executed by any test, 199
+executed by a test that did not notice.** After the first round of fixes: 1,632
+/ 1,039 / 411 / 182, test strength 85%.
+
+The 182 are the number that matters — a test ran the line, its behaviour
+changed, nothing failed. What has been fixed and what has not is in
+DECISIONS 8.20; the short version is that the security- and correctness-relevant
+survivors are dealt with (replay protection, link-code entropy, platform-kind
+learning, the asymmetric link path, outage reporting) and the tail is not.
+
+Two caveats on the numbers, both of which make them flattering rather than
+harsh: MariaDB-only paths never run on this machine, and the seeded fuzz tier is
+excluded by tag, so a mutant killed only by fuzzing is counted here as
+surviving.
+
+Neither tool is gated on a threshold and neither is wired into `check`.
+
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the

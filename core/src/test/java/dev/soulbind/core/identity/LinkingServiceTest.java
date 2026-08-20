@@ -154,6 +154,50 @@ class LinkingServiceTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("a new account redeemed BY an already-linked one joins that subject")
+    void redeemingSideKeepsItsSubject(Backend backend) {
+        // The asymmetric case, and the one nothing covered. isSymmetric() starts
+        // both sides fresh; this starts the REDEEMING side already linked --
+        // somebody who linked a chat account last month now adds a forum one.
+        //
+        // Mutation coverage found it: `issuedSide.or(() -> redeemedSide)` could
+        // return Optional.empty with every test still green. The consequence is
+        // not cosmetic. A fresh subject would be created, the new identity bound
+        // to it, and the existing identity left on its original subject -- so
+        // the redeem reports success and the two accounts are NOT linked.
+        try (Fixture f = fixture(backend)) {
+            Storage storage = f.storage();
+
+            LinkCodeRecord first = f.linking().issue("conn-x", "kind-x", "acct-x", "Alex");
+            LinkingService.Result.Linked existing = assertInstanceOf(
+                    LinkingService.Result.Linked.class,
+                    f.linking().redeem("conn-b", first.code(), "kind-b", "acct-2", "Alex"));
+            String establishedSubject = existing.subject().id();
+
+            // Now a brand-new account issues, and the already-linked one redeems.
+            LinkCodeRecord second = f.linking().issue("conn-a", "kind-a", "acct-9", "Alex");
+            LinkingService.Result.Linked result = assertInstanceOf(
+                    LinkingService.Result.Linked.class,
+                    f.linking().redeem("conn-b", second.code(), "kind-b", "acct-2", "Alex"));
+
+            assertEquals(establishedSubject, result.subject().id(),
+                    "redeeming created a NEW subject instead of joining the one the"
+                            + " redeeming account already belonged to");
+
+            // Read back, because a response can be right about work that did not
+            // persist -- and because this is the assertion the mutant fails: on
+            // a fresh subject the new identity is alone on it.
+            assertEquals(
+                    Set.of("kind-x:acct-x", "kind-b:acct-2", "kind-a:acct-9"),
+                    Set.copyOf(storage.identities().identitiesOf(establishedSubject).stream()
+                            .map(Identity::ref).toList()),
+                    "the three accounts are not all on one subject, so the redeem"
+                            + " reported success without linking anything");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
     @DisplayName("every entry point registers the platform kind it was handed")
     void learnsPlatformKinds(Backend backend) {
         // Core has no compiled-in list of platforms -- it learns them from what

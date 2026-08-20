@@ -194,6 +194,42 @@ class SoulbindClientTest {
     }
 
     @Test
+    @DisplayName("a refusal carries core's message, not an empty one")
+    void refusalCarriesItsMessage() {
+        // The code was asserted; the message never was. Blanking it left every
+        // test green -- and the message is the entire reason a refusal is
+        // actionable. An operator reading "REFUSED" with nothing after it has
+        // to go and read core's log to learn what this connector was already
+        // told.
+        SoulbindClient client = client(
+                InMemoryTransport.always(
+                        "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"unauthorized\","
+                                + "\"message\":\"that credential lacks code-entry\"}}"),
+                new DecisionCache());
+
+        SoulbindClient.Outcome.Refused refused = assertInstanceOf(
+                SoulbindClient.Outcome.Refused.class, client.call("code.redeem", null));
+        assertEquals("that credential lacks code-entry", refused.message(),
+                "the refusal reached the caller without core's explanation");
+    }
+
+    @Test
+    @DisplayName("a named reason is parsed, not flattened to DEFAULT")
+    void reasonIsParsed() {
+        // `raw.isEmpty() ? "default" : raw` could be negated with nothing
+        // failing: an empty reason still lands on DEFAULT via the exception
+        // path, and no test had ever supplied a reason that maps to anything
+        // else. Every decision this connector logs or displays would have read
+        // DEFAULT regardless of what core actually decided.
+        SoulbindClient client = client(
+                InMemoryTransport.always(denyEnvelope()), new DecisionCache());
+
+        Decision decision = client.decide(GATE, "kind-a", "acct-1").decision();
+        assertEquals(Decision.Reason.NOT_LINKED, decision.reason(),
+                "core said 'not-linked' and the connector reported " + decision.reason());
+    }
+
+    @Test
     @DisplayName("a proxy error page is an OUTAGE, not a refusal")
     void nonEnvelopeIsAnOutage() {
         // Something between here and core is answering -- a captive portal, a
