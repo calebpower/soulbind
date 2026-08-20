@@ -190,10 +190,30 @@ public final class SdkCore implements CoreDriver, CoreView {
 
     @Override
     public List<AuditRow> auditSince(long after) {
-        SoulbindClient.Outcome outcome =
-                admin.call("audit.query", Map.of("sinceSequence", after, "limit", 1000));
+        // `limit` and nothing else. audit.query takes fromEpochSeconds,
+        // toEpochSeconds, actor, subjectId, action and limit -- there is no
+        // sequence cursor, and core's codec fails on unknown properties, so the
+        // invented one produced a MALFORMED refusal.
+        //
+        // MAX_LIMIT is 1000 and anything above it is clamped, so this asks for
+        // the most core will give. A run that produces more audit rows than that
+        // would compare against a truncated log and report a shortfall that is
+        // this method's fault -- which is why the count is checked below.
+        SoulbindClient.Outcome outcome = admin.call("audit.query", Map.of("limit", 1000));
         if (!(outcome instanceof SoulbindClient.Outcome.Ok ok)) {
-            return List.of();
+            // LOUDLY. Returning an empty list here was the first version, and it
+            // meant "I could not ask" was indistinguishable from "core has
+            // audited nothing" -- so a broken query in the harness reported
+            // itself as a missing-audit defect in core. Exactly backwards, and
+            // it is what the control caught.
+            String why = outcome instanceof SoulbindClient.Outcome.Refused refused
+                    ? refused.code() + ": " + refused.message()
+                    : ((SoulbindClient.Outcome.Unreachable) outcome).detail();
+            throw new IllegalStateException(
+                    "could not read the audit log (" + why + "). The run cannot conclude"
+                            + " anything about audit completeness without it, and reporting"
+                            + " an unreadable log as an empty one would blame core for a"
+                            + " fault in this harness.");
         }
         List<AuditRow> rows = new ArrayList<>();
         for (Payload item : ok.payload().items("entries")) {
@@ -201,7 +221,14 @@ public final class SdkCore implements CoreDriver, CoreView {
                     item.number("sequence"), item.text("actor"),
                     item.text("action"), item.has("subjectId") ? item.text("subjectId") : null));
         }
-        return rows;
+        if (rows.size() >= 1000) {
+            throw new IllegalStateException(
+                    "the audit log came back at core's maximum of 1000 rows, so it is"
+                            + " truncated. Every count this run compares against it would be"
+                            + " short, and the shortfall would be reported as core failing to"
+                            + " audit. Shorten the run or add a cursor to audit.query.");
+        }
+        return rows.stream().filter(r -> r.sequence() > after).toList();
     }
 
     @Override

@@ -425,6 +425,45 @@ PLAN_CRED=$("$CORE_CLI" register --name plan --quiet \
     --capabilities link-state-reader \
     --config "$RUN/core/soulbind.toml")
 
+# --- the simulated-user cast --------------------------------------------
+#
+# Three actors, each a SEPARATE PRINCIPAL with its own credential, because §11
+# asks for "independent identities with their own rotating credentials" and a
+# shared client would make the whole run one principal -- which is the one thing
+# a capability model cannot be tested through.
+#
+# Each holds what a person's connectors would between them: mint a code, redeem
+# one, read link state, ask a gate. Not config-management -- rule and config
+# changes go through the admin credential below, so an actor cannot rewrite the
+# policy it is being judged by.
+SIM_CREDS="$RUN/core/sim-credentials"
+: > "$SIM_CREDS"
+for who in alex sam rey; do
+    cred=$("$CORE_CLI" register --name "sim-$who" --quiet \
+        --capabilities code-display,code-entry,enforcement-point,link-state-reader \
+        --config "$RUN/core/soulbind.toml")
+    [ -n "$cred" ] || { log "no credential for sim actor $who"; exit 1; }
+    printf '%s=%s\n' "$who" "$cred" >> "$SIM_CREDS"
+done
+
+# The operator's credential, for the rule and config classes.
+SIM_ADMIN=$("$CORE_CLI" register --name sim-admin --quiet \
+    --capabilities config-management,link-state-reader,code-entry \
+    --config "$RUN/core/soulbind.toml")
+printf 'admin=%s\n' "$SIM_ADMIN" >> "$SIM_CREDS"
+
+# A credential core will refuse, for the stale-credential nemesis class.
+#
+# NOT a registered one. soulbind has no credential rotation yet -- it is a Phase
+# 10 deliverable -- so nothing can retire a credential, and this is the honest
+# approximation: a well-formed credential core has never seen. It tests the
+# property §11 asks for, that the attempt is REFUSED rather than crashing and
+# does not disturb the live session. It does not test the retirement path
+# itself, which is stated in CoreDriver.withRetiredCredential and closes when
+# rotation lands.
+printf 'retired=%s\n' "sim-retired.$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+    >> "$SIM_CREDS"
+
 if [ -z "$PROXY_CRED" ] || [ -z "$HARNESS_CRED" ] || [ -z "$PLAN_CRED" ]; then
     log "a credential did not come back from register; refusing to continue"
     exit 1

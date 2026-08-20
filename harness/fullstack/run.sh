@@ -222,7 +222,7 @@ XML
 # below, and FullstackStagesGuardTest asserts this list matches both the
 # functions defined and the stages documented in the README. A stage that is
 # listed but does no work is the exact shape this file exists to prevent.
-STAGES="up migrate journeys plan down"
+STAGES="up migrate journeys sim plan down"
 
 # The post-condition, checked rather than assumed.
 #
@@ -323,6 +323,51 @@ stage_journeys() {
     else
         result_fail journeys "a player links through the real flow, and core agrees" \
             "see $OUT/evidence for what the run recorded before it stopped"
+        return 1
+    fi
+}
+
+stage_sim() {
+    resolve_toolchain
+    result_open sim
+    log "simulated users: three committed seeds against this deployment"
+
+    creds="$RUN/core/sim-credentials"
+    if [ ! -s "$creds" ]; then
+        result_fail sim "the committed seeds run clean against a real core" \
+            "no credentials at $creds -- the up stage did not register the cast"
+        return 1
+    fi
+
+    # The run tag comes from OUTSIDE the seeded stream, per §11: it distinguishes
+    # this run's rows from an earlier run's against the same database, and a tag
+    # drawn from the seed would make a replayed seed collide with the data the
+    # original run left behind.
+    tag=$(date +%s)
+
+    # Built through Gradle and run from its start script, rather than a
+    # classpath assembled here. A hand-built classpath is a second declaration
+    # of the module's dependencies, and the two disagree the first time one
+    # changes.
+    sim_home="$REPO/harness/sim/build/install/soulbind-sim"
+    if [ ! -x "$sim_home/bin/soulbind-sim" ]; then
+        log "building the simulated-user tier"
+        ( cd "$REPO" && JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon --quiet :sim:installDist )
+    fi
+
+    if SOULBIND_SIM_CORE_URL="http://127.0.0.1:$CORE_PORT" \
+        SOULBIND_SIM_CREDENTIALS="$creds" \
+        SOULBIND_SIM_TAG="$tag" \
+        JAVA_HOME="$JAVA_HOME" \
+        "$sim_home/bin/soulbind-sim" \
+            > "$OUT/evidence/sim-$DB.log" 2>&1; then
+        result_pass sim "the committed seeds run clean against a real core"
+        sed 's/^/    /' "$OUT/evidence/sim-$DB.log"
+    else
+        sed 's/^/    /' "$OUT/evidence/sim-$DB.log"
+        result_fail sim "the committed seeds run clean against a real core" \
+            "the trace is in $OUT/evidence/sim-$DB.log; the seed that failed is named" \
+            "above, and the line to add to seeds.txt with it"
         return 1
     fi
 }

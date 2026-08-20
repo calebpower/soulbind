@@ -4411,3 +4411,98 @@ failing seed and reading a four-hundred-action trace in full.**
 The executor — the thing that turns an `Action` into a real call. Everything
 above runs in-process against fakes, which is why the whole module tests in
 milliseconds. The executor is the part that needs a session, and it is next.
+
+### 9.4 — One question the protocol cannot answer without changing the answer
+
+`redeemed-codes-stay-redeemed` asks whether a spent code is still redeemable.
+Against the in-memory core that is a lookup. Against a real one it is not
+askable at all: there is no operation that reports a code's state, and the only
+way to find out is to **attempt the redeem** — which, against a broken core,
+succeeds, links a phantom identity, and corrupts the graph the rest of the run
+is asserting about.
+
+Three options, and the middle one is the trap:
+
+1. Probe anyway. The check works and the run's other invariants start reporting
+   damage the checker caused.
+2. Answer `false`. The invariant never fires, the report stays green, and it is
+   an assertion that cannot fail — arrived at by politeness rather than by
+   oversight, which makes it harder to spot later.
+3. Say so.
+
+The view declares the invariant **inert**, with the reason, and the runner
+prints it **first and unconditionally** — before the verdict, on green runs as
+well as red ones. `RunnerTest` asserts that ordering, because a narrowing that
+only appears in a failing run is a narrowing nobody reads: the runs people look
+at are the green ones.
+
+Single use is not left uncovered. The Phase 2 gate proves it under real
+concurrency on both backends, which is a stronger test than a weighted action
+would be — and it is why `double redeem` was one of the two nemesis classes
+deferred in 9.1. When that class returns, the executor will exercise it at
+action time and this invariant becomes live again.
+
+Adding a read-only "is this code spent" operation to core was considered and
+rejected: it would put a query in the protocol that only a test uses, and the
+capability model would then have to decide who may ask it.
+
+### 9.5 — The acceptance test, and the control that caught the harness
+
+§14's Phase 9 gate asks for "a deliberately reverted Phase-2-or-later fix
+rediscovered by a hunting run", which the methodology (§15) calls the battery's
+own acceptance test. It is the only check that establishes the tier has **power**
+rather than coverage: a suite that has never caught anything is indistinguishable
+from a suite that cannot.
+
+`harness/sim/acceptance.sh` reverts a real, recent fix — the one mutation
+coverage found in `LinkingService.redeem`, where `issuedSide.or(() ->
+redeemedSide)` returning empty makes a redeem report success while leaving the
+two accounts unlinked — rebuilds core, and requires the committed seeds to
+rediscover it.
+
+**It runs on a workstation.** The tier talks to core over HTTP and has no
+opinion about Paper, the proxy or the forum, so the gate's hardest clause needs
+core and SQLite and nothing else. That was worth discovering: it turns a
+once-a-session check into one that can be run whenever somebody touches the
+linking path.
+
+#### What the control caught on its first run
+
+The script runs the seeds against **unmodified** core first, and requires that
+run to be clean. It was not.
+
+Sixteen violations, every one from `every-mutation-is-audited`, every one saying
+core had audited nothing. A convincing finding: a real invariant, a coherent
+story, arrived at by a new tier on its first contact with real code — which is
+exactly the result that gets believed.
+
+It was entirely my harness. `audit.query` takes `fromEpochSeconds`,
+`toEpochSeconds`, `actor`, `subjectId`, `action` and `limit`; I sent a
+`sinceSequence` cursor that does not exist, core's codec fails on unknown
+properties, and every call came back `MALFORMED`.
+
+And the second bug is the one worth keeping: **`auditSince` returned an empty
+list when the call failed.** So "I could not ask" and "core has audited nothing"
+were the same value, and a broken query in the checker reported itself as a
+missing-audit defect in the thing being checked. Exactly backwards.
+
+It now throws, naming the refusal. A checker that cannot read the audit log
+cannot conclude anything about audit completeness, and continuing produces a
+confident wrong verdict rather than an honest failure. There is also a guard for
+core's 1000-row `MAX_LIMIT`: a run producing more rows than core will return
+would compare against a truncated log and report a shortfall that is the
+harness's fault.
+
+**Without the control this would have shipped as a discovery.** The first
+question asked would have been "what is wrong with core's audit?" rather than
+"is my harness right?", and the answer would have been found eventually, by
+somebody, after a while.
+
+#### The result
+
+Control: three committed seeds, four hundred actions each, against unmodified
+core — clean. Reverted: rediscovered at **action 50**, naming
+`linkage-mirrors-model`, with the diagnosis stated in full — these accounts
+should share a subject, core reports a smaller set. Source restored and rebuilt
+on the way out, so a failed run never leaves a reverted fix compiled into
+anybody's install directory.

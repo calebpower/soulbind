@@ -4,8 +4,8 @@ The full-stack battery: core, a Paper backend and a Velocity proxy brought up
 for real, with stages run against the live deployment.
 
 ```sh
-SOULBIND_DB=sqlite  ./run.sh up migrate journeys down
-SOULBIND_DB=mariadb ./run.sh up migrate journeys down
+SOULBIND_DB=sqlite  ./run.sh up migrate journeys sim down
+SOULBIND_DB=mariadb ./run.sh up migrate journeys sim plan down
 ```
 
 ## Why a stage runner and not one script
@@ -41,6 +41,7 @@ narrows it, never as a green result carrying the word "skipped".
 | `up` | Brings the stack up via `stack.sh --keep` — which disarms its teardown trap on success, since `stack.sh` alone is a one-shot smoke that tears down even when it passes — then **probes core's port** before reporting, because a script finishing is not a stack existing. Takes the `@pristine` snapshot once it is healthy — stack-up, not end-of-run (§12), so a stage that dirties the databases can roll back to a working stack instead of an empty machine. |
 | `migrate` | Migration idempotence against the **live, already-used** database. Core migrates on every `Storage.open`, so a deployment re-migrates on every restart; a second apply that is not a no-op is drift per restart, invisible to any test against a fresh database. |
 | `journeys` | Tier 11 human evidence: a per-step transcript per linking journey, emitted so "would a newcomer understand this?" is answered from evidence rather than memory. |
+| `sim` | Tier 9: the committed seed set, three actors each a separate principal with its own credential, four hundred weighted actions apiece against this live deployment. Invariants diff a partial shadow model against core periodically and at the end. Reports **what it did not check** before it reports the verdict — see `harness/sim/README.md`. |
 | `plan` | The gate's second clause: asks Plan's own HTTP API whether the soulbind extension rendered link data for a player the smoke linked through the real flow. Asserts on the extension's *values*, not on the plugin name — that appears whether or not a provider ever ran. **mariadb axis only**: Plan on a proxy supports MySQL, and the sqlite axis has no server for it. |
 | `down` | Stops what `up` started. |
 
