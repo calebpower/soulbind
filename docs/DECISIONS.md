@@ -4340,3 +4340,74 @@ that grades it, naming it. Restored, green.
 That is the same operation PIT performs on the Java suite, applied by hand to
 the thing PIT cannot reach, because the defect being guarded against is not a
 wrong answer but an absent one.
+
+### 9.3 — The generator's scratchpad is not the oracle
+
+Deliverable (2): the generator, the actors and the checker. Three decisions in
+it are worth recording because each closes a way the tier could have been quietly
+useless.
+
+#### The generator reads a different structure from the one the invariants check
+
+`World` — outstanding codes, who has rotated, which refs are unlinked — is the
+generator's scratchpad. `ShadowModel` is the oracle. They are separate objects
+holding overlapping facts, which looks like duplication and is not.
+
+**If the generator read the oracle, an error in the oracle would steer the
+generator away from the actions that would have exposed it.** The run would get
+quieter as the model got wronger. That is the worst available direction for a
+feedback loop, and it would present as a clean run.
+
+#### The per-run tag is drawn outside the seeded stream
+
+§11 asks for this in one clause and it is the subtlest requirement in the tier:
+*"anything that must vary between runs — a tag distinguishing this process's data
+from an earlier run's — is drawn outside the seeded stream, so replay reproduces
+the action sequence exactly"*.
+
+If the tag came from the seeded PRNG, replaying a seed would either collide with
+the original run's rows or shift every subsequent draw. Either way the seed
+stops being replayable — and nothing says so, because a run with a shifted
+sequence still looks like a run. It is invisible until somebody tries to
+reproduce a failure, which is the moment it matters most.
+
+`Generator` therefore takes a seed and nothing else, and `GeneratorTest` asserts
+that two different tags under one seed produce an identical sequence of action
+kinds.
+
+#### Only applicable actions are proposed, and the nemesis is in the same pool
+
+A draw spent proposing a redeem when no code is outstanding is a draw the
+executor must refuse. Do that often enough and the weights stop meaning what
+they say: the run drifts toward whatever happens to be possible rather than
+toward what was chosen.
+
+The four kept nemesis classes sit in that same weighted pool rather than in a
+mode, per §11, so they land at arbitrary depth. A stale credential presented on
+action three against two rows of state is a unit test; the same credential on
+action three hundred, against a graph that has been merged, unlinked and
+re-linked, is the thing no other tier can construct. `GeneratorTest` asserts
+they occur **in the second half** of a long run — a pool whose adversarial
+classes never get drawn documents an intention rather than testing anything.
+
+#### The checker deduplicates, and that needed its own test
+
+Violations are recorded once per (invariant, complaint). Without it, a
+divergence that persists is re-reported at every subsequent check, and the
+report's length measures how long the run continued after the first failure
+rather than how many things are wrong.
+
+The risk that introduces is obvious in hindsight and easy to ship: a
+deduplication keyed too coarsely swallows the *second, different* failure. So it
+keys on the complaint rather than on the invariant, and there is a test that two
+different divergences within one invariant are both heard.
+
+Violations also carry the action number they were first seen after. With the
+shrinker deferred (9.1), **that number is the main thing standing between a
+failing seed and reading a four-hundred-action trace in full.**
+
+#### What is deliberately still missing
+
+The executor — the thing that turns an `Action` into a real call. Everything
+above runs in-process against fakes, which is why the whole module tests in
+milliseconds. The executor is the part that needs a session, and it is next.

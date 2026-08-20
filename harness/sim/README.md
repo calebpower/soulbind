@@ -10,9 +10,14 @@ and the re-entry criteria.
 
 ## What is here so far
 
-Deliverable (1) of §14 Phase 9: **the oracle self-test, and the invariants it
-grades.** The generator, actors and checker come next; the ordering is the
-plan's and it is deliberate.
+Deliverables (1) and (2) of §14 Phase 9: **the oracle self-test and the
+invariants it grades**, then **the generator, actors and checker**. The ordering
+is the plan's and it is deliberate — see below.
+
+What is still missing is the executor: the thing that turns an `Action` into a
+real call against a running core. Everything above is exercised in-process
+against fakes, which is what makes it fast; the executor is what needs a
+session.
 
 | | |
 |---|---|
@@ -20,6 +25,10 @@ plan's and it is deliberate.
 | `ShadowModel` | A deliberately *partial* second copy of the truth. |
 | `Invariant` / `Invariants` | Six properties that must hold, each a separate object. |
 | `OracleSelfTest` | Feeds each invariant a broken core and requires it to complain. |
+| `Actor` / `World` | A simulated person spanning platforms, and the generator's scratchpad. |
+| `ActionKind` / `Action` | The weighted pool, nemesis classes included. |
+| `Generator` | Seeded, weighted, only ever proposing what is currently possible. |
+| `Checker` | Runs the invariants periodically and at the end, deduplicating. |
 
 ## Why the self-test comes first
 
@@ -42,6 +51,20 @@ chosen ways, and the whole file runs in milliseconds without a server.
 
 An invariant that cannot be made to complain against a liar would not have
 complained about the real thing either.
+
+## Two seeded-generator properties worth knowing about
+
+**The per-run tag is drawn outside the seeded stream.** Anything that must vary
+between runs — a tag distinguishing this process's rows from an earlier run's —
+comes from the caller, never from the PRNG. If it came from the seeded stream,
+replaying a seed would either collide with the original run's data or shift
+every subsequent draw. That is the most common way a "reproducible" generator
+turns out not to be, and it is invisible until somebody tries to replay one.
+`GeneratorTest` asserts the action sequence is identical across two tags.
+
+**Only applicable actions are proposed.** A draw spent on a redeem when no code
+is outstanding is a draw the executor must refuse, so the weights quietly stop
+meaning what they say and the run drifts toward whatever happens to be possible.
 
 ## Why the model is partial
 
