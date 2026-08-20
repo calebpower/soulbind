@@ -34,17 +34,44 @@ of the overhead, and Infection re-runs the suite once per mutant.
 It runs as part of `reaper test`, after the PHPUnit entry point. The report is
 copied into `out/infection/` so it survives the session.
 
-**It does not run on the workstation**, and the reason is stated rather than
-worked around: FreeBSD's PHP here has no coverage driver, and `ext-xmlwriter` is
-absent too. Both are one `pkg install` away — `php84-pecl-pcov` and
-`php84-xmlwriter` — after which
+## Running it on a workstation
+
+Three PHP extensions, none of them present in a default FreeBSD install:
+
+| Extension | Needed by | Package |
+|---|---|---|
+| `xmlwriter` | **PHPUnit itself** | `php84-xmlwriter` |
+| `pcov` | Infection's line coverage | `php84-pecl-pcov` |
+| `zlib` | reading the gz-compressed PHAR | `php84-zlib` |
+
+The first one is worth dwelling on: without `ext-xmlwriter`, `composer install`
+in `connector-flarum` fails outright, so **the extension's 61 PHPUnit tests
+could not run on the workstation at all** — the whole PHP tier was session-only
+from Phase 7 onward, by omission rather than by anybody's decision. A one-line
+change cost a full reaper session to verify. With it, the suite runs in 0.6s.
+
+That is the anti-pattern the plan names: a cheap tier living in a session
+because that is where it happened to work.
 
 ```sh
-cd connector-flarum && php /path/to/infection.phar --configuration=infection.json5
+cd connector-flarum
+composer install
+vendor/bin/phpunit --configuration phpunit.xml
+sh ../harness/php/fetch.sh ../harness/php/.build
+php ../harness/php/.build/infection.phar --configuration=infection.json5 --threads=max
 ```
 
-works locally. Until then this tier is session-only, which makes its loop slow
-and is a fact about this machine rather than about the tier.
+## PHPUnit and Infection are not alternatives
+
+Infection **runs** PHPUnit — once to establish coverage, then once per surviving
+mutant. It has no assertions of its own; it consumes PHPUnit's. PHPUnit measures
+the code against the tests; Infection measures the tests against the code.
+Line coverage measures neither: it says a line executed, not that anything
+checked what it did.
+
+So PHPUnit stays the edit-test loop and Infection is the periodic audit of it.
+Infection is strictly the slower of the two by construction and can never
+replace the suite it drives.
 
 ## No minimum MSI
 
