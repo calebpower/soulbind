@@ -19,6 +19,10 @@ plugins {
     // that honestly means a consumer sees exactly what the SDK intends to
     // expose, and no more.
     `java-library`
+    // Applied here rather than module by module, so a new module cannot be
+    // created without it. A tool that has to be remembered is a tool that is
+    // missing from exactly the module nobody thought about.
+    id("soulbind.mutation")
 }
 
 group = "dev.soulbind"
