@@ -57,3 +57,9 @@
 # harness/php/pins.env on every run. Reproducible by checksum, like the
 # full-stack tier's .cache/, so it is not tracked.
 /harness/php/.build/
+
+# PHPUnit's result cache: which tests passed last time, so it can reorder them.
+# Machine-local and rewritten on every run. It was tracked from Phase 7 -- when
+# the suite only ever ran inside a container, so nobody saw it churn -- and
+# turned up the moment the suite started running on a workstation.
+**/.phpunit.result.cache
