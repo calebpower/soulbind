@@ -109,7 +109,7 @@ final class FakeCore implements CoreView {
         for (String member : group) {
             int colon = member.indexOf(':');
             identities.add(new Identity(
-                    member.substring(0, colon), member.substring(colon + 1), true));
+                    member.substring(0, colon), member.substring(colon + 1), true, null));
         }
         return Optional.of(new Subject(subjectIds.get(ref), identities));
     }

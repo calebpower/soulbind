@@ -46,6 +46,7 @@ public final class ShadowModel {
     private final Map<String, Set<String>> members = new LinkedHashMap<>();
     private final Set<String> redeemedCodes = new LinkedHashSet<>();
     private final Map<String, Boolean> rules = new LinkedHashMap<>();
+    private final Map<String, String> displaysSent = new LinkedHashMap<>();
     private final Set<String> neverLinked = new LinkedHashSet<>();
     private final List<String> expectedAuditActions = new ArrayList<>();
 
@@ -99,6 +100,23 @@ public final class ShadowModel {
     /** Identities the model has seen and never seen linked. */
     public Set<String> neverLinked() {
         return Collections.unmodifiableSet(neverLinked);
+    }
+
+    /**
+     * Records the display name an actor sent for an identity.
+     *
+     * <p>The oracle for §11's "astral-plane text from the corpus pushes through
+     * the newest text column in every stage". Pushing it through is half the
+     * requirement; the half that catches anything is reading it back and
+     * comparing, byte for byte.
+     */
+    public void displaySent(String ref, String display) {
+        displaysSent.put(ref, display);
+    }
+
+    /** The display name last sent for an identity, if any. */
+    public Optional<String> displayFor(String ref) {
+        return Optional.ofNullable(displaysSent.get(ref));
     }
 
     /** Records a code as spent. Spent is permanent; §11's single-use property. */

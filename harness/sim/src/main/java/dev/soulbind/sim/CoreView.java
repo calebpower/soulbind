@@ -41,7 +41,7 @@ import java.util.Optional;
 public interface CoreView {
 
     /** One identity as core reports it. */
-    record Identity(String platformKind, String platformId, boolean verified) {
+    record Identity(String platformKind, String platformId, boolean verified, String display) {
         /** The form audit rows and log lines use. */
         public String ref() {
             return platformKind + ":" + platformId;

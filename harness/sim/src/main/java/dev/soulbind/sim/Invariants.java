@@ -45,6 +45,7 @@ public final class Invariants {
                 auditSequenceStrictlyIncreases(),
                 redeemedCodesStayRedeemed(),
                 decisionsFollowTheRules(),
+                textSurvivesTheRoundTrip(),
                 everyResponseWasAnEnvelope());
     }
 
@@ -273,6 +274,69 @@ public final class Invariants {
                     }
                     return complaints;
                 });
+    }
+
+    /**
+     * A display name comes back exactly as it was sent.
+     *
+     * <p>The actors write four-byte UTF-8 — the astral-plane section of
+     * {@code corpus/hostile-inputs.txt}, "the classic latin1 tripwire" — into
+     * every display name, per §11 Tier 6. This is the half that catches
+     * something: pushing hostile text through a system proves nothing unless
+     * somebody reads it back.
+     *
+     * <p>It is also the end-to-end proof of 8.18 and 8.24. Those are otherwise
+     * asserted by reading {@code information_schema}, which is a claim about
+     * what the schema DECLARES. This is a claim about what survives a round
+     * trip through a real deployment against a server started latin1 — which is
+     * the one anybody cares about: a person whose name is an emoji can link.
+     *
+     * <p>Compared exactly. A truncated or re-encoded name is the failure mode,
+     * and "close enough" is how a mangled name ships.
+     */
+    public static Invariant textSurvivesTheRoundTrip() {
+        return invariant(
+                "text-survives-the-round-trip",
+                "a display name comes back byte for byte as it was sent",
+                (model, core) -> {
+                    List<String> complaints = new ArrayList<>();
+                    Set<String> checked = new LinkedHashSet<>();
+                    for (String ref : model.knownIdentities()) {
+                        String[] parts = split(ref);
+                        Optional<CoreView.Subject> subject = core.describe(parts[0], parts[1]);
+                        if (subject.isEmpty()) {
+                            continue; // linkage-mirrors-model reports this
+                        }
+                        for (CoreView.Identity identity : subject.get().identities()) {
+                            if (!checked.add(identity.ref())) {
+                                continue;
+                            }
+                            Optional<String> expected = model.displayFor(identity.ref());
+                            if (expected.isEmpty()) {
+                                continue;
+                            }
+                            if (!expected.get().equals(identity.display())) {
+                                complaints.add(identity.ref() + " was written with display "
+                                        + quote(expected.get()) + " and core returns "
+                                        + quote(identity.display())
+                                        + ". Four-byte text did not survive the round trip;"
+                                        + " the column or the connection charset is wrong.");
+                            }
+                        }
+                    }
+                    return complaints;
+                });
+    }
+
+    /** Shows a string with its code points, so a mangled one is readable. */
+    private static String quote(String value) {
+        if (value == null) {
+            return "null";
+        }
+        StringBuilder out = new StringBuilder("\"").append(value).append("\" [");
+        value.codePoints().forEach(cp -> out.append("U+")
+                .append(Integer.toHexString(cp).toUpperCase(java.util.Locale.ROOT)).append(' '));
+        return out.append(']').toString();
     }
 
     /**

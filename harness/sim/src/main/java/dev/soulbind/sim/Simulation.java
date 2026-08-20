@@ -155,6 +155,7 @@ public final class Simulation {
                 // ever linked. That is what lets the policy invariant ask about
                 // accounts linked to nothing.
                 model.sawUnlinked(action.subject());
+                model.displaySent(action.subject(), driver.displayFor(action.actor()));
                 if (result.accepted() && result.value() != null
                         && action.kind() == ActionKind.ISSUE_CODE) {
                     // ABANDON_CODE deliberately does not tell the world, so the
@@ -169,6 +170,9 @@ public final class Simulation {
                 String issuedFor = world.outstandingCodes().get(action.subject());
                 CoreDriver.Result result = driver.redeemCode(
                         action.actor(), action.subject(), target[0], target[1]);
+                if (result.accepted() && action.detail() != null) {
+                    model.displaySent(action.detail(), driver.displayFor(action.actor()));
+                }
                 if (result.codeConsumed()) {
                     // Whether or not the link happened. A code core has claimed
                     // is gone, and leaving it in the world means proposing it

@@ -70,6 +70,9 @@ final class InMemoryCore implements CoreDriver, CoreView {
          */
         RULES_ARE_IGNORED,
 
+        /** A display name comes back truncated at the first four-byte character. */
+        MANGLES_FOUR_BYTE_TEXT,
+
         /**
          * A merge silently drops a member, but only once the subject is large.
          *
@@ -110,10 +113,36 @@ final class InMemoryCore implements CoreDriver, CoreView {
 
     // --- the write side ------------------------------------------------------
 
+    private final Map<String, String> displays = new LinkedHashMap<>();
+
+    @Override
+    public String displayFor(Actor actor) {
+        // The same four-byte text the real driver writes, so the in-process
+        // acceptance test exercises the same property as a session run.
+        return actor.name() + " \uD83D\uDE00\uD83E\uDD16";
+    }
+
+    /** Stores a display the way the defect says to. */
+    private void remember(String ref, String display) {
+        if (defects.contains(Defect.MANGLES_FOUR_BYTE_TEXT) && display != null) {
+            StringBuilder kept = new StringBuilder();
+            for (int i = 0; i < display.length(); i++) {
+                if (Character.isHighSurrogate(display.charAt(i))) {
+                    break;
+                }
+                kept.append(display.charAt(i));
+            }
+            displays.put(ref, kept.toString());
+            return;
+        }
+        displays.put(ref, display);
+    }
+
     @Override
     public Result issueCode(Actor actor, String platformKind, String platformId) {
         String code = "CODE" + (++codeCounter);
         liveCodes.put(code, platformKind + ":" + platformId);
+        remember(platformKind + ":" + platformId, displayFor(actor));
         return Result.ok(code);
     }
 
@@ -128,6 +157,7 @@ final class InMemoryCore implements CoreDriver, CoreView {
                     : Result.refused("unknown code");
         }
         String redeemer = platformKind + ":" + platformId;
+        remember(redeemer, displayFor(actor));
         if (redeemer.equals(issuedFor)) {
             return Result.refused("an account cannot link to itself");
         }
@@ -230,7 +260,8 @@ final class InMemoryCore implements CoreDriver, CoreView {
         for (String member : group) {
             int colon = member.indexOf(':');
             identities.add(new Identity(
-                    member.substring(0, colon), member.substring(colon + 1), true));
+                    member.substring(0, colon), member.substring(colon + 1), true,
+                    displays.get(member)));
         }
         return Optional.of(new Subject(subjectIds.get(ref), identities));
     }

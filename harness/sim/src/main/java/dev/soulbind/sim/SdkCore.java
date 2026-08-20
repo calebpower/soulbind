@@ -80,6 +80,33 @@ public final class SdkCore implements CoreDriver, CoreView {
                 new DecisionCache());
     }
 
+    /**
+     * The display name every actor is written to core under.
+     *
+     * <p><b>Four-byte UTF-8, deliberately</b>, drawn from
+     * {@code corpus/hostile-inputs.txt}'s astral-plane section — "the classic
+     * latin1 tripwire". §11 Tier 6 asks for "astral-plane text from the corpus
+     * pushed through the newest text column in every stage", and this is the
+     * tier that writes to the most of them.
+     *
+     * <p>It is also the end-to-end proof of the charset work in 8.18 and 8.24.
+     * That work is otherwise asserted by reading {@code information_schema} back
+     * — a statement about what the schema DECLARES. This is a statement about
+     * what survives a round trip through a real deployment on a server started
+     * latin1, which is the claim anybody actually cares about: a person whose
+     * name is an emoji can link.
+     *
+     * <p>Kept short. The column is {@code VARCHAR(191)} and a display name that
+     * failed for being too long would look exactly like one that failed for
+     * being four-byte.
+     */
+    private static final String ASTRAL_SUFFIX = " \uD83D\uDE00\uD83E\uDD16";
+
+    @Override
+    public String displayFor(Actor actor) {
+        return actor.name() + ASTRAL_SUFFIX;
+    }
+
     private SoulbindClient forActor(Actor actor) {
         SoulbindClient client = clients.get(actor.name());
         if (client == null) {
@@ -119,7 +146,7 @@ public final class SdkCore implements CoreDriver, CoreView {
     public Result issueCode(Actor actor, String platformKind, String platformId) {
         return call(forActor(actor), "code.issue",
                 Map.of("platformKind", platformKind, "platformId", platformId,
-                        "display", actor.name()),
+                        "display", displayFor(actor)),
                 "code");
     }
 
@@ -127,7 +154,7 @@ public final class SdkCore implements CoreDriver, CoreView {
     public Result redeemCode(Actor actor, String code, String platformKind, String platformId) {
         Result result = call(forActor(actor), "code.redeem",
                 Map.of("code", code, "platformKind", platformKind,
-                        "platformId", platformId, "display", actor.name()),
+                        "platformId", platformId, "display", displayFor(actor)),
                 "subjectId");
         if (result.accepted()) {
             return result;
@@ -205,7 +232,8 @@ public final class SdkCore implements CoreDriver, CoreView {
         for (Payload item : body.items("identities")) {
             identities.add(new Identity(
                     item.text("platformKind"), item.text("platformId"),
-                    item.has("verifiedAtEpochSeconds")));
+                    item.has("verifiedAtEpochSeconds"),
+                    item.has("display") ? item.text("display") : null));
         }
         return Optional.of(new Subject(body.text("subjectId"), identities));
     }

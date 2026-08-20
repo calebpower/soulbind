@@ -64,6 +64,17 @@ public interface CoreDriver {
         }
     }
 
+    /**
+     * The display name this driver writes for an actor.
+     *
+     * <p>Asked rather than assumed. The model has to record exactly what went on
+     * the wire, and a second copy of the rule in the executor would be a second
+     * chance to disagree — the round-trip invariant would then be comparing the
+     * model's idea of the name against core's, with the actual sent value in
+     * neither.
+     */
+    String displayFor(Actor actor);
+
     /** Mint a code for an account this actor vouches for. Value is the code. */
     Result issueCode(Actor actor, String platformKind, String platformId);
 

@@ -4884,3 +4884,45 @@ Not retracted — one seed doing four hundred actions against a real deployment 
 both backends is still the clause, and the acceptance test's power is unchanged
 because it never depended on seeds two and three. But it was weaker than it
 read, and it read that way because nothing made the tier show its working.
+
+### 9.12 — Astral text with an oracle, which is the half that catches anything
+
+§11 Tier 6 asks that "astral-plane text from the corpus pushes through the
+newest text column in every stage". The simulated-user tier now writes four-byte
+UTF-8 — the astral-plane section of `corpus/hostile-inputs.txt`, "the classic
+latin1 tripwire" — into every display name it sends.
+
+**Pushing it through is the half that proves nothing.** A system that silently
+truncates at the first surrogate accepts the write, returns success, and looks
+identical to one that stored it correctly. So `text-survives-the-round-trip`
+reads it back and compares byte for byte, and the complaint prints code points
+on both sides, because a mangled name and a correct one look the same in a log.
+
+#### Why this matters more than the schema assertions
+
+`SchemaCharsetTest` and the boot-time check in `Storage.migrate` assert what the
+schema **declares** — every table utf8mb4, every text column utf8mb4, the
+database default correct. Those are worth having and they are not the claim
+anybody cares about.
+
+This is: **a person whose name is an emoji can link, on a server started
+latin1.** It goes through the real transport, the real connection, the real
+column, and comes back. That is the end-to-end proof the charset work of 8.18
+and 8.24 never had — those cost three attempts and two session runs, and were
+verified by asking the schema about itself.
+
+#### The driver is asked what it sends
+
+`CoreDriver.displayFor` exists so the model records exactly what went on the
+wire. Duplicating the rule — the executor building one string and the model
+remembering another — would leave the round-trip invariant comparing the model's
+idea of the name against core's, with the value actually sent in neither. That
+is a comparison that can pass while both are wrong.
+
+#### Covered by the acceptance test
+
+`MANGLES_FOUR_BYTE_TEXT` truncates a display at the first high surrogate, which
+is what a latin1 column does. It joins the enum the acceptance test is
+parameterised over, so it was tested the moment it was written — and the control
+still passes, which is the claim: four-byte text survives a round trip through a
+real core.
