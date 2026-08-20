@@ -401,8 +401,12 @@ HARNESS_CRED=$("$CORE_CLI" register --name harness --quiet \
 # The chat connector gets its OWN credential and its own capabilities, because
 # it is a separate principal. Sharing the harness's would prove the flow works
 # for something holding every capability, which is not what a deployment runs.
+# link-state-reader because ChatConnector implements /whoami, which calls
+# identity.describe. Third caller of that operation to need this grant after it
+# moved off code-display, and the third found one session run at a time -- see
+# DECISIONS 9.8.
 CHAT_CRED=$("$CORE_CLI" register --name chat --quiet \
-    --capabilities code-display,code-entry \
+    --capabilities code-display,code-entry,link-state-reader \
     --config "$RUN/core/soulbind.toml")
 
 # The dashboard connector, holding exactly one capability: link-state-reader.
