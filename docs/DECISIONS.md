@@ -4804,3 +4804,83 @@ identities allowed at `game.join`.
 **This is a lead, not a finding.** It is written down at this length because the
 next person to look at it should not have to rediscover which of the two
 explanations they are choosing between.
+
+### 9.11 — The lead resolved: core was right, two of three seeds were doing nothing
+
+9.10 left an open question: an identity the model believed unlinked was allowed
+at a gate requiring linkage. Either core treated seen-but-unlinked as satisfying
+`requireLinked`, or the tier's model lost track of a link.
+
+**Core is correct**, established directly rather than assumed. Against a live
+core with a rule requiring linkage:
+
+```
+decide game:never-seen   -> deny / not-linked
+code.issue game:seen-only
+decide game:seen-only    -> deny / not-linked
+```
+
+Both denied. `issue` creates no identity and core treats both as unlinked, which
+is right.
+
+So the model was stale — and finding out why turned up something worse than the
+invariant.
+
+#### All three seeds shared one identity namespace
+
+The run tag varied per **run**, not per **seed**, and all three seeds execute
+against one core and one database. Seed one linked alex's accounts; seeds two
+and three then replayed the *same identity names* against a graph that was
+already built.
+
+Every redeem came back `already-linked` or `already-redeemed`. **Zero successful
+redeems across 800 traced actions.** And because each seed gets a fresh
+`ShadowModel`, seeds two and three believed nothing was linked while core had it
+all — which is exactly the staleness 9.10 was chasing.
+
+The reported result for those runs was *"3 of 3 seeds clean"*. Two of the three
+had done nothing at all. **A tier cannot disagree with core about a graph it
+never built**, so silence was guaranteed and meant nothing.
+
+Fixed by giving each seed its own namespace. The seed value is not drawn from
+the seeded stream, so §11's replay property is untouched, and `GeneratorTest`
+already asserts the action-kind sequence is identical across tags.
+
+#### A refusal can still spend the code
+
+The same trace showed 132 of 234 refusals were `already-redeemed` for codes the
+tier kept re-proposing. Core claims a link code even when it declines the link —
+deliberately: *"it was used, and re-offering it would let the same collision be
+retried indefinitely."* The tier only retired a code on success, so a spent code
+stayed in the generator's pool for the rest of the run, and every draw that
+picked it was wasted.
+
+`CoreDriver.Result` now carries `codeConsumed`, and the executor retires the code
+whether or not the link happened.
+
+#### A green run now has to show its working
+
+Both bugs produced the same symptom: **a clean report from a run that did
+nothing**. "400 actions" counts attempts, and an attempt core refused did not
+happen.
+
+So an outcome now carries links made and refusals, the summary prints them, and
+**a seed that linked nothing is a failure** — a HARNESS FAULT, not a pass. That
+is the `journeys` stage's "no steps recorded" rule, arriving in the tier that
+needed it most.
+
+Reading the numbers matters: with three actors of three platforms each, the
+graph *completes* after about six successful redeems, and every redeem after
+that is correctly refused. A low link count late in a long run is saturation.
+Zero is the failure.
+
+#### What this says about the earlier green runs
+
+Runs 7 and 8 reported the sim clean on both backends. That result now has to be
+read as: **seed one did real work and seeds two and three did not.** The gate
+clause was met on one seed per axis rather than three.
+
+Not retracted — one seed doing four hundred actions against a real deployment on
+both backends is still the clause, and the acceptance test's power is unchanged
+because it never depended on seeds two and three. But it was weaker than it
+read, and it read that way because nothing made the tier show its working.

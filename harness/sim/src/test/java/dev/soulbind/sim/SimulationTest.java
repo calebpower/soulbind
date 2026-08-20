@@ -89,6 +89,35 @@ class SimulationTest {
     }
 
     @Test
+    @DisplayName("a run reports how much work it actually did")
+    void theRunReportsItsOwnWork() {
+        // "400 actions" counts attempts, and an attempt core refused did not
+        // happen. Two seeds sharing an identity namespace with a third linked
+        // NOTHING and reported clean, because there is nothing for an invariant
+        // to disagree about when nothing changed.
+        InMemoryCore core = new InMemoryCore();
+        Simulation.Outcome outcome = Simulation.run(20260820L, world(), core, core, 400, 50);
+
+        assertTrue(outcome.didWork(),
+                () -> "the run linked nothing: " + outcome.summary());
+        // Three, not more. Three actors of three platforms each is a graph that
+        // COMPLETES after about six successful redeems, and every redeem after
+        // that is correctly refused as already-linked. So a healthy run does its
+        // linking early and spends the rest of its actions on decisions, audit,
+        // rules and the nemesis classes.
+        //
+        // Worth knowing when reading a summary: a low link count late in a long
+        // run is saturation, not failure. What would be failure is ZERO, which
+        // didWork() covers.
+        assertTrue(outcome.linksMade() >= 3,
+                () -> "only " + outcome.linksMade() + " links, so barely any of the graph"
+                        + " was built: " + outcome.summary());
+        assertTrue(outcome.summary().contains("links made"),
+                () -> "the summary does not say how much work was done, so a run that did"
+                        + " none reads exactly like one that did: " + outcome.summary());
+    }
+
+    @Test
     @DisplayName("the run says WHEN it first diverged, not just that it did")
     void violationsAreLocatedInTheRun() {
         // With the shrinker deferred (DECISIONS 9.1) this is what makes a

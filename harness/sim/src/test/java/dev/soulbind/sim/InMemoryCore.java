@@ -121,12 +121,22 @@ final class InMemoryCore implements CoreDriver, CoreView {
     public Result redeemCode(Actor actor, String code, String platformKind, String platformId) {
         String issuedFor = liveCodes.get(code);
         if (issuedFor == null) {
-            return Result.refused(
-                    spentCodes.contains(code) ? "already redeemed" : "unknown code");
+            // Mirrors core: a spent code stays spent and the refusal says so;
+            // an unknown code consumed nothing.
+            return spentCodes.contains(code)
+                    ? Result.refusedAndSpent("already-redeemed")
+                    : Result.refused("unknown code");
         }
         String redeemer = platformKind + ":" + platformId;
         if (redeemer.equals(issuedFor)) {
             return Result.refused("an account cannot link to itself");
+        }
+        if (groups.containsKey(redeemer) && groups.containsKey(issuedFor)
+                && groups.get(redeemer) == groups.get(issuedFor)) {
+            // Already linked to each other. Core claims the code anyway.
+            liveCodes.remove(code);
+            spentCodes.add(code);
+            return Result.refusedAndSpent("already-linked");
         }
 
         // The defect leaves the code LIVE, which is what "still redeemable"

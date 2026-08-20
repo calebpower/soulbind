@@ -37,11 +37,11 @@ import org.junit.jupiter.api.Test;
 class HuntTest {
 
     private static Simulation.Outcome clean(long seed) {
-        return new Simulation.Outcome(seed, 400, List.of(), List.of());
+        return new Simulation.Outcome(seed, 400, 40, 12, List.of(), List.of());
     }
 
     private static Simulation.Outcome dirty(long seed) {
-        return new Simulation.Outcome(seed, 400,
+        return new Simulation.Outcome(seed, 400, 40, 12,
                 List.of(new Checker.Violation("linkage-mirrors-model", "a link vanished", 75)),
                 List.of());
     }

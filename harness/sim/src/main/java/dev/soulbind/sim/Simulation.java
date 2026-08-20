@@ -41,6 +41,8 @@ public final class Simulation {
     public record Outcome(
             long seed,
             int actionsTaken,
+            int linksMade,
+            int refusals,
             List<Checker.Violation> violations,
             List<String> trace) {
 
@@ -48,11 +50,30 @@ public final class Simulation {
             return violations.isEmpty();
         }
 
+        /**
+         * Whether the run actually did anything.
+         *
+         * <p>"400 actions" counts attempts, and an attempt core refused did not
+         * happen. A run whose every redeem was declined reports the same action
+         * count as one that linked forty accounts, and reports clean, because
+         * there is nothing for an invariant to disagree about when nothing
+         * changed.
+         *
+         * <p>That is not hypothetical: three seeds sharing one identity
+         * namespace meant seeds two and three linked nothing at all, and both
+         * reported clean. Zero successful links is a harness fault, not a pass.
+         */
+        public boolean didWork() {
+            return linksMade > 0;
+        }
+
         /** A short report, for a runner's stdout. */
         public String summary() {
             StringBuilder out = new StringBuilder();
             out.append("seed ").append(seed)
                     .append(": ").append(actionsTaken).append(" actions, ")
+                    .append(linksMade).append(" links made, ")
+                    .append(refusals).append(" refused, ")
                     .append(violations.size()).append(" violation(s)");
             for (Checker.Violation violation : violations) {
                 out.append("\n  ").append(violation);
@@ -87,6 +108,8 @@ public final class Simulation {
         List<String> trace = new ArrayList<>();
 
         int taken = 0;
+        int linksMade = 0;
+        int refusals = 0;
         for (int i = 1; i <= actions; i++) {
             var next = generator.next(world);
             if (next.isEmpty()) {
@@ -94,8 +117,14 @@ public final class Simulation {
                 break;
             }
             Action action = next.get();
+            int linksBefore = model.knownIdentities().size();
             CoreDriver.Result result = execute(action, driver, world, model);
             taken++;
+            if (!result.accepted()) {
+                refusals++;
+            } else if (model.knownIdentities().size() > linksBefore) {
+                linksMade++;
+            }
             trace.add(i + ": " + action + "  => "
                     + (result.accepted() ? "ok" : "refused: " + result.detail()));
 
@@ -111,7 +140,8 @@ public final class Simulation {
         // the ones with the most accumulated history behind them.
         checker.check(taken, model, view);
 
-        return new Outcome(seed, taken, checker.violations(), List.copyOf(trace));
+        return new Outcome(
+                seed, taken, linksMade, refusals, checker.violations(), List.copyOf(trace));
     }
 
     private static CoreDriver.Result execute(
@@ -139,8 +169,14 @@ public final class Simulation {
                 String issuedFor = world.outstandingCodes().get(action.subject());
                 CoreDriver.Result result = driver.redeemCode(
                         action.actor(), action.subject(), target[0], target[1]);
-                if (result.accepted()) {
+                if (result.codeConsumed()) {
+                    // Whether or not the link happened. A code core has claimed
+                    // is gone, and leaving it in the world means proposing it
+                    // again for the rest of the run -- draws spent on an answer
+                    // that cannot change.
                     world.codeSpent(action.subject());
+                }
+                if (result.accepted()) {
                     model.redeemed(action.subject());
                     if (issuedFor != null) {
                         world.linked(issuedFor, action.detail());

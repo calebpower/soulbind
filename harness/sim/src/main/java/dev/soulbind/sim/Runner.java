@@ -66,6 +66,13 @@ public final class Runner {
         int failed = 0;
         for (Simulation.Outcome outcome : outcomes) {
             out.append("[sim] ").append(outcome.summary().replace("\n", "\n[sim] ")).append('\n');
+            if (!outcome.didWork()) {
+                failed++;
+                out.append("[sim]   HARNESS FAULT: this seed linked nothing. Every redeem was"
+                        + " refused, so the invariants had nothing to disagree about and"
+                        + " 'clean' means 'nothing happened'.\n");
+                continue;
+            }
             if (!outcome.clean()) {
                 failed++;
                 out.append("[sim]   promote this seed -- add to harness/sim/src/main/"
@@ -240,9 +247,23 @@ public final class Runner {
 
         List<Simulation.Outcome> outcomes = new ArrayList<>();
         for (Seeds.Seed seed : Seeds.fixed()) {
+            // A namespace PER SEED, not per run.
+            //
+            // All three seeds share one core and one database. With one tag for
+            // the whole run they also shared one set of identity names, so seed
+            // one linked everything and seeds two and three replayed the same
+            // names against a graph that was already built -- every redeem
+            // refused already-linked or already-redeemed, no work done, and a
+            // fresh model that believed nothing was linked while core had it
+            // all. Measured: zero successful redeems across 800 traced actions,
+            // and "3 of 3 seeds clean" where two of the three did nothing.
+            //
+            // The seed value is not drawn from the seeded stream, so this does
+            // not disturb §11's replay property -- and GeneratorTest asserts the
+            // action-kind sequence is identical across tags.
             outcomes.add(Simulation.run(
-                    seed.value(), worldFor(credentials, runTag), core, core,
-                    actions, DEFAULT_CHECK_PERIOD));
+                    seed.value(), worldFor(credentials, runTag + "-s" + seed.value()),
+                    core, core, actions, DEFAULT_CHECK_PERIOD));
         }
 
         System.out.println(report(outcomes, core));

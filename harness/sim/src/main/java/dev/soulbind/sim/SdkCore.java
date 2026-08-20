@@ -125,10 +125,19 @@ public final class SdkCore implements CoreDriver, CoreView {
 
     @Override
     public Result redeemCode(Actor actor, String code, String platformKind, String platformId) {
-        return call(forActor(actor), "code.redeem",
+        Result result = call(forActor(actor), "code.redeem",
                 Map.of("code", code, "platformKind", platformKind,
                         "platformId", platformId, "display", actor.name()),
                 "subjectId");
+        if (result.accepted()) {
+            return result;
+        }
+        // A refusal that still spent the code. Core claims it on
+        // already-redeemed and already-linked alike; only an unknown or expired
+        // code leaves nothing consumed.
+        String detail = result.detail() == null ? "" : result.detail();
+        boolean spent = detail.contains("already-redeemed") || detail.contains("already-linked");
+        return spent ? Result.refusedAndSpent(detail) : result;
     }
 
     @Override

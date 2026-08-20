@@ -39,14 +39,28 @@ public interface CoreDriver {
      *     or null when there is none
      * @param detail core's own words, for the trace
      */
-    record Result(boolean accepted, String value, String detail) {
+    record Result(boolean accepted, String value, String detail, boolean codeConsumed) {
 
         public static Result ok(String value) {
-            return new Result(true, value, "ok");
+            return new Result(true, value, "ok", true);
         }
 
         public static Result refused(String detail) {
-            return new Result(false, null, detail);
+            return new Result(false, null, detail, false);
+        }
+
+        /**
+         * Refused, and the code was spent anyway.
+         *
+         * <p>Core claims a link code even when it declines the link: "it was
+         * used, and re-offering it would let the same collision be retried
+         * indefinitely". A caller that treats a refusal as leaving the code
+         * outstanding will offer it again forever — measured at 132 of 234
+         * refusals in one run being `already-redeemed` for codes the tier kept
+         * proposing.
+         */
+        public static Result refusedAndSpent(String detail) {
+            return new Result(false, null, detail, true);
         }
     }
 
