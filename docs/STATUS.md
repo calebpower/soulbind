@@ -342,9 +342,17 @@ instance has ever run in this project.
    Plan instance against the full-stack tier, and `connector-plan` registered as
    a `DataExtension` in a running Plan. Everything under it is tested; nothing
    has rendered.
-2. **T6's remaining items** — MariaDB started **latin1** (the point is that core
-   specifies charset explicitly rather than inheriting the server default),
-   astral-plane pushes, no-backdoor state building.
+2. **T6's remaining items.** The **latin1** half is written and is waiting on a
+   session to prove it: the battery's MariaDB now starts
+   `--character-set-server=latin1`, `soulbind_fullstack` is created without a
+   charset clause so it inherits that, and core states utf8mb4 itself — in the
+   dialect migration (`ALTER DATABASE` for future tables, `CONVERT TO` for the
+   fifteen V1–V7 already created) and on the pool (`connectionCollation`).
+   `SchemaCharsetTest` asserts the schema rather than a round trip, because a
+   round trip only sees columns the suite happened to write emoji into.
+   **Unverified against a real latin1 server** — the workstation has no MariaDB,
+   so only the SQLite branch has ever executed. DECISIONS 8.18. Still open:
+   astral-plane pushes through every stage, and no-backdoor state building.
 3. **T7 fuzz and T8 scenarios as run stages.** `run.sh`'s `STAGES` list is
    deliberately short; adding a name without a `stage_` function is rejected
    before anything runs, and `FullstackStagesGuardTest` asserts the list, the

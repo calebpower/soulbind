@@ -143,6 +143,22 @@ public final class Storage implements AutoCloseable {
             }
             case MARIADB -> {
                 cfg.setMaximumPoolSize(10);
+                // The connection charset, said out loud.
+                //
+                // Connector/J 3.5 happens to issue `SET NAMES utf8mb4` of its own
+                // accord today, so in practice this line changes nothing yet. It
+                // is here because "the driver happens to" is not a property this
+                // schema can afford to inherit: the columns are utf8mb4 (see the
+                // dialect migration), and a connection negotiated down to the
+                // server's default -- latin1 on plenty of long-lived
+                // installations -- would mangle four-byte text on the way in
+                // while every column definition still looked correct.
+                //
+                // Only utf8mb4 collations are accepted by this driver, which is
+                // why the value is not configurable: there is no valid
+                // alternative, and offering the choice would only let a
+                // deployment get it wrong.
+                cfg.addDataSourceProperty("connectionCollation", "utf8mb4_unicode_ci");
                 // No serialising executor: the backend handles concurrent writers,
                 // and forcing them through one thread would throw that away.
                 writeExecutor = null;
@@ -171,6 +187,19 @@ public final class Storage implements AutoCloseable {
 
     public Backend backend() {
         return backend;
+    }
+
+    /**
+     * The pool the repositories actually use.
+     *
+     * <p>Package-private and read-only, for tests that must assert about the
+     * connection rather than about a connection. {@code SchemaCharsetTest} is
+     * the case: opening its own {@code DriverManager} connection would prove
+     * that <em>a</em> connection to that server speaks utf8mb4, which is not the
+     * claim -- the claim is about the one core writes through.
+     */
+    javax.sql.DataSource dataSource() {
+        return dataSource;
     }
 
     public AuditRepository audit() {

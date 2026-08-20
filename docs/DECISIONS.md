@@ -3378,3 +3378,67 @@ The general point: a harness whose discipline is "the bytes are pinned or the
 green means nothing" should not have one component exempt because somebody else
 did the pinning. Their pin is not ours to rely on, and it does not survive an
 offline run.
+
+### 8.18 — The schema never said what charset it was in
+
+Specification §11 Tier 6 requires the battery's MariaDB to start **latin1**. It
+had never been started that way, and writing the flag turned out to be the
+smallest part of the change.
+
+Core specified **nothing** about charset — not on the connection, not in the
+DDL. All seven common migrations create tables with no `CHARACTER SET` clause,
+so each table takes the database default, which takes the server default. The
+harness then created every database `CHARACTER SET utf8mb4` explicitly, and the
+image's own default is utf8mb4. Two layers of coincidence, and underneath them
+core had no opinion at all.
+
+`AuditRepositoryTest.survivesHostileText` pushes `😀🤖` through the audit detail
+on both backends and reads it back. It has been green since Phase 1. It was
+green because the harness had already made the database right on core's behalf —
+the assertion was correct, well-motivated, and testing the fixture.
+
+Point the same code at a server started `--character-set-server=latin1` and
+every text column in the schema is latin1. A four-byte character reaching one is
+truncated or rejected depending on `sql_mode`, so a player whose name is an
+emoji cannot link, and the error names a column rather than a charset. That is
+not an exotic deployment: it is what a long-lived installation upgraded across
+major versions typically still has, and nobody involved knows it.
+
+**The fix says the charset out loud in three places, because they fail
+differently:**
+
+- `ALTER DATABASE` in the dialect migration, so every table a *future* migration
+  creates inherits utf8mb4 and V9's author does not have to know this.
+- `CONVERT TO CHARACTER SET` for the fifteen tables V1–V7 already created,
+  because inheritance cannot reach backwards. A no-op on a database that was
+  already utf8mb4, which is what makes it safe to add now rather than only for
+  new installations.
+- `connectionCollation` on the pool. Connector/J 3.5 issues `SET NAMES utf8mb4`
+  of its own accord, so this changes nothing today — and "the driver happens to"
+  is not a property a schema can afford to inherit. utf8mb4 columns reached over
+  a latin1 connection are mangled on the way in while every column definition
+  still looks correct.
+
+**Why the round-trip test is not enough on its own.** It can only see a column
+somebody wrote four-byte text into during the suite. A new table added by a
+later migration, on a latin1 server, is broken from the day it ships and every
+test stays green. `SchemaCharsetTest` therefore asserts on the schema itself —
+the database default, the session variables on the pool core actually writes
+through, every table's collation and every text column's charset — and it checks
+the enumeration is non-empty first, because "nothing in this list is wrong" is
+satisfied by an empty list.
+
+**Two narrowings, both stated where they apply.** `flyway_schema_history` is not
+converted: Flyway is writing this migration's own row into it while the
+statements run, and it holds versions, descriptions and filenames authored in
+this repository, all ASCII. And the forum tier's MariaDB is *not* started latin1,
+because it is shared with Flarum, which requires utf8mb4 — a latin1 server there
+would break the forum and report the result as soulbind's. What that tier does
+contribute is the privilege question: core migrates there as a non-root user, so
+`ALTER DATABASE` has to work without superuser rights.
+
+**The pattern, again.** This is 8.5 and 8.13 in a new place: a check that passes
+because the environment was arranged to make it pass. The tell is the same one
+every time — the assertion is about something the test does not control, and
+nothing in the run says which of the two produced the green.
+

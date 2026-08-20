@@ -290,6 +290,16 @@ url = "jdbc:sqlite:/state/soulbind.db"'
         # Its own database on the server Flarum already uses. A second container
         # would be a second thing to wait for, and a second thing to blame when
         # it does not come up.
+        #
+        # This server is NOT started latin1, unlike the full-stack tier's.
+        # Sharing it with Flarum is the reason: Flarum requires utf8mb4 and a
+        # latin1 server would break the forum, so the run would be testing
+        # Flarum's charset handling and reporting the result as soulbind's. The
+        # database-charset hostility axis belongs to the tier that owns its own
+        # server -- see .reaper.toml, specification §11 Tier 6. What this tier
+        # DOES contribute is the privilege question: core migrates here as
+        # $DB_USER rather than root, so `ALTER DATABASE` in the dialect
+        # migration has to work for a non-superuser.
         podman exec -i "$DB_C" mariadb -h 127.0.0.1 -uroot -p"$DB_ROOT" \
             -e "CREATE DATABASE IF NOT EXISTS soulbind CHARACTER SET utf8mb4;
                 GRANT ALL ON soulbind.* TO '$DB_USER'@'%'; FLUSH PRIVILEGES;" 2>/dev/null

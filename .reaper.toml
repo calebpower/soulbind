@@ -208,10 +208,24 @@ done
 # nobody in this session created.
 podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 
+# Started LATIN1, on purpose, per specification §11 Tier 6.
+#
+# Not to test MariaDB. The point is that core must SAY what charset it wants
+# rather than take the server's, because a long-lived installation upgraded
+# across major versions very often still has latin1 as its server default and
+# nobody involved knows it. Started utf8mb4 -- the image's default -- every
+# table in the schema inherits the right answer for the wrong reason, and the
+# charset assertions in this repository pass without exercising anything.
+#
+# This is the hostile axis for the DATABASE. The JVM's own hostile axis is
+# `charsetHostilityTest`, and they are independent: a run under
+# -Dfile.encoding=ISO-8859-1 against a utf8mb4 server proves nothing about a
+# utf8mb4 JVM against a latin1 server.
 podman run -d --name soulbind-mariadb --network host \
   -e MARIADB_ROOT_PASSWORD=soulbind-test \
   -e MARIADB_DATABASE=soulbind \
-  "$MARIADB"
+  "$MARIADB" \
+  --character-set-server=latin1 --collation-server=latin1_swedish_ci
 
 # mariadbd accepts TCP before it is ready to serve, so starting the tests on
 # container-start produces a flaky failure that reads as a soulbind defect.
@@ -287,11 +301,20 @@ SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys down
 
 podman exec -i soulbind-mariadb \
   mariadb -h 127.0.0.1 -uroot -psoulbind-test <<'SQL'
-CREATE DATABASE IF NOT EXISTS soulbind_fullstack CHARACTER SET utf8mb4;
+-- No CHARACTER SET clause, deliberately: this database inherits the server's
+-- latin1 default, which is precisely the condition core has to survive. Naming
+-- utf8mb4 here would fix the schema on core's behalf and the fix would never be
+-- tested. Core's own dialect migration is what makes it utf8mb4.
+CREATE DATABASE IF NOT EXISTS soulbind_fullstack;
 -- Plan's own database, separate from soulbind's for the same reason
 -- soulbind_fullstack is separate from soulbind: a tier asserting on rows it did
 -- not create is a tier that fails for reasons nobody can find. Plan writes a
 -- great deal.
+--
+-- utf8mb4 IS named here, and the asymmetry is the point: Plan is a third party
+-- and is not under test. Handing it a latin1 database would be testing Plan's
+-- schema handling, not soulbind's, and a failure there would say nothing about
+-- this repository while looking exactly like a defect in it.
 CREATE DATABASE IF NOT EXISTS plan CHARACTER SET utf8mb4;
 SQL
 
