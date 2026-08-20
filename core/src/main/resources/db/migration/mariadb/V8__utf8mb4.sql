@@ -37,6 +37,34 @@
 
 ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- Foreign key checks OFF for the conversion, and this is not optional.
+--
+-- CONVERT TO CHARACTER SET rewrites every char column's definition, and MariaDB
+-- refuses to change a column referenced by a foreign key while the other side
+-- still has the old charset:
+--
+--   1833: Cannot change column 'id': used in a foreign key constraint
+--         'fk_capability_connector' of table 'soulbind.connector_capability'
+--
+-- No ordering avoids it. Converting the parent first leaves the child pointing
+-- at a column it no longer matches; converting the child first does the same in
+-- reverse. Both sides have to move, and they cannot move simultaneously.
+--
+-- Nothing is at risk while they are off. This migration inserts and deletes
+-- nothing -- it rewrites column metadata, and for the ASCII identifiers in
+-- these columns the stored bytes are identical before and after. Every table on
+-- both sides of every foreign key is converted in this one script, so the
+-- schema is consistent again before the flag goes back.
+--
+-- This is a SESSION variable, so the concern is a pooled connection escaping
+-- with checks still disabled. It cannot: on success the flag is restored below,
+-- and on failure Flyway aborts, `Storage.open` throws, and core does not start
+-- at all -- the pool dies with the process, having served nothing.
+--
+-- Found by running it. The local build has no MariaDB, so this file was green
+-- on the workstation and had never executed a single one of these statements.
+SET FOREIGN_KEY_CHECKS = 0;
+
 ALTER TABLE runtime_config CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ALTER TABLE audit CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ALTER TABLE audit_seq CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -52,3 +80,5 @@ ALTER TABLE policy_override CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_uni
 ALTER TABLE event_outbox CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ALTER TABLE event_seq CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ALTER TABLE event_cursor CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;

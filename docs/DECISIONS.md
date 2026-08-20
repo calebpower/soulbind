@@ -3927,3 +3927,60 @@ claim was recorded where it had shipped. The new guard immediately failed on it:
 the matcher is deliberately loose, and a quoted false claim is still the false
 sentence sitting in the legal file. It was right to fail. History belongs in
 this document; `NOTICE` states only what is true today.
+
+### 8.23 — The charset migration could not run, and only a real MariaDB could say so
+
+`V8__utf8mb4.sql` (8.18) was written, reviewed, committed and green on the
+workstation. Its first contact with an actual MariaDB failed on the fourth
+statement:
+
+```
+1833: Cannot change column 'id': used in a foreign key constraint
+      'fk_capability_connector' of table 'soulbind.connector_capability'
+```
+
+`CONVERT TO CHARACTER SET` rewrites every char column's definition, and MariaDB
+refuses to change a column referenced by a foreign key while the other side
+still carries the old charset. **No ordering avoids it**: converting the parent
+first leaves the child pointing at a column it no longer matches, and converting
+the child first does the same in reverse. Both sides have to move and they
+cannot move simultaneously, so the checks come off for the duration.
+
+Why that is safe here, stated rather than assumed: the migration inserts and
+deletes nothing — it rewrites column metadata, and for the ASCII identifiers in
+these columns the stored bytes are identical before and after. Every table on
+both sides of every foreign key is converted in this one script, so the schema
+is consistent again before the flag is restored. The flag is a session variable,
+so the real hazard is a pooled connection escaping with checks disabled; it
+cannot, because on success the script restores it, and on failure Flyway aborts,
+`Storage.open` throws and core never starts — the pool dies with the process,
+having served nothing.
+
+**The point worth keeping.** The workstation has no MariaDB. Every test that
+would have exercised this file was skipped there, so `./gradlew build` was green
+over a migration that could not run. `SchemaCharsetTest` asserts the schema
+correctly and had never executed its MariaDB branch. The commit message said so
+— *"the latin1 axis is written and unproven until the next session"* — and that
+was the accurate part; what it could not say was which of the two ways it would
+turn out to be wrong.
+
+This is 8.9 again, in a new place: **static review of code that has never run
+converges on the wrong things.** Three rounds of reading found the charset
+inheritance, the connection collation, the anti-vacuity floors and two
+narrowings worth stating. None of them found that the DDL was rejected outright.
+
+#### What the same run did confirm
+
+The failure was fourth in the queue, and three things had already passed:
+
+- **Infection ran on the guest**, first time: PHAR fetched and checksum-verified
+  twice, pcov loaded in the derived image, 343 killed / 78 escaped / 81% MSI —
+  the same numbers as the workstation — and the report copied into `out/`.
+- **The shell mutation battery ran** in the run verb: control green, 13 of 13
+  mutants killed.
+- **`PlanCheckWalkerGuardTest` skipped** in the build container rather than
+  failing or silently passing (8.22).
+
+And one thing was answered in passing: the failure was on statement four, which
+means `ALTER DATABASE` had already succeeded **as the forum tier's non-root
+user**. That was an open question in 8.18 and it is now closed.
