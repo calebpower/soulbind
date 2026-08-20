@@ -93,7 +93,22 @@ final class WebhookVerifier
         // as they liked while the signature check passed each time, because
         // nothing would remember the first. The store is bounded and fails
         // closed, so recording unverified nonces cannot be used to exhaust it.
-        if (!$this->nonces->recordIfNew($nonce, $now, $this->windowSeconds * 2)) {
+        // 2W + 1, and the +1 is not padding.
+        //
+        // A delivery stamped t is acceptable for now in [t-W, t+W] -- a span 2W
+        // wide, inclusive at BOTH ends. A nonce first seen at the earliest of
+        // those, t-W, must therefore still be remembered at the latest, t+W.
+        // With a retention of exactly 2W it expires at t-W+2W = t+W, and the
+        // store sweeps entries whose expiry is `<= $now`, so at t+W it is
+        // forgotten -- while the timestamp check still accepts. A captured
+        // delivery replayed at the final instant of its own window went
+        // through.
+        //
+        // Found by mutation coverage rather than by reading: nothing here
+        // asserted the retention at all, so `* 1`, `* 3` and `/ 2` all survived,
+        // and writing the test that killed them is what surfaced the off-by-one
+        // in the original `* 2`.
+        if (!$this->nonces->recordIfNew($nonce, $now, $this->windowSeconds * 2 + 1)) {
             return Verdict::REPLAYED_NONCE;
         }
 

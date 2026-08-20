@@ -175,7 +175,7 @@ public final class Main {
                             (int) window.toSeconds()));
 
             try (TransportServer server = new TransportServer(
-                    dispatcher, codec, authenticator, window, new NonceStore(window), clock)) {
+                    dispatcher, codec, authenticator, window, new NonceStore(NonceStore.retentionFor(window)), clock)) {
 
                 int port = server.start(
                         CoreConfig.host(config), config.getInt(CoreConfig.SERVER_PORT));

@@ -3633,3 +3633,78 @@ depend on either. A threshold gets lowered the first time it is inconvenient,
 and a lowered threshold is a decision about what this project permanently stops
 noticing. A slow `check` is a `check` people stop running. Both numbers go in
 when there is one worth defending.
+
+### 8.21 — A replay hole on both sides, found by symmetry
+
+The PHP tier's first mutation run reported that `WebhookVerifier`'s nonce
+retention — `$this->windowSeconds * 2` — could be changed to `* 1`, `* 3` or
+`/ 2` with every check still green. Nothing asserted it at all.
+
+Writing the test that killed those mutants is what found the defect, and the
+defect was in the `* 2`.
+
+A delivery stamped `t` is acceptable while `|now - t| <= W`: a span **2W wide,
+inclusive at both ends**. A nonce first seen at the earliest of those, `t - W`,
+must still be remembered at the latest, `t + W`. Retaining for exactly `2W`
+makes it expire at `t - W + 2W = t + W`, and that store sweeps entries whose
+expiry is `<= $now` — so at `t + W` the nonce is forgotten while the timestamp
+check still accepts. **A captured delivery replayed at the final instant of its
+own window was accepted.** Confirmed by reverting the fix: the verdict comes
+back `accepted` rather than `replayed-nonce`.
+
+One instant wide, on the only endpoint an unauthenticated caller can reach.
+
+#### The same reasoning, applied to core, found a much wider one
+
+`SignedRequestVerifier` accepts `|now - timestamp| <= W`, the same 2W span. And
+`Main` constructed its store as `new NonceStore(window)` — **retention W, not
+2W**. A nonce first seen at `t - W` is swept once `now > t`, leaving a captured
+request replayable from `t` to `t + W`: **the entire second half of its own
+window**, at the default 300s setting.
+
+`new NonceStore(window)` reads entirely reasonably, which is why it survived
+review. The retention is now a named factory, `NonceStore.retentionFor`, so the
+relationship lives in one place instead of at each call site.
+
+#### The test needed a sweep, and saying so matters
+
+Two `recordIfNew` calls do not trigger one: the store sweeps every 256
+insertions. A naive test would pass against the broken retention, because the
+entry simply had not been reclaimed yet. The test therefore uses
+`sweepInterval = 1`.
+
+That is not arranging the failure. It is what a server with traffic does every
+256 requests; a test that never sweeps is testing a store that never reclaims,
+and would pass with the retention set to anything at all.
+
+#### A correction, on the record
+
+The first version of the Java fix used `2W + 1`, and its comment asserted that
+`2W` was "wrong by one tick". **That was wrong**, and the mutation check is what
+said so: `2W` passes, only `W` fails. Java's `sweep` drops entries *strictly*
+older than the cutoff, so an entry recorded at `t - W` survives a cutoff of
+exactly `t - W`. The `+1` was an unasserted constant defended by a comment I had
+not verified — the same defect as an assertion that cannot fail, wearing
+different clothes.
+
+The two sides now differ by one tick and are each correct for their own sweep:
+core retains `2W` against a strict comparison, the PHP store `2W + 1` against an
+inclusive one. The asymmetry is deliberate and is recorded in both places
+because it looks like a mistake.
+
+#### What is left there, and why it stays
+
+Two `IncrementInteger` mutants survive on the PHP retention line. Both make
+retention *longer*, which is strictly more conservative: they cost memory, never
+correctness. They are not excluded from the report.
+
+#### The number
+
+PHP: 415 mutants, 332 killed, **83 covered and undetected**, 100% mutation code
+coverage, 80% MSI. After: 421 / 343 / 78, 81% MSI, and the replay path clean but
+for the two above.
+
+The 100% mutation code coverage is worth separating from the MSI. Every mutable
+line in `src/` is reached by a test — the PHP suite has no blind spots of the
+kind core has 411 of. What it has is 78 places where a test watched something
+happen and did not check what it was.

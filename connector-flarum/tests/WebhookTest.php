@@ -43,6 +43,56 @@ final class WebhookTest extends TestCase
     }
 
     #[Test]
+    #[DisplayName('a timestamp exactly at the window edge is accepted')]
+    public function aTimestampAtTheWindowEdgeIsAccepted(): void
+    {
+        $this->assertNoFailures(
+            WebhookChecks::aTimestampAtTheWindowEdgeIsAccepted(),
+            'the webhook endpoint does not hold: the window is inclusive at both ends'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('a whitespace-padded timestamp header is accepted')]
+    public function aPaddedTimestampHeaderIsAccepted(): void
+    {
+        $this->assertNoFailures(
+            WebhookChecks::aPaddedTimestampHeaderIsAccepted(),
+            'the webhook endpoint does not hold: a padded timestamp header is accepted'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('a nonce is remembered for the whole span its stamp stays valid')]
+    public function aNonceOutlastsItsWholeWindow(): void
+    {
+        $this->assertNoFailures(
+            WebhookChecks::aNonceOutlastsItsWholeWindow(),
+            'the webhook endpoint does not hold: a nonce outlasts its own window'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('a nonce expiring exactly now is forgotten')]
+    public function anEntryExpiringExactlyNowIsForgotten(): void
+    {
+        $this->assertNoFailures(
+            WebhookChecks::anEntryExpiringExactlyNowIsForgotten(),
+            'the nonce store does not hold: expiry at now means expired'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('a full nonce store refuses rather than evicting')]
+    public function aFullStoreRefusesRatherThanEvicting(): void
+    {
+        $this->assertNoFailures(
+            WebhookChecks::aFullStoreRefusesRatherThanEvicting(),
+            'the nonce store does not hold: full means refuse, never evict'
+        );
+    }
+
+    #[Test]
     #[DisplayName('a correctly signed, fresh delivery is accepted')]
     public function aProperlySignedDeliveryIsAccepted(): void
     {

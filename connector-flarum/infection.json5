@@ -7,11 +7,11 @@
     // Infection 0.35 requires ^2 || ^3, so the tool cannot live in this
     // package's dependency tree at all. harness/php/pins.env has the detail.
     source: {
+        // src/ only. tests/ is absent rather than listed under `excludes`:
+        // mutating a test asks whether the OTHER tests cover it, which is not a
+        // question anybody has, and the schema rejects an empty excludes array
+        // anyway.
         directories: ["src"],
-        // tests/ is excluded because mutating a test asks whether the OTHER
-        // tests cover it, which is not a question anybody has. src/ is the
-        // subject.
-        excludes: [],
     },
 
     mutators: {
@@ -19,20 +19,23 @@
     },
 
     testFramework: "phpunit",
-    // The ordinary entry point. phpunit-hostile.xml re-runs the same tests
-    // under a non-UTF-8 locale and would double the runtime to re-answer a
-    // question this tier does not ask -- mutation coverage is about whether
-    // assertions bite, and the hostile run is about whether encodings are
-    // explicit. Deliberate, and it does not excuse a surviving mutant.
-    testFrameworkOptions: "--configuration=phpunit.xml",
+    // No testFrameworkOptions. Infection passes --configuration itself, and
+    // adding a second one makes PHPUnit refuse: "Option --configuration cannot
+    // be used more than once."
+    //
+    // So this tier runs against phpunit.xml, the ordinary entry point.
+    // phpunit-hostile.xml re-runs the same tests under a non-UTF-8 locale and
+    // would double the runtime to re-answer a question this tier does not ask:
+    // mutation coverage is about whether assertions bite, the hostile run is
+    // about whether encodings are explicit. Deliberate, and it does not excuse
+    // a surviving mutant.
 
     logs: {
         text: "build/infection/infection.log",
         summary: "build/infection/summary.log",
-        json: "build/infection/infection.json",
         // Every escaped mutant, so the report can be read without re-running.
         // A summary alone says how many survived and never which.
-        stryker: {},
+        json: "build/infection/infection.json",
     },
 
     tmpDir: "build/infection/tmp",

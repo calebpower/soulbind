@@ -18,6 +18,16 @@
          failOnWarning="true"
          failOnRisky="true"
          beStrictAboutOutputDuringTests="true">
+  <!-- The coverage filter. Not for a coverage REPORT; nothing here asks for a
+       percentage. It is here because Infection cannot start without one: it
+       needs to know which tests reach the line it just mutated, and PHPUnit
+       produces no coverage data at all when no filter is configured. Without
+       this the mutation run stops with "No filter is configured". -->
+  <source>
+    <include>
+      <directory>src</directory>
+    </include>
+  </source>
   <testsuites>
     <testsuite name="soulbind-hostile">
       <directory>tests</directory>

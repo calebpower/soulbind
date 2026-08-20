@@ -52,7 +52,7 @@ class SignedRequestVerifierTest {
             Set.of(Capability.CODE_DISPLAY), NOW, null);
 
     private SignedRequestVerifier verifier() {
-        return new SignedRequestVerifier(WINDOW, new NonceStore(WINDOW));
+        return new SignedRequestVerifier(WINDOW, new NonceStore(NonceStore.retentionFor(WINDOW)));
     }
 
     private String sign(long timestamp, String nonce, String body) {
@@ -64,6 +64,46 @@ class SignedRequestVerifierTest {
         return verifier.verify(
                 CONNECTOR, TOKEN, String.valueOf(NOW.getEpochSecond()),
                 nonce, signature, body, NOW);
+    }
+
+    @Test
+    @DisplayName("a captured request cannot be replayed at the far end of its own window")
+    void aNonceOutlastsItsWindow() {
+        // The window accepts |now - timestamp| <= WINDOW, which is a span 2*WINDOW
+        // wide. A nonce first seen at the earliest instant of that span must still
+        // be remembered at the latest, or a captured request is replayable for
+        // most of its own lifetime.
+        //
+        // sweepInterval 1, so every insertion sweeps. That is not arranging the
+        // failure -- it is what a server with traffic does anyway, since the
+        // store sweeps every 256 insertions. A test that never sweeps is testing
+        // a store that never reclaims, and would pass with the retention set to
+        // anything at all.
+        NonceStore store = new NonceStore(
+                NonceStore.retentionFor(WINDOW), NonceStore.MAX_ENTRIES, 1);
+        SignedRequestVerifier verifier = new SignedRequestVerifier(WINDOW, store);
+
+        String nonce = "captured";
+        long stamp = NOW.getEpochSecond();
+        String signature = sign(stamp, nonce, BODY);
+
+        assertInstanceOf(
+                SignedRequestVerifier.Outcome.Accepted.class,
+                verifier.verify(CONNECTOR, TOKEN, String.valueOf(stamp), nonce, signature,
+                        BODY, NOW.minus(WINDOW)),
+                "the earliest acceptable instant was refused, so the replay below would"
+                        + " prove nothing");
+
+        SignedRequestVerifier.Outcome replay = verifier.verify(
+                CONNECTOR, TOKEN, String.valueOf(stamp), nonce, signature,
+                BODY, NOW.plus(WINDOW));
+
+        SignedRequestVerifier.Outcome.Refused refused = assertInstanceOf(
+                SignedRequestVerifier.Outcome.Refused.class, replay,
+                "a captured request was replayed at the last instant of its own window and"
+                        + " accepted. The nonce is forgotten while the timestamp is still"
+                        + " valid, which is a replay window with no lid on it.");
+        assertEquals(ErrorCode.REPLAYED_NONCE, refused.code());
     }
 
     @Test

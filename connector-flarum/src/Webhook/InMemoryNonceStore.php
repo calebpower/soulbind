@@ -39,6 +39,22 @@ final class InMemoryNonceStore implements NonceStore
     /** @var array<string, int> nonce => expiry */
     private array $seen = [];
 
+    private readonly int $maxEntries;
+
+    /**
+     * @param int|null $maxEntries the refusal threshold, for tests
+     *
+     * The threshold is injectable because it is otherwise 100,000 insertions
+     * away, and mutation coverage showed that moving the comparison off its
+     * boundary changed nothing any test could see. Filling the real store to
+     * assert one branch costs a hundred thousand array writes and a sweep over
+     * each; moving the threshold asserts the same comparison in microseconds.
+     */
+    public function __construct(?int $maxEntries = null)
+    {
+        $this->maxEntries = $maxEntries ?? self::MAX_ENTRIES;
+    }
+
     public function recordIfNew(string $nonce, int $now, int $ttlSeconds): bool
     {
         foreach ($this->seen as $key => $expiresAt) {
@@ -47,7 +63,7 @@ final class InMemoryNonceStore implements NonceStore
             }
         }
 
-        if (count($this->seen) >= self::MAX_ENTRIES) {
+        if (count($this->seen) >= $this->maxEntries) {
             return false; // fail closed
         }
 

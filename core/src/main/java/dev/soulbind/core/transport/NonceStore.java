@@ -70,6 +70,40 @@ public final class NonceStore {
     }
 
     /**
+     * How long nonces must be retained for a given signature window.
+     *
+     * <p><b>2W + 1, and the +1 is not padding.</b> A request stamped {@code t}
+     * is acceptable while {@code |now - t| <= W} — a span {@code 2W} wide,
+     * inclusive at both ends. A nonce first seen at the earliest of those,
+     * {@code t - W}, must therefore still be remembered at the latest,
+     * {@code t + W}. Retaining for {@code W} — which is what the server did,
+     * because it passed the signature window straight in — forgets it at
+     * {@code t}, leaving a captured request replayable for the entire second
+     * half of its own window.
+     *
+     * <p><b>2W exactly, with no slack, and that depends on {@link #sweep}
+     * dropping entries STRICTLY older than the cutoff.</b> An entry recorded at
+     * {@code t - W} is compared against a cutoff of {@code t - W} at the moment
+     * {@code t + W}, and {@code isBefore} is false, so it survives exactly long
+     * enough. Change that comparison to an inclusive one and this constant is
+     * wrong by a tick, silently.
+     *
+     * <p>The PHP connector's store needs {@code 2W + 1} for precisely that
+     * reason — its sweep drops on {@code <=}. The two sides differ by one tick
+     * and are each correct for their own sweep; the asymmetry is deliberate and
+     * is recorded here because it looks like a mistake.
+     *
+     * <p>A named factory rather than arithmetic at the call site, because the
+     * call site is where this went wrong: {@code new NonceStore(window)} reads
+     * entirely reasonable and is the bug. The PHP connector had the same defect
+     * on the same line of reasoning, found first, by mutation coverage
+     * reporting that nothing asserted the retention at all.
+     */
+    public static Duration retentionFor(Duration signatureWindow) {
+        return signatureWindow.multipliedBy(2);
+    }
+
+    /**
      * The same store with the two thresholds moved, for tests.
      *
      * <p>Package-private, and it exists because mutation coverage said the

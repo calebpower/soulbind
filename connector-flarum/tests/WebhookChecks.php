@@ -63,6 +63,152 @@ final class WebhookChecks
         ];
     }
 
+    /**
+     * @return list<string>
+     *
+     * The window's edge, on the accepting side. Nothing asserted it, so moving
+     * the comparison from `>` to `>=` -- which refuses a delivery that is
+     * exactly as old as the window permits -- passed every check here.
+     */
+    public static function aTimestampAtTheWindowEdgeIsAccepted(): array
+    {
+        $problems = [];
+        $window = 60;
+        foreach ([-$window, $window] as $offset) {
+            $stamp = self::NOW + $offset;
+            $verifier = new WebhookVerifier(self::SECRET, new InMemoryNonceStore(), $window);
+            $verdict = $verifier->verify(
+                self::signedHeaders('edge-' . $offset, $stamp),
+                self::BODY,
+                self::NOW
+            );
+            if ($verdict !== Verdict::ACCEPTED) {
+                $problems[] = 'a delivery exactly ' . abs($offset) . 's from now, with a '
+                    . $window . 's window, was refused as ' . $verdict->value
+                    . '. The window is inclusive at both ends; a delivery at the edge is '
+                    . 'inside it.';
+            }
+        }
+        return $problems;
+    }
+
+    /**
+     * @return list<string>
+     *
+     * Whitespace around a header value is ordinary -- proxies and hand-written
+     * clients add it. The trim was removable with nothing failing.
+     */
+    public static function aPaddedTimestampHeaderIsAccepted(): array
+    {
+        $headers = self::signedHeaders('padded-1');
+        $headers['X-Soulbind-Timestamp'] = "  " . $headers['X-Soulbind-Timestamp'] . " \n";
+
+        $verdict = self::verifier()->verify($headers, self::BODY, self::NOW);
+        if ($verdict !== Verdict::ACCEPTED) {
+            return [
+                'a timestamp header padded with whitespace was refused as ' . $verdict->value
+                . '. The value is correct; only its surroundings are not.',
+            ];
+        }
+        return [];
+    }
+
+    /**
+     * @return list<string>
+     *
+     * The retention property, and the one that found a real defect rather than
+     * a missing test.
+     *
+     * A delivery stamped t is acceptable for now in [t-W, t+W]. Seen at the
+     * earliest of those it must still be refused at the latest. With retention
+     * of exactly 2W the nonce expired at precisely t+W and the store sweeps at
+     * `<= $now`, so the replay went through at the final instant of its own
+     * window.
+     */
+    public static function aNonceOutlastsItsWholeWindow(): array
+    {
+        $window = 60;
+        $store = new InMemoryNonceStore();
+        $verifier = new WebhookVerifier(self::SECRET, $store, $window);
+
+        // Stamped NOW, delivered at the earliest instant that stamp is valid.
+        $headers = self::signedHeaders('long-lived', self::NOW);
+        $first = $verifier->verify($headers, self::BODY, self::NOW - $window);
+        if ($first !== Verdict::ACCEPTED) {
+            return [
+                'a delivery at the earliest acceptable instant was refused as '
+                . $first->value . ', so the replay below would prove nothing.',
+            ];
+        }
+
+        // The same delivery, replayed at the LAST instant it is still valid.
+        $replay = $verifier->verify($headers, self::BODY, self::NOW + $window);
+        if ($replay !== Verdict::REPLAYED_NONCE) {
+            return [
+                'a captured delivery was replayed at the last instant of its own window '
+                . 'and came back ' . $replay->value . ' rather than replayed-nonce. The '
+                . 'nonce is forgotten while the timestamp is still accepted, which is a '
+                . 'replay window with no lid on it.',
+            ];
+        }
+        return [];
+    }
+
+    /**
+     * @return list<string>
+     *
+     * An entry whose expiry is exactly now is expired. Nothing asserted it, so
+     * the sweep's comparison could be moved off its boundary freely.
+     */
+    public static function anEntryExpiringExactlyNowIsForgotten(): array
+    {
+        $store = new InMemoryNonceStore();
+        $store->recordIfNew('boundary', self::NOW, 30);
+
+        if ($store->recordIfNew('boundary', self::NOW + 29, 30)) {
+            return ['a nonce was forgotten a second before its ttl elapsed'];
+        }
+        if (!$store->recordIfNew('boundary', self::NOW + 30, 30)) {
+            return [
+                'a nonce whose expiry is exactly now was still remembered. Expiry at now '
+                . 'means expired; keeping it makes the effective ttl one second longer '
+                . 'than every caller computed.',
+            ];
+        }
+        return [];
+    }
+
+    /**
+     * @return list<string>
+     *
+     * Full means refuse, never evict -- evicting the oldest entry is how a
+     * replay gets in. The threshold is 100,000 away in production and nothing
+     * reached it.
+     */
+    public static function aFullStoreRefusesRatherThanEvicting(): array
+    {
+        $store = new InMemoryNonceStore(4);
+        for ($i = 0; $i < 4; $i++) {
+            if (!$store->recordIfNew('n' . $i, self::NOW, 30)) {
+                return ['the store refused a nonce before it was full'];
+            }
+        }
+
+        if ($store->recordIfNew('overflow', self::NOW, 30)) {
+            return [
+                'a full store accepted another nonce instead of failing closed. An '
+                . 'unauthenticated caller fills this store, so unbounded growth is a '
+                . 'memory-exhaustion path they control.',
+            ];
+        }
+
+        // And the refusal is not permanent: once the entries expire it recovers.
+        if (!$store->recordIfNew('after-expiry', self::NOW + 31, 30)) {
+            return ['the store never recovered after its entries expired'];
+        }
+        return [];
+    }
+
     /** @return list<string> */
     public static function aProperlySignedDeliveryIsAccepted(): array
     {
