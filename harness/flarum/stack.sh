@@ -386,8 +386,18 @@ FORUM_CRED=$(core_cli register --name forum --quiet \
     --capabilities code-display,code-entry,enforcement-point,link-state-reader)
 
 # The harness stands in for the game side AND for an operator's tooling.
+# link-state-reader is here for the same reason it is on the forum credential:
+# this script calls identity.describe directly, further down, to read the graph
+# back and confirm the link actually happened. That call used to reach through
+# code-display; when identity.describe moved to the read-only capability this
+# credential was not updated, and the forum tier failed a session run with
+# "missing-capability: link-state-reader".
+#
+# Worth stating because the grant is not obvious from the capability list alone:
+# the harness stands in for an operator's tooling, and reading link state is
+# exactly what such tooling does.
 HARNESS_CRED=$(core_cli register --name harness --quiet \
-    --capabilities code-display,code-entry,config-management,enforcement-point)
+    --capabilities code-display,code-entry,config-management,enforcement-point,link-state-reader)
 
 if [ -z "$FORUM_CRED" ] || [ -z "$HARNESS_CRED" ]; then
     log "a credential did not come back from register; refusing to continue"

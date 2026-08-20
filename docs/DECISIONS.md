@@ -4586,3 +4586,74 @@ that **nothing ever hunts**: the runner executes the committed set and no other,
 so the promotion rule — any seed that finds a defect is kept forever — can never
 fire, and the set can never grow. A regression set with no exploration behind it
 stays exactly as good as the day it was written.
+
+### 9.7 — Hunting, and the sentence it must not be allowed to become
+
+9.6 ended by naming the real gap: nothing ever explores, so the promotion rule
+can never fire and the committed set can never grow. This closes it.
+
+`SOULBIND_SIM_HUNT=<n>` runs fresh seeds from `SecureRandom` — outside every
+seeded stream by construction — and stops at the first finding.
+
+**Opt-in, and a test asserts the battery never enables it.** A hunt is
+nondeterministic in runtime *and* outcome. Wired into `reaper test` it would
+make the battery's green depend on a dice roll, and the failure would present as
+flakiness rather than as a finding — which is how a real defect gets re-run
+until it goes away.
+
+**Seeds are printed before the run, not after.** If the JVM dies mid-seed, the
+seed that did it is the most valuable thing in the output, and printing it
+afterwards means not printing it at all.
+
+**It stops at the first finding.** The budget is a bound, not a target: once
+there is something to fix, spending the remaining budget looking for a second
+thing delays the first.
+
+#### The wording is load-bearing
+
+A hunt that finds nothing has established that **these particular N seeds found
+nothing**. That is the budget running out. It is not evidence of correctness, and
+it is the single most quotable sentence this tier produces — "we hunted fifty
+seeds and it was clean" is exactly the claim somebody will carry into a release
+discussion.
+
+So the report says *"found nothing. That is not a clean bill of health — it is
+the budget running out"*, and there is a test asserting those words survive. A
+comment explaining the distinction would not have, because the person quoting
+the number is not reading the source.
+
+### 9.8 — A capability change broke a credential nobody thought about
+
+The session run following the `link-state-reader` change failed in the forum
+tier:
+
+```
+identity.describe was refused: {"code": "missing-capability",
+  "capability": "link-state-reader"}
+```
+
+`harness/flarum/stack.sh` calls `identity.describe` directly, far below the
+registration block, to read the graph back and confirm a link actually happened.
+It used `HARNESS_CRED`, which reached the operation through `code-display` —
+and when the operation moved to the read-only capability, that credential was
+not updated.
+
+Both connectors *were* updated: 8.27 traced `identity.describe` to
+`connector-plan` and to `connector-flarum`'s `LinkService.php`, and granted both.
+What it did not trace was the **harness itself** calling the operation, a
+thousand lines away from where its credential is declared and in a different
+language from the connectors that were checked.
+
+The lesson is narrow and worth having: **changing an operation's capability
+means finding every caller, and the callers are not only the connectors.** The
+harness is a client too. A grep for the operation name across the whole
+repository would have found it; a review of the connector modules never could.
+
+Fixed by granting it, with a note at the registration saying why — the grant is
+not obvious from the capability list alone, since the harness stands in for an
+operator's tooling and reading link state is exactly what such tooling does.
+
+No guard added. One that parsed shell to match credential variables against the
+operations they invoke would be brittle enough to cost more than it caught, and
+the failure it would prevent is loud, immediate and correctly attributed by the
+error message. The session found it in the first tier that ran.

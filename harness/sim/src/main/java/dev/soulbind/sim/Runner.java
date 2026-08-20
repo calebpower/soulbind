@@ -81,6 +81,71 @@ public final class Runner {
         return out.toString();
     }
 
+    /** What a hunt did. */
+    public record Hunt(List<Long> seedsTried, java.util.Optional<Simulation.Outcome> found) {
+
+        public String summary() {
+            StringBuilder out = new StringBuilder();
+            if (found.isEmpty()) {
+                return "[sim] hunted " + seedsTried.size()
+                        + " fresh seed(s), found nothing. That is not a clean bill of health"
+                        + " -- it is the budget running out.";
+            }
+            Simulation.Outcome outcome = found.get();
+            out.append("[sim] HUNT FOUND SOMETHING on seed ").append(outcome.seed())
+                    .append(" after ").append(seedsTried.size()).append(" seed(s)\n");
+            out.append("[sim] ").append(outcome.summary().replace("\n", "\n[sim] ")).append('\n');
+            out.append("[sim] promote it -- add to harness/sim/src/main/resources/seeds.txt:\n")
+                    .append("[sim]   ").append(outcome.seed()).append("  found ")
+                    .append(outcome.violations().get(0).invariant()).append(" on <date>");
+            return out.toString();
+        }
+    }
+
+    /**
+     * Runs fresh seeds until one finds something, or the budget runs out.
+     *
+     * <p><b>Opt-in, and never part of the battery.</b> A hunt is
+     * nondeterministic in both runtime and outcome, and a battery whose green
+     * depends on a dice roll is a battery people stop believing. The committed
+     * set is what runs on every session; this is what grows it.
+     *
+     * <p><b>Every seed is printed before it runs</b>, not after. If the JVM dies
+     * mid-seed — an out-of-memory, a hang somebody kills — the seed that did it
+     * is the single most valuable thing in the output, and printing it
+     * afterwards means not printing it at all.
+     *
+     * <p>Stops at the first finding. The budget is a bound, not a target: once
+     * there is something to fix, spending another hour looking for a second
+     * thing delays the first.
+     *
+     * @param source fresh seeds, from OUTSIDE any seeded stream
+     * @param budget how many to try at most
+     * @param run runs one seed
+     */
+    public static Hunt hunt(
+            java.util.function.LongSupplier source,
+            int budget,
+            java.util.function.LongFunction<Simulation.Outcome> run) {
+
+        if (budget < 1) {
+            throw new IllegalArgumentException(
+                    "a hunt budget below 1 tries nothing and reports having found nothing,"
+                            + " which reads exactly like a clean hunt; got " + budget);
+        }
+        List<Long> tried = new ArrayList<>();
+        for (int i = 0; i < budget; i++) {
+            long seed = source.getAsLong();
+            tried.add(seed);
+            System.out.println("[sim] hunting seed " + seed);
+            Simulation.Outcome outcome = run.apply(seed);
+            if (!outcome.clean()) {
+                return new Hunt(List.copyOf(tried), java.util.Optional.of(outcome));
+            }
+        }
+        return new Hunt(List.copyOf(tried), java.util.Optional.empty());
+    }
+
     /** Reads {@code name=credential} lines; {@code admin} and {@code retired} are reserved. */
     static Map<String, String> readCredentials(Path file) throws IOException {
         Map<String, String> credentials = new LinkedHashMap<>();
@@ -154,6 +219,24 @@ public final class Runner {
                 stripReserved(credentials),
                 credentials.get("admin"),
                 credentials.get("retired"));
+
+        int huntBudget = Integer.parseInt(
+                System.getenv().getOrDefault("SOULBIND_SIM_HUNT", "0"));
+        if (huntBudget > 0) {
+            // Fresh seeds, from SecureRandom -- outside every seeded stream by
+            // construction, which is the whole point of a hunt.
+            java.security.SecureRandom entropy = new java.security.SecureRandom();
+            Hunt hunt = hunt(entropy::nextLong, huntBudget, seed -> Simulation.run(
+                    seed, worldFor(credentials, runTag), core, core,
+                    actions, DEFAULT_CHECK_PERIOD));
+            System.out.println(hunt.summary());
+            if (hunt.found().isPresent()) {
+                System.out.println("[sim] trace:");
+                hunt.found().get().trace()
+                        .forEach(line -> System.out.println("[sim]   " + line));
+            }
+            System.exit(hunt.found().isPresent() ? 1 : 0);
+        }
 
         List<Simulation.Outcome> outcomes = new ArrayList<>();
         for (Seeds.Seed seed : Seeds.fixed()) {

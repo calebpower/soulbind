@@ -52,6 +52,34 @@ chosen ways, and the whole file runs in milliseconds without a server.
 An invariant that cannot be made to complain against a liar would not have
 complained about the real thing either.
 
+## Hunting
+
+```sh
+SOULBIND_SIM_HUNT=50 ... soulbind-sim     # 50 fresh seeds, stop at the first finding
+```
+
+**Opt-in, and never part of the battery.** A hunt is nondeterministic in runtime
+and outcome; a battery whose green depends on a dice roll is one people stop
+believing, and the failure would present as flakiness rather than as a finding.
+A test asserts `.reaper.toml` never sets it.
+
+Seeds come from `SecureRandom` — outside every seeded stream by construction —
+and **each is printed before it runs**, not after. If the JVM dies mid-seed, the
+seed that did it is the most valuable thing in the output, and printing it
+afterwards means not printing it at all.
+
+It stops at the first finding: the budget is a bound, not a target, and once
+there is something to fix, looking for a second thing delays the first.
+
+**A hunt that finds nothing is the budget running out, not a clean bill of
+health**, and the report says so in those words — there is a test on the
+wording, because this is the one result in the tier most likely to be quoted as
+something it is not.
+
+Anything found prints the line to add to `seeds.txt`. Promotion is permanent and
+is a human's job: a harness that could edit its own seed file would eventually
+curate it, and the seeds it dropped would be the inconvenient ones.
+
 ## Two seeded-generator properties worth knowing about
 
 **The per-run tag is drawn outside the seeded stream.** Anything that must vary
