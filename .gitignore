@@ -52,3 +52,8 @@
 !harness/*/pins.env
 
 /secrets/
+
+# The PHP mutation tier's build context: a fetched PHAR, verified against
+# harness/php/pins.env on every run. Reproducible by checksum, like the
+# full-stack tier's .cache/, so it is not tracked.
+/harness/php/.build/

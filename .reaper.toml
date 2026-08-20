@@ -181,6 +181,50 @@ podman run --rm -v "$PWD":/work -w /work/connector-flarum "$PHP" sh -c '
 '
 
 # ---------------------------------------------------------------------------
+# PHP mutation coverage (Infection).
+#
+# The same question the Java modules' `mutationTest` task asks: does a test FAIL
+# when the thing it covers is broken? Sixty-one PHPUnit tests pass today, and
+# nothing has ever established that any of them would notice if src/ were wrong.
+#
+# Runs from a pinned PHAR in an image built from the pinned PHP base with a
+# coverage driver added, because Infection cannot resolve into this package's
+# dependency tree -- Flarum 1.8 locks psr/log to 1.x, Infection needs ^2 || ^3.
+# harness/php/pins.env carries the reasoning and the checksum.
+#
+# NOT gated on a minimum MSI. A threshold is a decision about what stops being
+# noticed, and it goes in when there is a number worth defending. Today the
+# report is read by a person.
+# ---------------------------------------------------------------------------
+echo "run: PHP mutation coverage"
+sh harness/php/fetch.sh harness/php/.build
+. ./harness/php/pins.env
+podman build --quiet \
+  --build-arg "BASE=$PHP" \
+  --build-arg "PCOV_VERSION=$PCOV_VERSION" \
+  --build-arg "INFECTION_SHA256=$INFECTION_SHA256" \
+  -f harness/php/Containerfile -t soulbind-php-mutation harness/php/.build >/dev/null
+
+podman run --rm -v "$PWD":/work -w /work/connector-flarum soulbind-php-mutation sh -c '
+  set -e
+  php -m | grep -qix pcov || {
+    echo "no coverage driver; Infection cannot determine which tests cover a line" >&2
+    exit 1
+  }
+  php /opt/infection.phar \
+    --configuration=infection.json5 \
+    --threads=max \
+    --no-progress \
+    --no-interaction \
+    --show-mutations
+'
+# Into out/, which is what reaper copies back. Without this the report exists
+# only inside the guest and dies with it -- and a mutation report nobody can
+# read after the session is a mutation report that was not produced.
+mkdir -p out/infection
+cp -r connector-flarum/build/infection/. out/infection/
+
+# ---------------------------------------------------------------------------
 # The forum tier.
 #
 # EARLIER than the plan schedules it: §14 puts the forum image in Phase 8 with

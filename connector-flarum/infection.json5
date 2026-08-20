@@ -1,0 +1,44 @@
+{
+    // Mutation coverage for the PHP side. The Java side's equivalent is
+    // `./gradlew :<module>:mutationTest`; this is the same question asked of
+    // the extension: does a test FAIL when the thing it covers is broken?
+    //
+    // Run from the PHAR, not from vendor/. Flarum 1.8 locks psr/log to 1.x and
+    // Infection 0.35 requires ^2 || ^3, so the tool cannot live in this
+    // package's dependency tree at all. harness/php/pins.env has the detail.
+    source: {
+        directories: ["src"],
+        // tests/ is excluded because mutating a test asks whether the OTHER
+        // tests cover it, which is not a question anybody has. src/ is the
+        // subject.
+        excludes: [],
+    },
+
+    mutators: {
+        "@default": true,
+    },
+
+    testFramework: "phpunit",
+    // The ordinary entry point. phpunit-hostile.xml re-runs the same tests
+    // under a non-UTF-8 locale and would double the runtime to re-answer a
+    // question this tier does not ask -- mutation coverage is about whether
+    // assertions bite, and the hostile run is about whether encodings are
+    // explicit. Deliberate, and it does not excuse a surviving mutant.
+    testFrameworkOptions: "--configuration=phpunit.xml",
+
+    logs: {
+        text: "build/infection/infection.log",
+        summary: "build/infection/summary.log",
+        json: "build/infection/infection.json",
+        // Every escaped mutant, so the report can be read without re-running.
+        // A summary alone says how many survived and never which.
+        stryker: {},
+    },
+
+    tmpDir: "build/infection/tmp",
+
+    // No minMsi / minCoveredMsi yet, on purpose. A threshold gets lowered the
+    // first time it is inconvenient, and a lowered threshold is a decision
+    // about what this project permanently stops noticing. The number goes in
+    // when there is one worth defending.
+}

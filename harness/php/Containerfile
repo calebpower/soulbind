@@ -1,0 +1,38 @@
+# The pinned PHP image, plus a coverage driver and the Infection PHAR.
+#
+# Built once per session from a digest-pinned base, matching harness/flarum's
+# Containerfile and for the same reason: an inline `pecl install` on every
+# container start is a network dependency in the middle of a test run, and one
+# that changes what it installs depending on the day.
+ARG BASE
+FROM ${BASE}
+
+ARG PCOV_VERSION
+ARG INFECTION_SHA256
+
+# pcov, because Infection cannot start without line coverage. `docker-php-ext-
+# enable` succeeding is not the same claim as the extension being loadable, so
+# the assertion below is separate -- the same distinction harness/flarum's
+# Containerfile records after an install that exited 0 and left nothing behind.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends $PHPIZE_DEPS; \
+    pecl install "pcov-${PCOV_VERSION}"; \
+    docker-php-ext-enable pcov; \
+    apt-get purge -y --auto-remove $PHPIZE_DEPS; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    php -m | grep -qix pcov || { echo "pcov is not loaded" >&2; exit 1; }; \
+    php -r 'exit(extension_loaded("pcov") ? 0 : 1);' \
+        || { echo "pcov is listed but not loadable" >&2; exit 1; }
+
+# The PHAR arrives already fetched and is verified again HERE, against the pin,
+# because a file that was correct when it was downloaded is not necessarily the
+# file that reached this layer.
+COPY infection.phar /opt/infection.phar
+RUN set -eux; \
+    echo "${INFECTION_SHA256}  /opt/infection.phar" | sha256sum -c -; \
+    php /opt/infection.phar --version
+
+WORKDIR /work
