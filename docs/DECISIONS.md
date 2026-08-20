@@ -4269,3 +4269,74 @@ capability — so adding one capability added 24 cases without anybody writing
 them. Mutation-checked by pointing `IDENTITY_DESCRIBE` back at `CODE_DISPLAY`:
 **10 of 264 cases fail**, and they are the right ten. `ProtocolDocSyncGuardTest`
 caught `protocol.md` before the build did, which is what it is for.
+
+### 9.2 — The self-test comes first, and what that ordering is protecting against
+
+§14 puts the oracle self-test ahead of the harness it grades. That ordering is
+the most valuable instruction in Phase 9 and it is worth writing down why.
+
+**A simulated-user run that finds nothing looks exactly like a set of invariants
+that cannot find anything.** Both print the same thing: hundreds of actions, no
+violations. And the second is the more likely of the two — it is this
+repository's most-repeated defect, arriving here in the tier where it would be
+hardest to notice, because a quiet run in a fuzzing tier reads as success rather
+than as silence.
+
+So every invariant is fed the response a broken core would send and must
+complain. And — the half that is easy to skip — every invariant is fed a
+**healthy** core and must stay silent. Without that control, an invariant that
+complains about everything scores identically to a good one, catches every fault
+and is worth nothing. The shell mutation battery learned the same lesson two
+weeks earlier and for the same reason.
+
+#### `CoreView` is the design decision
+
+The self-test is only possible if "what core said" is a **value a test can
+fabricate**. So the invariants never touch a socket: they read a narrow
+interface, one implementation of which will talk to a real core through
+`connector-sdk`, and another of which lies in whatever way the case requires.
+
+The whole self-test then runs in milliseconds with no server, which is what
+makes it something to run constantly rather than something to run in a session.
+
+The interface is deliberately narrow — every method is a question some invariant
+actually asks. A wide seam is a seam the self-test cannot cover, and an
+unfabricatable answer is an invariant that can only be tested against the real
+thing, which is where this started.
+
+#### The model is partial on purpose
+
+A shadow model that reimplemented core would be a second implementation with its
+own defects, and the two agreeing would prove they shared a misunderstanding.
+
+`ShadowModel` records what the actors *did* and what must follow from it: these
+two accounts are now on one subject, this code is spent, this many mutations
+happened. It never records how core arrived at anything. So it can assert that
+two accounts share a subject and cannot assert which subject id that is — which
+is correct, because the id is core's to choose and an invariant pinning it would
+be asserting an implementation detail rather than a property.
+
+#### The six, and why the cheap one is separate
+
+`linkage-mirrors-model` and `core-invents-no-links` are deliberately two
+invariants rather than one. The first catches a link that vanished; the second
+catches an identity attached to a subject nobody linked it to. **The first alone
+passes a core that also attaches strangers**, because the accounts the model
+linked are all present — and a link nobody asked for is the more alarming
+failure and the easier one to leave uncovered.
+
+`every-response-was-an-envelope` is independent of all the others, per §11. A
+run whose model and server agree perfectly, having exchanged a 500 on the way,
+has still found something — and none of the other five would mention it. The
+self-test asserts exactly that shape: a case where the cheap oracle complains
+and every other invariant correctly does not.
+
+#### Verified by neutering one
+
+The self-test was checked the only way it can be: an invariant was made unable
+to complain — one conditional forced false — and the suite went red on the case
+that grades it, naming it. Restored, green.
+
+That is the same operation PIT performs on the Java suite, applied by hand to
+the thing PIT cannot reach, because the defect being guarded against is not a
+wrong answer but an absent one.

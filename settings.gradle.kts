@@ -62,4 +62,11 @@ include(
     "connector-velocity",
     "connector-plan",
     "guards",
+    // The simulated-user tier. Named `sim` rather than `harness:sim` so the
+    // Gradle path stays flat and the guards that enumerate modules do not have
+    // to learn about nested projects; the DIRECTORY is harness/sim, where §4
+    // puts it.
+    "sim",
 )
+
+project(":sim").projectDir = file("harness/sim")

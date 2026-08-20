@@ -70,7 +70,16 @@ class ReleaseLevelGuardTest {
      * <p>{@code guards} produces no production bytecode and ships nowhere. The
      * exclusion covers exactly that module.
      */
-    private static final java.util.Set<String> NOT_RELEASE_GOVERNED = java.util.Set.of("guards");
+    /**
+     * Modules no release level governs, because nothing distributes them.
+     *
+     * <p>`guards` reads the repository as data and `sim` drives it as a client;
+     * neither is packaged, published or loaded into anybody's JVM, so there is
+     * no runtime whose floor could be violated. The exemption covers exactly
+     * that — it is not a licence to omit a module that DOES ship.
+     */
+    private static final java.util.Set<String> NOT_RELEASE_GOVERNED =
+            java.util.Set.of("guards", "sim");
 
     @Test
     @DisplayName("every module in the build appears in the release table")
