@@ -19,6 +19,7 @@ package dev.soulbind.sim;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -62,7 +63,7 @@ class GeneratorTest {
         switch (action.kind()) {
             case ISSUE_CODE, ABANDON_CODE ->
                     world.codeIssued("CODE" + step, action.subject());
-            case REDEEM_CODE -> {
+            case REDEEM_CODE, REDEEM_FOREIGN -> {
                 String issuedFor = world.outstandingCodes().get(action.subject());
                 world.codeSpent(action.subject());
                 if (issuedFor != null && action.detail() != null) {
@@ -153,6 +154,62 @@ class GeneratorTest {
             }
             apply(world, action, i);
         }
+    }
+
+    @Test
+    @DisplayName("an ordinary redeem links one person's own accounts")
+    void redeemsAreSamePerson() {
+        // The tier's whole subject is a cross-platform identity GRAPH, and an
+        // earlier generator let any actor redeem any actor's code. Every redeem
+        // then merged two arbitrary components, the graph closed transitively,
+        // and every simulated person became the same person -- measured at seven
+        // of nine identities on one subject by action 50, and thirty-two of
+        // thirty-six with twelve actors.
+        //
+        // A collapsed graph is not a smaller test, it is a different one: there
+        // are no distinct subjects left, so nothing can exercise two people
+        // colliding over one account, and every defect becomes reachable on the
+        // first link.
+        //
+        // Linking your own accounts is also simply what linking IS. Somebody
+        // else redeeming your code is REDEEM_FOREIGN, weighted low, and it is a
+        // conflict rather than a link.
+        World world = worldTagged("-shape");
+        Generator generator = new Generator(20260820L);
+        int checked = 0;
+
+        for (int i = 0; i < 400; i++) {
+            var next = generator.next(world);
+            if (next.isEmpty()) {
+                break;
+            }
+            Action action = next.get();
+            if (action.kind() == ActionKind.REDEEM_CODE) {
+                String issuedFor = world.outstandingCodes().get(action.subject());
+                assertNotNull(issuedFor, "a redeem was proposed for a code nobody issued");
+                Actor owner = null;
+                for (Actor candidate : world.actors()) {
+                    if (candidate.identities().contains(issuedFor)) {
+                        owner = candidate;
+                    }
+                }
+                assertNotNull(owner, "nobody owns " + issuedFor);
+                final Actor finalOwner = owner;
+                assertTrue(finalOwner.identities().contains(action.detail()),
+                        () -> "a plain redeem links " + issuedFor + " to " + action.detail()
+                                + ", which belongs to somebody else. That merges two people"
+                                + " into one subject; the graph closes transitively and there"
+                                + " is nothing left to explore. Somebody else's redeem is"
+                                + " REDEEM_FOREIGN.");
+                checked++;
+            }
+            apply(world, action, i);
+        }
+
+        final int redeemsChecked = checked;
+        assertTrue(redeemsChecked > 5,
+                () -> "only " + redeemsChecked + " ordinary redeems occurred, so this"
+                        + " asserted almost nothing");
     }
 
     @Test

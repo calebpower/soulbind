@@ -41,6 +41,17 @@ public enum ActionKind {
     /** Redeem an outstanding code from another platform's account. */
     REDEEM_CODE(10, false),
 
+    /**
+     * Redeem somebody else's code onto an account they do not own.
+     *
+     * <p>Two people claiming one link. Weighted low because it is not what
+     * normally happens, and kept because the refusal path -- core must decline
+     * once both sides already belong to different subjects -- is exactly the
+     * case a graph with several distinct subjects can reach and a collapsed one
+     * cannot.
+     */
+    REDEEM_FOREIGN(2, false),
+
     /** Ask what an identity is linked to. */
     DESCRIBE(6, false),
 

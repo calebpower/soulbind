@@ -4506,3 +4506,83 @@ core — clean. Reverted: rediscovered at **action 50**, naming
 should share a subject, core reports a smaller set. Source restored and rebuilt
 on the way out, so a failed run never leaves a reverted fix compiled into
 anybody's install directory.
+
+### 9.6 — Every simulated person was the same person
+
+The question was "are three seeds enough?". Measuring it found something better
+than an answer.
+
+Each injectable defect was run against the three committed seeds and against two
+hundred arbitrary ones. Every defect, every seed, caught at the **first
+checkpoint**:
+
+```
+REDEEM_DOES_NOT_LINK      3/3   200/200   median first action 50
+CODE_STAYS_REDEEMABLE     3/3   200/200   median first action 50
+AUDIT_DROPS_ROWS          3/3   200/200   median first action 50
+AUDIT_SEQUENCE_REPEATS    3/3   200/200   median first action 50
+LINKS_A_STRANGER          3/3   200/200   median first action 50
+SERVES_A_5XX              3/3   200/200   median first action 50
+```
+
+A uniform result across six unrelated defects is not a finding about the
+defects. It is a finding about the world they were injected into.
+
+#### The generator was collapsing the graph
+
+`REDEEM_CODE` allowed **any** actor to redeem **any** actor's code. Every redeem
+therefore merged two arbitrary components, the graph closed transitively, and
+every simulated person became one person. Measured directly:
+
+```
+actors=3   identities=9    action=50    biggest subject=7
+actors=3   identities=9    action=400   biggest subject=9
+actors=12  identities=36   action=400   biggest subject=32
+```
+
+Thirty-two of thirty-six identities on a single subject. A tier whose entire
+subject is a **cross-platform identity graph** had reduced it to one node.
+
+That is not a smaller test, it is a different one. With no distinct subjects
+there is nothing to exercise two people colliding over one account, no
+`ALREADY_LINKED` "different people" path, no merge between two established
+subjects — and every defect becomes reachable on the first link, which is
+exactly why the detection rates were uniform and useless.
+
+It was also simply wrong about the domain. Linking is a person joining **their
+own** accounts: a code minted on a game account and typed into a chat account by
+the same person. Somebody else redeeming your code is a conflict, not a link.
+
+#### After the fix
+
+`REDEEM_CODE` links one person's own accounts, and `REDEEM_FOREIGN` — weighted
+low — is somebody else attempting it, which is the refusal path worth having.
+
+```
+actors=3   identities=9    action=400   biggest subject=3   linked=9
+actors=12  identities=36   action=400   biggest subject=3   linked=36
+```
+
+One subject per person holding their three platforms, filling in gradually. The
+shape the tier is supposed to be exploring.
+
+`GeneratorTest` now asserts it and was mutation-checked by reintroducing the
+collapse: red, then green on restore.
+
+#### And the honest answer to the original question
+
+Still 200/200 at the first checkpoint, even on the corrected graph, including a
+defect written specifically to require accumulated depth.
+
+**So: for every defect I can construct, three seeds is ample and one would do.
+That is a statement about my defect catalogue, not about the tier.** I tried
+three times to build a defect that some seeds miss and failed each time —
+which means I have **no measurement at all** of the tier's power against the
+rare, interleaving-dependent defects that are the entire justification for a
+simulated-user tier over a unit test.
+
+The seed count is therefore the wrong knob to worry about. What is missing is
+that **nothing ever hunts**: the runner executes the committed set and no other,
+so the promotion rule — any seed that finds a defect is kept forever — can never
+fire, and the set can never grow. A regression set with no exploration behind it
+stays exactly as good as the day it was written.

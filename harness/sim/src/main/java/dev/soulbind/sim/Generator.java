@@ -81,6 +81,19 @@ public final class Generator {
                 "weighted choice fell through with " + candidates.size() + " candidates");
     }
 
+    /** Which actor owns an identity ref, or null when nobody does. */
+    private static Actor ownerOf(List<Actor> actors, String ref) {
+        if (ref == null) {
+            return null;
+        }
+        for (Actor actor : actors) {
+            if (actor.identities().contains(ref)) {
+                return actor;
+            }
+        }
+        return null;
+    }
+
     /**
      * Every action that could be taken right now, one per (kind, chosen target).
      *
@@ -111,19 +124,52 @@ public final class Generator {
             List<String> codes = new ArrayList<>(outstanding.keySet());
             String code = codes.get(random.nextInt(codes.size()));
             String issuedFor = outstanding.get(code);
-            // Redeemed by an identity that is NOT the one it was issued for --
-            // redeeming your own code links an account to itself, which core
-            // refuses and which would waste the draw.
+
+            // Redeemed by the SAME PERSON, on a different platform.
+            //
+            // That is what linking is: Alex issues a code on their game account
+            // and types it into their chat account. An earlier version let any
+            // actor redeem any actor's code, which sounds like broader coverage
+            // and is the opposite -- every redeem merged two arbitrary
+            // components, so the graph closed transitively and **every
+            // simulated person became the same person**. Measured: seven of
+            // nine identities on one subject by action 50, and with twelve
+            // actors, thirty-two of thirty-six on one subject by action 400.
+            //
+            // A tier whose whole subject is a cross-platform identity GRAPH had
+            // collapsed it to a single node, and every defect was therefore
+            // caught instantly by every seed -- which is what made the detection
+            // measurements meaningless.
+            Actor owner = ownerOf(actors, issuedFor);
+            if (owner != null) {
+                List<String> theirOthers = new ArrayList<>();
+                for (String ref : owner.identities()) {
+                    if (!ref.equals(issuedFor)) {
+                        theirOthers.add(ref);
+                    }
+                }
+                if (!theirOthers.isEmpty()) {
+                    String ref = theirOthers.get(random.nextInt(theirOthers.size()));
+                    candidates.add(new Action(ActionKind.REDEEM_CODE, owner, code, ref));
+                }
+            }
+
+            // Somebody ELSE redeeming it: rarer, and a different situation
+            // entirely -- two people claiming one account, which core must
+            // refuse once both sides are linked. Kept because the refusal path
+            // is worth exercising, weighted low because it is not what normally
+            // happens.
             for (Actor other : actors) {
+                if (other == owner) {
+                    continue;
+                }
                 for (String ref : other.identities()) {
                     if (!ref.equals(issuedFor)) {
-                        candidates.add(new Action(ActionKind.REDEEM_CODE, other, code, ref));
+                        candidates.add(new Action(ActionKind.REDEEM_FOREIGN, other, code, ref));
                         break;
                     }
                 }
-                if (candidates.stream().anyMatch(c -> c.kind() == ActionKind.REDEEM_CODE)) {
-                    break;
-                }
+                break;
             }
         }
 

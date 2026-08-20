@@ -130,7 +130,7 @@ public final class Simulation {
                 }
                 return result;
             }
-            case REDEEM_CODE -> {
+            case REDEEM_CODE, REDEEM_FOREIGN -> {
                 String[] target = split(action.detail());
                 String issuedFor = world.outstandingCodes().get(action.subject());
                 CoreDriver.Result result = driver.redeemCode(

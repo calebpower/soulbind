@@ -59,6 +59,26 @@ final class InMemoryCore implements CoreDriver, CoreView {
         LINKS_A_STRANGER,
         /** The transport sees a 5xx. */
         SERVES_A_5XX,
+
+        /**
+         * A merge silently drops a member, but only once the subject is large.
+         *
+         * <p><b>The rare one, and the reason it exists.</b> Every other defect
+         * here fires on the first redeem: measured across two hundred seeds,
+         * each was caught 200/200 times, always at the first checkpoint. That
+         * makes them a fine test of whether the invariants work and no test at
+         * all of whether the tier can find something that needs looking for —
+         * which is the entire justification for a simulated-user tier over a
+         * unit test.
+         *
+         * <p>This one cannot fire until a subject has accumulated five
+         * identities, which takes several successful links between distinct
+         * actors. A seed that never builds a group that big will never see it,
+         * and that is the point: it produces a detection RATE rather than a
+         * yes, and a rate is the only thing that can say whether more seeds or
+         * longer runs buy anything.
+         */
+        MERGE_LOSES_A_MEMBER_AT_DEPTH,
     }
 
     private final Set<Defect> defects = EnumSet.noneOf(Defect.class);
@@ -202,6 +222,27 @@ final class InMemoryCore implements CoreDriver, CoreView {
         Set<String> merged = new LinkedHashSet<>();
         merged.addAll(groups.getOrDefault(left, Set.of(left)));
         merged.addAll(groups.getOrDefault(right, Set.of(right)));
+
+        // >= 3, which is a person's THIRD platform. Calibrated against the
+        // graph's real shape rather than a guess: a healthy run gives each
+        // person one subject holding their three identities, so a subject never
+        // exceeds three and a threshold of five could never fire. The first
+        // version used five, chosen while the generator was still collapsing
+        // every actor into one giant subject where five was easy to reach.
+        if (defects.contains(Defect.MERGE_LOSES_A_MEMBER_AT_DEPTH) && merged.size() >= 3) {
+            // Drops a member that is neither side of THIS link, so the redeem
+            // that triggered it still looks correct to anyone checking only the
+            // two accounts just joined. It is an older identity that quietly
+            // stops belonging.
+            for (String member : merged) {
+                if (!member.equals(left) && !member.equals(right)) {
+                    merged.remove(member);
+                    groups.remove(member);
+                    subjectIds.remove(member);
+                    break;
+                }
+            }
+        }
 
         String id = subjectIds.get(left);
         if (id == null) {
