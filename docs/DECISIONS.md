@@ -4699,3 +4699,42 @@ design question rather than an afternoon.
 
 Recorded as the thing to build, with the reason the cheaper-looking option is a
 trap.
+
+### 9.9 — Two action classes with no oracle, and a rule that required nothing
+
+Checking the sim's payloads against core's actual request types, while a session
+run was in flight, found that `rule.set` binds
+`RuleView(gate, requiredKinds, requireLinked, graceSeconds, defaultEffect)` and
+the tier was sending three of the five.
+
+**It did not fail.** `requireLinked` and `graceSeconds` are primitives, so
+Jackson filled them with `false` and `0`, the bind succeeded, and core happily
+stored a rule requiring nothing. The `SET_RULE` class had been performing
+hundreds of operations that could not change any decision.
+
+Fixed by sending all five. But the interesting part is why nothing noticed, and
+that is not the payload.
+
+#### `SET_RULE` and `DECIDE` have no oracle at all
+
+The tier performs both and checks neither. There is no invariant relating a
+decision to the rules that produced it — the shadow model records links, codes
+and audit expectations, and nothing about policy. So a rule that requires
+nothing, a rule that is never applied, and a `decide` that returns the wrong
+effect are all invisible.
+
+Two of nine action classes are therefore doing work no assertion reads. That is
+precisely the shape this tier exists to catch, arrived at inside the tier
+itself, and it is the second time in Phase 9 — 9.6 was the same thing about the
+graph.
+
+The invariant to write is `decisions-follow-the-rules`: when the model has set a
+rule on a gate requiring linkage, a `decide` for an identity the model believes
+unlinked must come back `deny`, and one for a linked identity must not be denied
+for that reason.
+
+**Deliberately not written yet.** A session loop is in progress with the
+instruction to get it green, and adding an assertion mid-loop means the next red
+run cannot be attributed to the previous fix. It goes in once a run is clean —
+recorded here so it is not lost, because "we noticed but were busy" is how a gap
+becomes permanent.

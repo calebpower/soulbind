@@ -146,8 +146,21 @@ public final class SdkCore implements CoreDriver, CoreView {
 
     @Override
     public Result setRule(Actor actor, String gate, boolean requireLinked) {
+        // ALL FIVE fields. rule.set binds RuleView(gate, requiredKinds,
+        // requireLinked, graceSeconds, defaultEffect), and the first version
+        // sent three of them.
+        //
+        // That did not fail. `requireLinked` and `graceSeconds` are primitives,
+        // so Jackson filled them with false and 0, the bind succeeded, and every
+        // rule the tier set was a rule requiring nothing -- an action class
+        // performing hundreds of operations that could not change any decision.
+        // Nothing failed and nothing was tested, which is this repository's
+        // house defect appearing in the tier built to find it.
         return call(admin, "rule.set",
-                Map.of("gate", gate, "requiredKinds", List.of(),
+                Map.of("gate", gate,
+                        "requiredKinds", List.of(),
+                        "requireLinked", requireLinked,
+                        "graceSeconds", 0,
                         "defaultEffect", requireLinked ? "deny" : "allow"),
                 "gate");
     }
