@@ -377,8 +377,13 @@ log "registering the forum connector"
 # would prove the flow works for something holding every capability, which is
 # not what a deployment runs -- and it is how a missing grant stays hidden until
 # somebody else's install.
+# link-state-reader is here because src/Link/LinkService.php calls
+# identity.describe to show a member what they are linked to. It used to reach
+# that through code-display; identity.describe now requires the read-only
+# capability instead, so the grant is stated rather than inherited from the
+# right to mint a code.
 FORUM_CRED=$(core_cli register --name forum --quiet \
-    --capabilities code-display,code-entry,enforcement-point)
+    --capabilities code-display,code-entry,enforcement-point,link-state-reader)
 
 # The harness stands in for the game side AND for an operator's tooling.
 HARNESS_CRED=$(core_cli register --name harness --quiet \

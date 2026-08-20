@@ -4201,3 +4201,71 @@ the reader is not.** In a comment, in a log that is not kept, in an artifact
 from a different run, in the absence of a failure. The tests were fine. What was
 missing was any way for a passing run to distinguish itself from a run that had
 not happened.
+
+### 8.27 — The read-only capability, and what it cost to not have one
+
+8.14 recorded that soulbind had no capability granting reading and only reading,
+and left the decision to the owner. The decision was to add it before v1, and
+this is it.
+
+**`link-state-reader`.** It reaches `identity.describe` and nothing else, and it
+is the only capability in the enum that grants no mutation of any kind. Every
+other one either changes the identity graph, changes policy, or causes a side
+effect somewhere.
+
+#### Why the absence was worse than it looked
+
+A connector that wanted link state had to hold one of two grants, and the module
+README had been carrying the table for two phases:
+
+| Operation | Capability | What else it unlocked |
+|---|---|---|
+| `subject.inspect` | `config-management` | `rule.set`, `override.set`, `config.set`, `audit.query`, `identity.unlink` |
+| `identity.describe` | `code-display` | `code.issue` — minting a link code |
+
+The two **return the same data** — core binds the same request type for both —
+so the choice was never about what came back. It was about who may ask, and both
+answers were wrong for a dashboard: one lets it rewrite every rule and unlink
+anybody, the other lets it mint credentials-in-waiting.
+
+The analytics connector took the second, which was the right call among the
+available wrong ones and was documented as such. It is also the most-installed
+and least-audited surface in the system, which is the worst place to be spending
+a capability one does not need.
+
+#### Two connectors, not one
+
+Worth noting because it changes the shape of the fix: the **forum connector also
+calls `identity.describe`** — `LinkService.php` uses it to show a member what
+they are linked to. It reached that through `code-display`, which it holds
+legitimately for its own code-issuing flow, so the extra reach was invisible.
+
+That is the quieter half of the problem. The dashboard's over-grant was at least
+*visible*, written down in a README with a paragraph explaining it. The forum
+connector's was an accident of overlap: it needed `code-display` anyway, so
+nobody had to notice that reading link state came along with it.
+
+Both now hold `link-state-reader` explicitly. A grant that is stated is a grant
+somebody can review.
+
+#### What it did not become
+
+Not "read-only" as a general permission. It reads **link state**, which is one
+operation's worth of data, and the name says so. A capability called `read-only`
+invites the next read operation to be added under it without anybody deciding
+whether the same holders should have it — which is how `config-management` came
+to mean nine different things.
+
+And reading is not *harmless*: link state says which platforms a person is on
+and when they joined them, which is exactly the correlation a dashboard should
+not publish casually. The analytics connector keeps the subject id off the page
+unless an operator opts in, and that remains necessary.
+
+#### Verification
+
+`AuthorizationMatrixTest` restates the operation-to-capability mapping by hand,
+independently of the production table, and runs every operation against every
+capability — so adding one capability added 24 cases without anybody writing
+them. Mutation-checked by pointing `IDENTITY_DESCRIBE` back at `CODE_DISPLAY`:
+**10 of 264 cases fail**, and they are the right ten. `ProtocolDocSyncGuardTest`
+caught `protocol.md` before the build did, which is what it is for.

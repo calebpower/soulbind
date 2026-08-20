@@ -93,7 +93,8 @@ class LinkDataSourceTest {
 
         assertTrue(
                 request.contains("identity.describe"),
-                () -> "the dashboard must ask identity.describe, which needs only code-display. "
+                () -> "the dashboard must ask identity.describe, which requires only "
+                        + "link-state-reader -- the one capability that grants no mutation. "
                         + "Sent: " + request);
         assertFalse(
                 request.contains("subject.inspect"),

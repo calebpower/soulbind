@@ -39,31 +39,36 @@ credential refuses it at core, not this file. That much is enforced by the
 deployment rather than by this module remembering to be careful, which matters:
 the dashboard is the most-installed, least-audited surface in the system.
 
-But the claim stops there, and the reason is worth stating rather than glossing.
-**soulbind has no read-only capability.** The seven are `identity-provider`,
-`code-display`, `code-entry`, `enforcement-point`, `effector`, `audit-source`
-and `config-management`. A connector that reads link state must hold one of two:
+And the claim no longer stops there. A deployment grants this connector exactly
+one capability — **`link-state-reader`** — and it permits no mutation of any
+kind. There is no second thing it unlocks.
 
-| Operation | Capability | What else it unlocks |
+That capability did not exist for most of this module's life, and the history is
+worth keeping because it is what the capability was added for. Reading link
+state used to mean holding one of two grants, neither defensible for a
+dashboard:
+
+| Operation | Capability | What else it unlocked |
 |---|---|---|
 | `subject.inspect` | `config-management` | `rule.set`, `override.set`, `config.set`, `audit.query`, **`identity.unlink`** |
 | `identity.describe` | `code-display` | `code.issue` — minting a link code |
 
 The two **return exactly the same thing** — core binds the same request type for
-both, and its handler says so outright. They differ only in who may ask.
+both — so the choice was never about the data. It was about who may ask, and
+both answers were wrong: one let a dashboard rewrite every rule, the other let
+it mint credentials-in-waiting.
 
-This connector asks `identity.describe`, so a deployment grants it
-`code-display`. That is dramatically less than admin, and it is not nothing: the
-dashboard could mint a link code, which still requires somebody controlling the
-other account to redeem it. `protocol.md` names the alternative as the trap it
-is — *"granting it `config-management` to do so would let it rewrite every rule
-— the capability model being correct and the deployment being wrong."*
+`identity.describe` now requires `link-state-reader` and nothing else reaches
+it. `LinkDataSourceTest` still pins the operation name, because the two
+responses remain identical and **no other assertion in the module can tell them
+apart**.
 
-`LinkDataSourceTest` pins the operation name, because the two responses are
-identical and **no other assertion in the module can tell them apart**. The real
-fix — a capability that grants reading and only reading — is recorded as
-DECISIONS 8.14 and is a decision for the owner, not one to make late in a
-phase.
+Reading is still not *nothing*, and the module is built accordingly: link state
+says which platforms a person is on and when they joined them, which is exactly
+the correlation a dashboard should not publish casually. That is why the subject
+id stays off the page until an operator opts in.
+
+DECISIONS 8.14 records the decision and 8.27 the change.
 
 ## Unknown is a state, and the whole module is built around it
 

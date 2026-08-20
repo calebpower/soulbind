@@ -405,18 +405,24 @@ CHAT_CRED=$("$CORE_CLI" register --name chat --quiet \
     --capabilities code-display,code-entry \
     --config "$RUN/core/soulbind.toml")
 
-# The dashboard connector, with the LEAST capability that can answer its
-# question -- code-display, which reaches identity.describe.
+# The dashboard connector, holding exactly one capability: link-state-reader.
 #
-# Deliberately not config-management. subject.inspect returns the same data and
-# needs that, which also unlocks rule.set, override.set, config.set,
-# audit.query and identity.unlink: a read-only dashboard would hold a credential
-# that can rewrite every rule and unlink anybody. Granting it here would prove
-# the flow works for something holding admin, which is not what a deployment
-# should run. See DECISIONS 8.14 -- soulbind has no read-only capability, and
-# this is the closest available.
+# ONE, and it grants no mutation of any kind. This is the whole point of the
+# capability added in 8.14: the dashboard can answer "what is this account
+# linked to" and can do nothing else at all.
+#
+# What it used to hold was code-display -- the closest available before the
+# read-only capability existed -- which also permits minting a link code. And
+# the alternative was config-management, which returns the same data through
+# subject.inspect and also unlocks rule.set, override.set, config.set,
+# audit.query and identity.unlink: a dashboard holding a credential that can
+# rewrite every rule and unlink anybody.
+#
+# Granting more here would prove the flow works for something holding more than
+# a deployment should run, which is how a missing grant stays hidden until
+# somebody else's install.
 PLAN_CRED=$("$CORE_CLI" register --name plan --quiet \
-    --capabilities code-display \
+    --capabilities link-state-reader \
     --config "$RUN/core/soulbind.toml")
 
 if [ -z "$PROXY_CRED" ] || [ -z "$HARNESS_CRED" ] || [ -z "$PLAN_CRED" ]; then

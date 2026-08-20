@@ -81,6 +81,7 @@ new integration arrive without a dispatcher change.
 | `enforcement-point` | Ask allow/deny for an (identity, gate) pair |
 | `effector` | Consume events and apply side effects |
 | `audit-source` | Append connector-side events to the audit stream |
+| `link-state-reader` | Read link state for an identity, and nothing else. The only capability that grants no mutation |
 | `config-management` | Read and mutate rules, overrides and runtime config; inspect subjects; unlink |
 
 ## Operations
@@ -97,7 +98,7 @@ copy of the rule.
 | `event.ack` | *(any registered)* |
 | `attest` | `identity-provider` |
 | `code.issue` | `code-display` |
-| `identity.describe` | `code-display` |
+| `identity.describe` | `link-state-reader` |
 | `code.redeem` | `code-entry` |
 | `decide` | `enforcement-point` |
 | `audit.push` | `audit-source` |

@@ -68,7 +68,7 @@ public final class Authorizer {
          * graph the moment a link completes. This grants no reach it did not
          * have; it removes the need to obtain far more.
          */
-        IDENTITY_DESCRIBE(Capability.CODE_DISPLAY),
+        IDENTITY_DESCRIBE(Capability.LINK_STATE_READER),
         CODE_REDEEM(Capability.CODE_ENTRY),
         DECIDE(Capability.ENFORCEMENT_POINT),
         AUDIT_PUSH(Capability.AUDIT_SOURCE),

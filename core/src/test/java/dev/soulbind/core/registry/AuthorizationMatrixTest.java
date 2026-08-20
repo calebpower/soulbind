@@ -73,7 +73,7 @@ class AuthorizationMatrixTest {
                 // code for an account already vouches for it; requiring
                 // config-management to answer "what am I linked to" would mean
                 // every chat surface could rewrite policy.
-                put(Operation.IDENTITY_DESCRIBE, Optional.of(Capability.CODE_DISPLAY));
+                put(Operation.IDENTITY_DESCRIBE, Optional.of(Capability.LINK_STATE_READER));
                 put(Operation.CODE_REDEEM, Optional.of(Capability.CODE_ENTRY));
                 put(Operation.DECIDE, Optional.of(Capability.ENFORCEMENT_POINT));
                 put(Operation.AUDIT_PUSH, Optional.of(Capability.AUDIT_SOURCE));

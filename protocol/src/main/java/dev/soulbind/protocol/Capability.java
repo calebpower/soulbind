@@ -55,6 +55,29 @@ public enum Capability {
     /** Append connector-side events to the audit stream. */
     AUDIT_SOURCE("audit-source"),
 
+    /**
+     * Read link state for an identity, and nothing else.
+     *
+     * <p>The only capability in this enum that grants no mutation of any kind.
+     * Every other one either changes the identity graph, changes policy, or
+     * causes a side effect somewhere; this one answers "what is this account
+     * linked to" and stops.
+     *
+     * <p>It exists because a dashboard needed it. Before it, reading link state
+     * meant holding either {@code config-management} — which also permits
+     * rewriting every rule and unlinking any identity — or {@code code-display},
+     * which also permits minting a link code. Neither is a reasonable grant for
+     * a component whose entire job is to display a value, and the analytics
+     * connector is the most-installed and least-audited surface in the system.
+     *
+     * <p>Reading is not nothing, and the grant is not "harmless": link state
+     * says which platforms a person is on and when they joined them, which is
+     * exactly the correlation a dashboard should not hand out casually. The
+     * analytics connector keeps the subject id off the page unless an operator
+     * opts in, for that reason.
+     */
+    LINK_STATE_READER("link-state-reader"),
+
     /** Read and mutate rules, overrides, runtime config; inspect subjects; unlink. */
     CONFIG_MANAGEMENT("config-management");
 

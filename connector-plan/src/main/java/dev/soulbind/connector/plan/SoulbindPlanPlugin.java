@@ -64,15 +64,16 @@ import org.slf4j.Logger;
  *
  * <p><b>Why a separate plugin from the proxy connector.</b> They are separate
  * principals with separate credentials. This one is registered with
- * {@code code-display} — the least capability that reaches
- * {@code identity.describe} — so it cannot mutate the identity graph or change
- * policy, and the credential refuses it at core rather than this file
- * remembering to be careful. Sharing the proxy connector's plugin would mean
- * sharing its credential, and that one can enforce.
+ * {@code link-state-reader}, which grants no mutation of any kind — so it
+ * cannot touch the identity graph or policy, and the credential refuses it at
+ * core rather than this file remembering to be careful. Sharing the proxy
+ * connector's plugin would mean sharing its credential, and that one can
+ * enforce.
  *
- * <p>Not "inspection and nothing else", which is what this comment used to say:
- * soulbind has no read-only capability, so {@code code-display} is the floor and
- * it also permits minting a link code. {@code docs/DECISIONS.md} 8.14.
+ * <p>Inspection and nothing else, which this comment could not honestly say
+ * until {@code link-state-reader} existed. It held {@code code-display} for two
+ * phases — the floor at the time, and one that also permits minting a link
+ * code. {@code docs/DECISIONS.md} 8.14.
  */
 @Plugin(
         id = "soulbind-plan",
