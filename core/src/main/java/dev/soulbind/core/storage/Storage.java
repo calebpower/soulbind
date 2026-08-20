@@ -171,7 +171,67 @@ public final class Storage implements AutoCloseable {
         return new Storage(backend, ds, writeExecutor);
     }
 
+    /**
+     * Sets the database's own default charset, before Flyway creates anything.
+     *
+     * <p>Every {@code CREATE TABLE} in the common migrations omits a
+     * {@code CHARACTER SET} clause and therefore inherits the database default,
+     * which inherits the server's. On a server started
+     * {@code --character-set-server=latin1} — what a long-lived installation
+     * upgraded across major versions typically still has — every text column in
+     * this schema is latin1, and the first four-byte character to reach one is
+     * truncated or rejected.
+     *
+     * <p><b>Here, and not in a migration, for three reasons that each ruled out
+     * an earlier attempt.</b>
+     *
+     * <ol>
+     *   <li>Converting afterwards does not work. {@code ALTER TABLE ... CONVERT
+     *       TO CHARACTER SET} rewrites every char column's definition, and
+     *       MariaDB refuses while the other side of a foreign key still carries
+     *       the old charset — error 1833. No ordering avoids it, and
+     *       {@code SET FOREIGN_KEY_CHECKS = 0} does not lift it: that flag
+     *       governs referential integrity of data, not whether a column's
+     *       definition may diverge from the one referencing it. Both were tried
+     *       against a real server.</li>
+     *   <li>A Flyway {@code beforeMigrate} callback is discovered correctly and
+     *       is <b>fatal on SQLite</b>: Flyway opens a SECOND connection to run
+     *       callbacks, and the SQLite pool is deliberately one connection, so
+     *       the callback waits thirty seconds for a connection the migration
+     *       itself is holding and then fails the boot. A guard now forbids
+     *       callbacks in the migration locations.</li>
+     *   <li>A versioned migration cannot run early enough: Flyway creates its
+     *       own history table before the first migration, so anything the
+     *       database default should govern is already created by then.</li>
+     * </ol>
+     *
+     * <p>One statement on the pool's own connection, borrowed and returned. It
+     * is idempotent — on a database that is already utf8mb4 it changes nothing —
+     * and it does <b>not</b> repair tables an earlier boot created latin1,
+     * because only {@code CONVERT} does that and {@code CONVERT} is what cannot
+     * be made to work. No such database exists.
+     */
+    private static void setDatabaseCharset(DataSource ds) {
+        try (java.sql.Connection c = ds.getConnection();
+                java.sql.Statement s = c.createStatement()) {
+            s.execute("ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        } catch (java.sql.SQLException e) {
+            // Loudly. A silent failure here leaves a latin1 schema that looks
+            // correct until somebody's name has an emoji in it, and the error
+            // then names a column rather than a charset.
+            throw new IllegalStateException(
+                    "could not set the database's default charset to utf8mb4. Every table"
+                            + " this migration is about to create would inherit the server's"
+                            + " default instead, and on a latin1 server four-byte text would"
+                            + " be truncated or refused.", e);
+        }
+    }
+
     private static void migrate(Backend backend, DataSource ds) {
+        if (backend == Backend.MARIADB) {
+            setDatabaseCharset(ds);
+        }
+
         // Common DDL first, then the per-dialect directory. The per-dialect
         // directories are deliberately near-empty: a difference there is a
         // dialect genuinely forcing one, not a convenience.

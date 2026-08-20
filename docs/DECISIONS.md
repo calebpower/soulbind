@@ -3984,3 +3984,77 @@ The failure was fourth in the queue, and three things had already passed:
 And one thing was answered in passing: the failure was on statement four, which
 means `ALTER DATABASE` had already succeeded **as the forum tier's non-root
 user**. That was an open question in 8.18 and it is now closed.
+
+### 8.24 — Three ways to set a charset, two of which a real server refused and one of which deadlocks SQLite
+
+The charset work of 8.18 took three attempts to land, and each failure was
+invisible to the workstation because it has no MariaDB.
+
+**Attempt one — convert afterwards.** `V8__utf8mb4.sql` did `ALTER DATABASE`
+plus `ALTER TABLE ... CONVERT TO CHARACTER SET` for fifteen tables. Its first
+contact with a real server failed on the fourth statement with error 1833:
+`Cannot change column 'id': used in a foreign key constraint`. CONVERT rewrites
+every char column's definition, and the server refuses while the other side of a
+foreign key still carries the old charset. No ordering avoids it — whichever
+side moves first stops matching the other.
+
+**Attempt two — disable the checks.** Bracketing the conversions with
+`SET FOREIGN_KEY_CHECKS = 0`, which is the usual advice, produced **error 1833
+on exactly the same statement**. That flag governs referential integrity of
+*data*; it does not permit a column's definition to diverge from the one
+referencing it. One session run to learn that.
+
+**Attempt three — a Flyway callback**, which is where it got interesting.
+
+A `beforeMigrate.sql` in the per-dialect location is the idiomatic answer to
+"do this before anything is created", and it removes the problem entirely: set
+the database default first and the tables are *born* utf8mb4, so there is
+nothing to convert and no foreign key to fight.
+
+Before spending a third session run, the one assumption that *could* be checked
+on the workstation was checked: does Flyway even discover a callback from these
+locations? A throwaway probe put `CREATE TABLE flyway_callback_probe` in the
+SQLite dialect directory and asserted the table existed after boot.
+
+It failed — and not for the reason expected:
+
+```
+FlywaySqlException: Unable to obtain connection from database: soulbind-sqlite
+  - Connection is not available, request timed out after 30000ms
+    (total=1, active=1, idle=0, waiting=0)
+  at DefaultCallbackExecutor.onMigrateOrUndoEvent
+```
+
+The callback **was** discovered. Flyway opens a **second connection** to execute
+it, and this project's SQLite pool is deliberately one connection — SQLite
+permits exactly one writer, and a pool of several does not make that untrue, it
+makes it intermittent. So the callback waits thirty seconds for a connection the
+migration it precedes is still holding, and then fails the boot.
+
+**The trap in that shape.** The same file under `mariadb/` would have worked,
+because that pool has ten connections. Under `common/` or `sqlite/` it takes the
+product down at boot on the backend a small deployment is most likely to be
+running. An asymmetry that severe, discoverable only at runtime, on one backend,
+is exactly what nobody finds before a user does — so `FlywayCallbackGuardTest`
+forbids callbacks in **all** migration locations, names every callback filename
+Flyway recognises rather than only the one that bit, and carries a planted
+must-fail fixture.
+
+**What actually landed.** One statement in `Storage.migrate`, on the pool's own
+connection, before Flyway runs. No second connection, no foreign key, no
+ordering problem — Flyway creates its own history table before the first
+migration, so a versioned migration could never have run early enough anyway.
+It throws loudly on failure: a silent one leaves a latin1 schema that looks
+correct until somebody's name has an emoji in it, and the error then names a
+column rather than a charset.
+
+#### The thing worth keeping
+
+Two session runs were spent on attempts one and two. The third was checked
+locally in **two minutes**, by asking what the smallest testable assumption was
+and testing that instead of the whole change — and it found a worse defect than
+the one being fixed.
+
+The lesson is not "test more". It is that after being wrong twice about the same
+file, the next move is not a third attempt at the same *kind* of verification.
+It is to find the part that *can* be verified here and verify it, however small.
