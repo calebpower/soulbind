@@ -1,0 +1,177 @@
+{
+ "extensions": [
+  {
+   "playerUUID": "d96d427c-e2d6-3a31-8231-cf626a854942",
+   "serverUUID": "7ca95dbc-cc38-4465-a8c4-9bdd138b636a",
+   "serverName": "Velocity",
+   "extensionData": [
+    {
+     "extensionInformation": {
+      "pluginName": "soulbind",
+      "icon": {
+       "family": "SOLID",
+       "familyClass": "fa",
+       "color": "BLUE",
+       "colorClass": "col-plugin-blue",
+       "iconName": "link"
+      }
+     },
+     "tabs": [
+      {
+       "tabInformation": {
+        "tabName": "",
+        "icon": {
+         "family": "SOLID",
+         "familyClass": "fa",
+         "color": "NONE",
+         "colorClass": "",
+         "iconName": "circle"
+        },
+        "elementOrder": [
+         "VALUES",
+         "GRAPH",
+         "TABLE"
+        ],
+        "tabPriority": 100
+       },
+       "values": [
+        {
+         "description": {
+          "name": "linked",
+          "text": "Linked",
+          "description": "Whether this account is linked to another platform",
+          "icon": {
+           "family": "SOLID",
+           "familyClass": "fa",
+           "color": "BLUE",
+           "colorClass": "col-plugin-blue",
+           "iconName": "link"
+          },
+          "priority": 0
+         },
+         "type": "BOOLEAN",
+         "value": true
+        },
+        {
+         "description": {
+          "name": "linkedSince",
+          "text": "Linked since",
+          "description": "When this account first became linked",
+          "icon": {
+           "family": "SOLID",
+           "familyClass": "fa",
+           "color": "BLUE",
+           "colorClass": "col-plugin-blue",
+           "iconName": "calendar"
+          },
+          "priority": 0
+         },
+         "type": "DATE_YEAR",
+         "value": 1787201694000
+        },
+        {
+         "description": {
+          "name": "linkStatus",
+          "text": "Link status",
+          "description": "linked, not linked, or unknown when core is unreachable",
+          "icon": {
+           "family": "SOLID",
+           "familyClass": "fa",
+           "color": "BLUE",
+           "colorClass": "col-plugin-blue",
+           "iconName": "link"
+          },
+          "priority": 0
+         },
+         "type": "STRING",
+         "value": "linked"
+        },
+        {
+         "description": {
+          "name": "subject",
+          "text": "Subject",
+          "description": "The soulbind subject id, when the operator has opted in",
+          "icon": {
+           "family": "SOLID",
+           "familyClass": "fa",
+           "color": "BLUE",
+           "colorClass": "col-plugin-blue",
+           "iconName": "fingerprint"
+          },
+          "priority": 0
+         },
+         "type": "STRING",
+         "value": "711c278c-4fb0-4ab1-b1c7-0ba130b2c73d"
+        },
+        {
+         "description": {
+          "name": "proof",
+          "text": "Proof",
+          "description": "How each link was proven",
+          "icon": {
+           "family": "SOLID",
+           "familyClass": "fa",
+           "color": "BLUE",
+           "colorClass": "col-plugin-blue",
+           "iconName": "shield-alt"
+          },
+          "priority": 0
+         },
+         "type": "STRING",
+         "value": "link-code"
+        },
+        {
+         "description": {
+          "name": "platforms",
+          "text": "Platforms",
+          "description": "The platform kinds this account is verified on",
+          "icon": {
+           "family": "SOLID",
+           "familyClass": "fa",
+           "color": "BLUE",
+           "colorClass": "col-plugin-blue",
+           "iconName": "users"
+          },
+          "priority": 0
+         },
+         "type": "STRING",
+         "value": "game, harness"
+        }
+       ],
+       "tableData": []
+      }
+     ],
+     "onlyGenericTab": true,
+     "wide": false
+    }
+   ]
+  }
+ ],
+ "sessions": [],
+ "kill_data": {
+  "deaths_7d": 0,
+  "mob_deaths_7d": 0,
+  "mob_kills_total": 0,
+  "player_kdr_30d": "0",
+  "player_kills_7d": 0,
+  "player_deaths_total": 0,
+  "deaths_30d": 0,
+  "deaths_total": 0,
+  "player_kills_total": 0,
+  "mob_deaths_30d": 0,
+  "player_deaths_30d": 0,
+  "mob_kdr_30d": "0",
+  "player_kdr_total": "0",
+  "weapon_3rd": "-",
+  "mob_kdr_7d": "0",
+  "player_kdr_7d": "0",
+  "player_kills_30d": 0,
+  "weapon_2nd": "-",
+  "player_deaths_7d": 0,
+  "mob_deaths_total": 0,
+  "mob_kills_7d": 0,
+  "mob_kdr_total": "0",
+  "weapon_1st": "-",
+  "mob_kills_30d": 0
+ }
+}

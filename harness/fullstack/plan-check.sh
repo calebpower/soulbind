@@ -85,10 +85,38 @@ log "asking Plan about $PLAYER"
 # /v1/ call with a redirect or a 403 and this stage would fail for a reason
 # having nothing to do with soulbind. Stated because it is invisible otherwise.
 fetch() {
+    # Truncated first. `curl -o` does not empty the file when the connection
+    # fails, so a second call that cannot reach Plan leaves the PREVIOUS body on
+    # disk -- and `[ -s "$file" ]` then passes on evidence from a fetch that did
+    # not happen. run.sh removes out/ per invocation, which hides this from the
+    # battery and not at all from anybody running this script directly.
+    : > "$2"
     curl -sS --compressed --max-time 20 -o "$2" -w '%{http_code}' "$1" 2>/dev/null || echo "000"
 }
 
 # Reads a provider's VALUE out of Plan's JSON, by provider name.
+#
+# The shape is NOT {"name": ..., "value": ...}. Plan nests the name one level
+# down, and `value` is a sibling of the object holding it:
+#
+#     {"description": {"name": "linked", "text": "Linked", ...},
+#      "type": "BOOLEAN",
+#      "value": true}
+#
+# The first version of this function looked for a single node carrying both
+# `name` and `value`. No Plan response has ever contained one. That is the
+# mirror image of this repository's usual defect -- not an assertion that
+# cannot fail, but one that cannot PASS -- and it is worth as little: the stage
+# went red on a run where all six providers had rendered correctly, and the
+# commit that introduced it claimed to have made the check able to fail. It had.
+# It had also made it unable to succeed. The shape was imagined rather than read
+# off a real response, and a synthetic fixture built from the same imagination
+# agreed with it.
+#
+# A JSON null exits 1, the same as a missing provider. Otherwise Python's
+# `None` is printed, and a caller testing "non-empty" accepts the string "None"
+# as a real value -- which is exactly how the `proof` assertion came to pass on
+# a response with no proof method in it.
 value_of() {
     python3 -c '
 import json, sys
@@ -100,10 +128,45 @@ except Exception:
 
 def walk(node):
     if isinstance(node, dict):
-        # Plan renders a provider as an object carrying its name and value.
-        if node.get("name") == name and "value" in node:
+        described = node.get("description")
+        if isinstance(described, dict) and described.get("name") == name \
+                and "value" in node:
+            if node["value"] is None:
+                raise SystemExit(1)
             print(node["value"])
             raise SystemExit(0)
+        for v in node.values():
+            walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            walk(v)
+
+walk(doc)
+sys.exit(1)
+' "$1" "$2" 2>/dev/null
+}
+
+# Is there a soulbind table with this name, and does it have columns?
+#
+# Separate from value_of because a table is not a value: it has a name, a column
+# list and rows, and `grep -q unlinkedTable` is satisfied by a text file
+# containing the word. That is not hypothetical -- a 76-byte plain-text file
+# holding only the four provider names passed the whole server block below.
+table_present() {
+    python3 -c '
+import json, sys
+name = sys.argv[1]
+try:
+    doc = json.load(open(sys.argv[2], encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+
+def walk(node):
+    if isinstance(node, dict):
+        if node.get("tableName") == name:
+            table = node.get("table") or {}
+            if table.get("columns"):
+                raise SystemExit(0)
         for v in node.values():
             walk(v)
     elif isinstance(node, list):
@@ -163,8 +226,15 @@ case "$platforms" in
     *game*) ;;
     *) dump_and_fail "platforms reads '$platforms' and does not include the game kind" ;;
 esac
-[ -n "$proof" ] && [ "$proof" != "-" ] \
-    || dump_and_fail "no proof method rendered (got '$proof')"
+# "None" is listed because it is what a JSON null used to print here. value_of
+# now exits 1 on null so this cannot arise, and the case stays as a belt on a
+# value that is otherwise unconstrained: `proof` is the one provider whose
+# assertion accepts any non-empty string, so it is the one that quietly accepted
+# garbage when the walker handed it some.
+case "$proof" in
+    ''|'-'|'None')
+        dump_and_fail "no proof method rendered (got '$proof')" ;;
+esac
 
 # Milliseconds, not seconds. Core speaks seconds and Plan's DATE_YEAR expects
 # ms; getting it wrong renders 1970 on every page, which reads as a data problem
@@ -196,12 +266,16 @@ server_ok=0
 i=0
 while [ "$i" -lt 24 ]; do
     server_code=$(fetch "$BASE/v1/extensionData?server=Velocity" "$SERVER_JSON")
-    if [ "$server_code" = "200" ] && grep -q 'linkedPlayers' "$SERVER_JSON" 2>/dev/null; then
+    # Gated on the same STRUCTURED read the assertions use, not on a grep for a
+    # provider name. Gating on `grep -q linkedPlayers` and then asserting the
+    # same grep made the first of the four assertions below unfailable by
+    # construction: the loop could not exit until it was true.
+    if [ "$server_code" = "200" ] && value_of linkedPlayers "$SERVER_JSON" >/dev/null 2>&1; then
         server_ok=1
         break
     fi
     i=$((i + 1))
-    sleep 5
+    [ "$i" -lt 24 ] && sleep 5
 done
 
 if [ "$server_ok" -ne 1 ]; then
@@ -211,12 +285,87 @@ if [ "$server_ok" -ne 1 ]; then
     exit 1
 fi
 
+# On VALUES again, for the same reason as the player page.
+#
+# The first version grepped for the four provider NAMES. That is the identical
+# defect the player page had just been rewritten to remove, left standing twenty
+# lines further down: a plain-text file containing only the words
+# `linkedPlayers unlinkedPlayers unknownPlayers unlinkedTable` -- no JSON, no
+# extension, no Plan -- passed the entire block.
 for provider in linkedPlayers unlinkedPlayers unknownPlayers; do
-    grep -q "$provider" "$SERVER_JSON" \
-        || { log "server page is missing the $provider provider"; exit 1; }
+    count=$(value_of "$provider" "$SERVER_JSON" || true)
+    case "$count" in
+        ''|*[!0-9]*)
+            log "server page: $provider is '$count', which is not a count"
+            head -c 600 "$SERVER_JSON" | sed 's/^/  /'
+            echo
+            exit 1 ;;
+    esac
+    log "server page: $provider=$count"
 done
-grep -q 'unlinkedTable' "$SERVER_JSON" \
-    || { log "server page is missing the unlinked-players table"; exit 1; }
 
-log "the server page renders all four server-wide providers"
+table_present unlinkedTable "$SERVER_JSON" \
+    || { log "server page has no soulbind unlinkedTable with columns"; exit 1; }
+
+# Plan's OWN aggregate, and the one server-side number that is presently worth
+# anything.
+#
+# It is not one of this connector's providers: Plan computes it itself by
+# aggregating the per-player `linked` boolean across every player in its
+# database. That makes it corroboration rather than an echo -- it says Plan
+# stored what the player provider returned and could compute over it -- and it
+# is non-zero on an idle server, which the three counters above are not.
+aggregate=$(value_of linked_aggregate "$SERVER_JSON" || true)
+case "$aggregate" in
+    ''|'0%'|'0.0%')
+        log "Plan's own aggregate over the stored player data reads '$aggregate'."
+        log "A player IS linked in this run, so Plan either did not store the"
+        log "player provider's value or could not aggregate it."
+        head -c 600 "$SERVER_JSON" | sed 's/^/  /'
+        echo
+        exit 1 ;;
+esac
+log "server page: linked_aggregate=$aggregate (Plan's own aggregation)"
+
+# KNOWN GAP, stated because it is invisible from a green run.
+#
+# The three counters above are asserted to be counts, and nothing more, because
+# in this harness they are all legitimately 0: they are derived from
+# proxy.getAllPlayers(), and no player is connected when Plan's SERVER_PERIODICAL
+# fires. So they would read 0 for a working extension and 0 for a broken one,
+# and an assertion of `>= 1` here would fail on correct code.
+#
+# That makes `linked_aggregate` the only server-side value in this stage that
+# discriminates. Closing the gap properly means holding a linked player on the
+# proxy across one gather -- or changing where the roster comes from, since a
+# count of "linked players" that silently means "linked players online right
+# now" reads as 0 on an idle server and is arguably the wrong number for a
+# dashboard. docs/DECISIONS.md 8.19.
+log "the server page renders four soulbind providers and a table"
+
+# --- corroboration, kept on green as well as on red -------------------------
+#
+# The proxy log is where `Registered extension: soulbind` appears, and that line
+# is Plan's, not soulbind's -- the one statement in this stage not made by the
+# code under test. It was previously tailed on a single failure branch and
+# discarded on success, so the run that PASSED kept no evidence of the thing
+# most worth keeping.
+if [ -f "$RUN/velocity.log" ]; then
+    cp "$RUN/velocity.log" "$EVIDENCE/velocity.log"
+fi
+if [ -d "$RUN/proxy/plugins/plan/libraries" ]; then
+    (cd "$RUN/proxy/plugins/plan/libraries" && sha256sum ./*.jar) \
+        > "$EVIDENCE/plan-libraries.sha256" 2>/dev/null || true
+fi
+
+grep -q 'Registered extension: soulbind' "$EVIDENCE/velocity.log" 2>/dev/null \
+    || { log "Plan never logged 'Registered extension: soulbind'. Every assertion"
+         log "above reads a page; this reads Plan's own account of whether it"
+         log "accepted the extension at all."
+         exit 1; }
+log "Plan's own log confirms it registered the soulbind extension"
+
+# Last, so it is not printed by a run that is about to fail. The first version
+# announced this two checks early, and the failing run's output read
+# "Plan renders soulbind link data ..." immediately before the reason it did not.
 log "Plan renders soulbind link data for a player linked through the real flow"

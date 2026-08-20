@@ -1,0 +1,133 @@
+{
+ "timestamp": 1787201719019,
+ "timestamp_f": "Today, 04:55",
+ "extensions": [
+  {
+   "extensionInformation": {
+    "pluginName": "soulbind",
+    "icon": {
+     "family": "SOLID",
+     "familyClass": "fa",
+     "color": "BLUE",
+     "colorClass": "col-plugin-blue",
+     "iconName": "link"
+    }
+   },
+   "tabs": [
+    {
+     "tabInformation": {
+      "tabName": "",
+      "icon": {
+       "family": "SOLID",
+       "familyClass": "fa",
+       "color": "NONE",
+       "colorClass": "",
+       "iconName": "circle"
+      },
+      "elementOrder": [
+       "VALUES",
+       "GRAPH",
+       "TABLE"
+      ],
+      "tabPriority": 100
+     },
+     "values": [
+      {
+       "description": {
+        "name": "unlinkedPlayers",
+        "text": "Unlinked players",
+        "description": "Known players whose accounts are not linked",
+        "icon": {
+         "family": "SOLID",
+         "familyClass": "fa",
+         "color": "RED",
+         "colorClass": "col-plugin-red",
+         "iconName": "unlink"
+        },
+        "priority": 0
+       },
+       "type": "NUMBER",
+       "value": 0
+      },
+      {
+       "description": {
+        "name": "linkedPlayers",
+        "text": "Linked players",
+        "description": "Known players whose accounts are linked",
+        "icon": {
+         "family": "SOLID",
+         "familyClass": "fa",
+         "color": "BLUE",
+         "colorClass": "col-plugin-blue",
+         "iconName": "link"
+        },
+        "priority": 0
+       },
+       "type": "NUMBER",
+       "value": 0
+      },
+      {
+       "description": {
+        "name": "unknownPlayers",
+        "text": "Unknown",
+        "description": "Players core could not be asked about",
+        "icon": {
+         "family": "SOLID",
+         "familyClass": "fa",
+         "color": "AMBER",
+         "colorClass": "col-plugin-amber",
+         "iconName": "question"
+        },
+        "priority": 0
+       },
+       "type": "NUMBER",
+       "value": 0
+      },
+      {
+       "description": {
+        "name": "linked_aggregate",
+        "text": "Linked / Players",
+        "description": "Whether this account is linked to another platform",
+        "icon": {
+         "family": "SOLID",
+         "familyClass": "fa",
+         "color": "BLUE",
+         "colorClass": "col-plugin-blue",
+         "iconName": "link"
+        },
+        "priority": 0
+       },
+       "type": "PERCENTAGE",
+       "value": "50%"
+      }
+     ],
+     "tableData": [
+      {
+       "tableName": "unlinkedTable",
+       "table": {
+        "columns": [
+         "Player"
+        ],
+        "icons": [
+         {
+          "family": "SOLID",
+          "familyClass": "fa",
+          "color": "NONE",
+          "colorClass": "",
+          "iconName": "user"
+         }
+        ],
+        "rows": []
+       },
+       "tableColor": "BLUE",
+       "tableColorClass": "bg-plugin-blue",
+       "wide": false
+      }
+     ]
+    }
+   ],
+   "onlyGenericTab": true,
+   "wide": false
+  }
+ ]
+}

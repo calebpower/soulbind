@@ -3442,3 +3442,92 @@ because the environment was arranged to make it pass. The tell is the same one
 every time — the assertion is about something the test does not control, and
 nothing in the run says which of the two produced the green.
 
+### 8.19 — An assertion that could not pass, and the one beside it that could not fail
+
+`8557416` rewrote `plan-check.sh` to assert on provider *values* rather than on
+annotation labels. The rewrite was right about the problem and wrong about the
+data. Its JSON walker looked for a node carrying both `name` and `value`:
+
+```python
+if node.get("name") == name and "value" in node:
+```
+
+Plan's actual shape nests the name one level down, and `value` is a sibling of
+the object holding it:
+
+```json
+{"description": {"name": "linked", "text": "Linked"}, "type": "BOOLEAN", "value": true}
+```
+
+The dict with `name` has no `value`; the dict with `value` has no `name`. **No
+Plan response can satisfy that predicate.** The stage went red on a run where
+all six providers had rendered correctly, and the commit message claimed it had
+"made the Plan check able to fail". It had. It had also made it unable to
+succeed, and the two are worth the same: neither tells you anything about the
+system.
+
+The cause is not subtle and is worth naming, because it is the same one as 8.9.
+The shape was **imagined rather than read off a real response**, and the
+fixture written to test the walker was imagined from the same picture, so the
+two agreed with each other. A check and its fixture built from one guess are one
+guess, not two.
+
+**And the block twenty lines below it still grepped for provider names** — the
+exact defect the player page had just been rewritten to remove, left standing in
+the same file. A 76-byte plain-text file containing only the words
+`linkedPlayers unlinkedPlayers unknownPlayers unlinkedTable` passed the whole
+server-page section. The retry loop compounded it: it broke on
+`grep -q linkedPlayers` and the first of the four assertions then grepped the
+same unchanged file for the same string, so that assertion could not fail by
+construction.
+
+**What the real evidence says.** The captured `plan-server.json` from a run in
+which a player was provably linked reads `linkedPlayers = 0`,
+`unlinkedPlayers = 0`, `unknownPlayers = 0`, `unlinkedTable` with no rows — and
+`linked_aggregate = "50%"`. The counters are zero because they derive from
+`proxy.getAllPlayers()`, and nobody is connected when Plan's `SERVER_PERIODICAL`
+fires. So a `>= 1` assertion there would fail on correct code, and the counters
+cannot presently distinguish a working extension from a broken one. They are
+asserted to be *counts* and nothing more, and the gap is logged by the stage
+itself rather than left to be inferred from a green run.
+
+`linked_aggregate` is the one server-side value that does discriminate, and it
+is not one of this connector's providers: **Plan computes it itself** by
+aggregating the per-player `linked` boolean across its whole player table. That
+makes it corroboration rather than an echo — it says Plan stored what the player
+provider returned and could compute over it — and it is non-zero on an idle
+server. It is now asserted.
+
+**Two further things this run exposed.** The proxy log, which carries Plan's own
+`Registered extension: soulbind` — the only line in the whole stage not written
+by the code under test — was tailed on a single failure branch and discarded on
+success, so the passing run kept no copy of the most valuable evidence in it. It
+is now collected on both paths and asserted. And `curl -o` does not truncate its
+output file when the connection fails, so a second fetch that cannot reach Plan
+leaves the previous body on disk for `[ -s ]` to accept; harmless only because
+`run.sh` removes `out/` per invocation.
+
+**The mutation battery, replayed against the real captured response** rather
+than a fixture: `linked`→false, `linkStatus`→"not linked", `proof`→null,
+`linkedSince`→seconds, `platforms`→"forum", `linked_aggregate`→"0%",
+`unlinkedTable` columns emptied, the whole server body replaced with the plain
+text that used to pass, and the `Registered extension` line removed from the
+proxy log. Ten mutants, ten reds, control green. An ungzipped response still
+passes, so `--compressed` is safe in both directions.
+
+**A note on the harness that found this.** The first version of my own mutation
+runner wrote each mutant to a file the replay server never served, so all eight
+mutants "survived" identically. The tell was uniformity: eight different
+mutations producing byte-identical output is not a finding about the code, it is
+a finding about the runner. A mutation battery needs its own control, and the
+control has to be a mutant that is *known* to fail.
+
+**On the gate clause.** Phase 8's second clause — "Plan pages render link data
+for players created through real flows" — is met, and was met before any of
+this: the captured evidence shows `linked=true`, `linkStatus="linked"`,
+`platforms="game, harness"`, `proof="link-code"`, `linkedSince` in milliseconds,
+against a player linked by a mineflayer client running `/link`. What was not
+true is that the automated check *enforced* it. From `558df1e` it passed on
+labels that render regardless of value; from `8557416` it could not pass at all.
+The clause rested on evidence a human read, which is exactly the arrangement the
+tier exists to replace.
