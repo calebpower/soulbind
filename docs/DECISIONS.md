@@ -4926,3 +4926,60 @@ is what a latin1 column does. It joins the enum the acceptance test is
 parameterised over, so it was tested the moment it was written — and the control
 still passes, which is the claim: four-byte text survives a round trip through a
 real core.
+
+### 8.28 — Tier 7 against a deployment that has been running
+
+Phase 8's test list asks for "T7 fuzz stage against the real deployment". The
+interesting question was what that adds, because `:core:fuzzTest` already drives
+**real HTTP and real signing** — `TestCore` stands up an actual server — so the
+obvious answers (real transport, real decoding) were already covered.
+
+What it adds is **accumulated state**. `:core:fuzzTest` starts its own core with
+an empty database. This stage runs after `journeys` and `sim`, against a
+deployment holding subjects, identities, spent codes, rules and an audit log.
+
+A malformed request against an empty database exercises the decoder. The same
+request against a populated one exercises the decoder, the query paths it
+reaches, and whatever the accumulated state makes reachable. That is §11's own
+argument for keeping the nemesis in the weighted pool — "faults land at
+arbitrary depths in an accumulated history rather than against a clean fixture"
+— applied to hostile input rather than to hostile actions.
+
+#### The oracle is Tier 7's, unchanged
+
+No 5xx; every response a well-formed envelope with an `ok` field; never an
+`internal` error code; core alive and answering a valid heartbeat afterwards.
+
+"The right things are rejected" is deliberately not asserted, for the reason
+`ProtocolFuzzTest` already records: it would need a second implementation of
+every validation rule to compare against, and would be wrong wherever the two
+disagreed with no way to tell which.
+
+Six request shapes, each built from the corpus: hostile operation name, hostile
+field value, hostile field *name*, a payload that is not an object at all,
+hostile in every field, and a plausible request with hostile identifiers.
+
+#### The bug in the stage, found by testing the stage
+
+The first version caught only `HTTPError`. A refused connection raises
+`URLError`, which is not one — so **a core that died mid-fuzz would abort the
+run with a Python traceback rather than reporting that the deployment stopped
+answering.**
+
+That is the single most important thing this stage can find, and it was the one
+outcome it could not report. Found by pointing it at a dead port, which took
+thirty seconds and is the kind of check that should be automatic when writing
+something whose whole job is to survive a crash.
+
+It now records status 0 — a status core cannot return, so it cannot be confused
+with one — stops immediately, and says how many requests it got through first.
+
+#### Verified before it went near a session
+
+200 hostile requests against a live core: all reached the dispatcher, spread
+across `decide`, `identity.describe`, `code.redeem`, `rule.set` and `heartbeat`,
+all answered with HTTP 200 and a refusal inside the envelope, which is correct.
+Then pointed at a dead port: two failures, exit 1.
+
+A fuzz stage that has only ever passed is indistinguishable from one that cannot
+fail, and this one was checked in both directions before being wired in.

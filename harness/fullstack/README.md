@@ -4,8 +4,8 @@ The full-stack battery: core, a Paper backend and a Velocity proxy brought up
 for real, with stages run against the live deployment.
 
 ```sh
-SOULBIND_DB=sqlite  ./run.sh up migrate journeys sim down
-SOULBIND_DB=mariadb ./run.sh up migrate journeys sim plan down
+SOULBIND_DB=sqlite  ./run.sh up migrate journeys sim fuzz down
+SOULBIND_DB=mariadb ./run.sh up migrate journeys sim fuzz plan down
 ```
 
 ## Why a stage runner and not one script
@@ -42,6 +42,7 @@ narrows it, never as a green result carrying the word "skipped".
 | `migrate` | Migration idempotence against the **live, already-used** database. Core migrates on every `Storage.open`, so a deployment re-migrates on every restart; a second apply that is not a no-op is drift per restart, invisible to any test against a fresh database. |
 | `journeys` | Tier 11 human evidence: a per-step transcript per linking journey, emitted so "would a newcomer understand this?" is answered from evidence rather than memory. |
 | `sim` | Tier 9: the committed seed set, three actors each a separate principal with its own credential, four hundred weighted actions apiece against this live deployment. Invariants diff a partial shadow model against core periodically and at the end. Reports **what it did not check** before it reports the verdict — see `harness/sim/README.md`. |
+| `fuzz` | Tier 7 against the **deployment**, not against a fresh embedded core. `:core:fuzzTest` already drives real HTTP and real signing against a core it starts itself; what it cannot do is drive them against a core the journeys and the simulated-user tier have already filled with subjects, identities, spent codes, rules and an audit log. Runs after both, deliberately. Oracle unchanged from Tier 7 — no 5xx, always an envelope, never `internal`, alive and answering correctly afterwards — because those four need no second implementation of any rule. Seed printed and replayable via `SOULBIND_FUZZ_SEED`. |
 | `plan` | The gate's second clause: asks Plan's own HTTP API whether the soulbind extension rendered link data for a player the smoke linked through the real flow. Asserts on the extension's *values*, not on the plugin name — that appears whether or not a provider ever ran. **mariadb axis only**: Plan on a proxy supports MySQL, and the sqlite axis has no server for it. |
 | `down` | Stops what `up` started. |
 

@@ -222,7 +222,7 @@ XML
 # below, and FullstackStagesGuardTest asserts this list matches both the
 # functions defined and the stages documented in the README. A stage that is
 # listed but does no work is the exact shape this file exists to prevent.
-STAGES="up migrate journeys sim plan down"
+STAGES="up migrate journeys sim fuzz plan down"
 
 # The post-condition, checked rather than assumed.
 #
@@ -368,6 +368,34 @@ stage_sim() {
         result_fail sim "the committed seeds run clean against a real core" \
             "the trace is in $OUT/evidence/sim-$DB.log; the seed that failed is named" \
             "above, and the line to add to seeds.txt with it"
+        return 1
+    fi
+}
+
+stage_fuzz() {
+    result_open fuzz
+    log "fuzz: hostile input against the live deployment"
+
+    creds="$RUN/core/creds.env"
+    if [ ! -s "$creds" ]; then
+        result_fail fuzz "hostile input never makes the deployment answer a 5xx" \
+            "no credentials at $creds -- the up stage did not write them"
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    . "$creds"
+
+    # AFTER journeys and sim, deliberately. The point of this stage over
+    # :core:fuzzTest is that the database is no longer empty: subjects,
+    # identities, spent codes, rules and an audit log are all there, and a
+    # malformed request now reaches query paths a fresh core has nothing in.
+    if "$HERE/fuzz-live.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
+            "$OUT/evidence" 400; then
+        result_pass fuzz "hostile input never makes the deployment answer a 5xx"
+    else
+        result_fail fuzz "hostile input never makes the deployment answer a 5xx" \
+            "the seed and every request are in $OUT/evidence/fuzz-live.log; replay with" \
+            "SOULBIND_FUZZ_SEED"
         return 1
     fi
 }
