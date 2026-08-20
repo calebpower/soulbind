@@ -69,6 +69,18 @@ public interface CoreView {
     boolean codeRedeemable(String code);
 
     /**
+     * What core decides for an identity at a gate, as an effect name.
+     *
+     * <p>Added because {@code SET_RULE} and {@code DECIDE} were two of nine
+     * action classes doing work no assertion read: the tier set rules and asked
+     * for decisions, and nothing related one to the other. A rule requiring
+     * nothing, a rule never applied, and a wrong effect were all invisible —
+     * which is how a `rule.set` payload missing two fields went unnoticed for
+     * an entire phase. {@code docs/DECISIONS.md} 9.9.
+     */
+    String decide(String gate, String platformKind, String platformId);
+
+    /**
      * Whether every response so far was a well-formed envelope with no 5xx.
      *
      * <p>The cheap oracle, and it is separate from the others on purpose: §11

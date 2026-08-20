@@ -65,6 +65,11 @@ class RunnerTest {
             }
 
             @Override
+            public String decide(String gate, String kind, String id) {
+                return core.decide(gate, kind, id);
+            }
+
+            @Override
             public boolean reachable() {
                 return core.reachable();
             }

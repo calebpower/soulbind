@@ -61,6 +61,16 @@ final class InMemoryCore implements CoreDriver, CoreView {
         SERVES_A_5XX,
 
         /**
+         * Rules are stored and never applied: every gate allows everybody.
+         *
+         * <p>The defect the tier could not see for an entire phase. `SET_RULE`
+         * and `DECIDE` both ran, hundreds of times, and nothing related one to
+         * the other — so a `rule.set` payload that silently required nothing
+         * looked identical to a working one.
+         */
+        RULES_ARE_IGNORED,
+
+        /**
          * A merge silently drops a member, but only once the subject is large.
          *
          * <p><b>The rare one, and the reason it exists.</b> Every other defect
@@ -147,13 +157,32 @@ final class InMemoryCore implements CoreDriver, CoreView {
         return Result.ok(subjectIds.get(platformKind + ":" + platformId));
     }
 
+    /** Gates with a rule requiring linkage. */
+    private final Set<String> requireLinked = new LinkedHashSet<>();
+
     @Override
     public Result decide(Actor actor, String gate, String platformKind, String platformId) {
-        return Result.ok(groups.containsKey(platformKind + ":" + platformId) ? "allow" : "deny");
+        return Result.ok(decide(gate, platformKind, platformId));
     }
 
     @Override
-    public Result setRule(Actor actor, String gate, boolean requireLinked) {
+    public String decide(String gate, String platformKind, String platformId) {
+        if (defects.contains(Defect.RULES_ARE_IGNORED)) {
+            return "allow";
+        }
+        if (!requireLinked.contains(gate)) {
+            return "allow";
+        }
+        return groups.containsKey(platformKind + ":" + platformId) ? "allow" : "deny";
+    }
+
+    @Override
+    public Result setRule(Actor actor, String gate, boolean linkedRequired) {
+        if (linkedRequired) {
+            requireLinked.add(gate);
+        } else {
+            requireLinked.remove(gate);
+        }
         if (!defects.contains(Defect.AUDIT_DROPS_ROWS)) {
             append("rule.changed");
         }

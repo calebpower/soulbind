@@ -44,6 +44,7 @@ public final class Invariants {
                 everyMutationIsAudited(),
                 auditSequenceStrictlyIncreases(),
                 redeemedCodesStayRedeemed(),
+                decisionsFollowTheRules(),
                 everyResponseWasAnEnvelope());
     }
 
@@ -189,6 +190,85 @@ public final class Invariants {
                             complaints.add("code " + code + " was redeemed and core still"
                                     + " offers it. Single use is the whole guarantee a link"
                                     + " code carries.");
+                        }
+                    }
+                    return complaints;
+                });
+    }
+
+    /**
+     * A gate requiring linkage refuses an identity that is not linked.
+     *
+     * <p>Written after discovering that {@code SET_RULE} and {@code DECIDE} —
+     * two of nine action classes — were doing work no assertion read. The tier
+     * set rules and asked for decisions and never related one to the other, so
+     * a {@code rule.set} payload silently missing {@code requireLinked} stored
+     * rules that required nothing, for an entire phase, invisibly.
+     *
+     * <p>Asserted in the direction that catches that. If rules were ignored
+     * entirely, every gate would allow everybody — so the claim worth making is
+     * about identities the model believes are <b>not linked</b>: they must be
+     * refused. Asserting the linked direction instead would pass just as well
+     * against a core that had never applied a rule in its life.
+     *
+     * <p>Uses {@link ShadowModel#neverLinked}, which is deliberately separate
+     * from the link graph: an identity that has only ever had a code issued for
+     * it has no subject in core, and folding it into the graph would make
+     * {@code linkage-mirrors-model} complain about an account core is right not
+     * to know.
+     */
+    public static Invariant decisionsFollowTheRules() {
+        return invariant(
+                "decisions-follow-the-rules",
+                "a gate requiring linkage refuses an unlinked identity",
+                (model, core) -> {
+                    List<String> complaints = new ArrayList<>();
+                    for (var rule : model.rules().entrySet()) {
+                        if (!Boolean.TRUE.equals(rule.getValue())) {
+                            continue;
+                        }
+
+                        // An account core has never heard of, which is
+                        // definitionally linked to nothing.
+                        //
+                        // The probe exists because the real unlinked set empties
+                        // out: the actors link everything they own within the
+                        // first few dozen actions, so by the time a rule has
+                        // been set there is often no unlinked identity left and
+                        // the loop below asserts nothing. The first version of
+                        // this invariant was exactly that vacuous, and the
+                        // acceptance test caught it -- RULES_ARE_IGNORED was
+                        // switched on and a four-hundred-action run did not
+                        // notice.
+                        //
+                        // This one cannot empty out, and it is sound for the
+                        // same reason it is always available: an identity core
+                        // has never seen is not linked to anything, so a gate
+                        // requiring linkage must refuse it.
+                        String probeEffect = core.decide(
+                                rule.getKey(), "game", "soulbind-sim-never-linked-probe");
+                        if (!probeEffect.isEmpty() && !"deny".equals(probeEffect)) {
+                            complaints.add("gate " + rule.getKey() + " requires linkage and"
+                                    + " core says " + probeEffect + " for an account it has"
+                                    + " never heard of. Either the rule was not applied or it"
+                                    + " was stored requiring nothing.");
+                        }
+
+                        for (String ref : model.neverLinked()) {
+                            String[] parts = split(ref);
+                            String effect = core.decide(rule.getKey(), parts[0], parts[1]);
+                            if (effect.isEmpty()) {
+                                // Unaskable is not the same as allowed. The
+                                // envelope invariant reports the outage; this
+                                // one must not turn it into a policy verdict.
+                                continue;
+                            }
+                            if (!"deny".equals(effect)) {
+                                complaints.add(ref + " is linked to nothing and gate "
+                                        + rule.getKey() + " requires linkage, and core says "
+                                        + effect + ". Either the rule was not applied or it"
+                                        + " was stored requiring nothing.");
+                            }
                         }
                     }
                     return complaints;

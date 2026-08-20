@@ -119,6 +119,19 @@ final class FakeCore implements CoreView {
         return audit.stream().filter(r -> r.sequence() > after).toList();
     }
 
+    /** Gate -> effect, for the policy invariant. */
+    private final Map<String, String> decisions = new LinkedHashMap<>();
+
+    FakeCore decides(String gate, String ref, String effect) {
+        decisions.put(gate + "|" + ref, effect);
+        return this;
+    }
+
+    @Override
+    public String decide(String gate, String platformKind, String platformId) {
+        return decisions.getOrDefault(gate + "|" + platformKind + ":" + platformId, "allow");
+    }
+
     @Override
     public boolean codeRedeemable(String code) {
         return redeemable.contains(code);

@@ -111,7 +111,7 @@ register_cast() {
         printf '%s=%s\n' "$who" "$cred" >> "$WORK/core/sim-credentials"
     done
     admin=$("$cli" register --name sim-admin --quiet \
-        --capabilities config-management,link-state-reader,code-entry \
+        --capabilities config-management,link-state-reader,code-entry,enforcement-point \
         --config "$WORK/core/soulbind.toml")
     printf 'admin=%s\n' "$admin" >> "$WORK/core/sim-credentials"
     printf 'retired=%s\n' "sim-retired.deadbeef" >> "$WORK/core/sim-credentials"

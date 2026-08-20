@@ -451,8 +451,11 @@ for who in alex sam rey; do
 done
 
 # The operator's credential, for the rule and config classes.
+# enforcement-point because the policy invariant asks core what a gate
+# decides, and decide requires it. Without it that invariant is silently
+# inert -- DECISIONS 9.10.
 SIM_ADMIN=$("$CORE_CLI" register --name sim-admin --quiet \
-    --capabilities config-management,link-state-reader,code-entry \
+    --capabilities config-management,link-state-reader,code-entry,enforcement-point \
     --config "$RUN/core/soulbind.toml")
 printf 'admin=%s\n' "$SIM_ADMIN" >> "$SIM_CREDS"
 

@@ -45,10 +45,14 @@ public final class ShadowModel {
     private final Map<String, String> groupOf = new LinkedHashMap<>();
     private final Map<String, Set<String>> members = new LinkedHashMap<>();
     private final Set<String> redeemedCodes = new LinkedHashSet<>();
+    private final Map<String, Boolean> rules = new LinkedHashMap<>();
+    private final Set<String> neverLinked = new LinkedHashSet<>();
     private final List<String> expectedAuditActions = new ArrayList<>();
 
     /** Records that two identities are now on one subject, whichever subject that is. */
     public void linked(String leftRef, String rightRef) {
+        neverLinked.remove(leftRef);
+        neverLinked.remove(rightRef);
         String left = groupOf.computeIfAbsent(leftRef, r -> newGroup(r));
         String right = groupOf.computeIfAbsent(rightRef, r -> newGroup(r));
         if (left.equals(right)) {
@@ -60,6 +64,41 @@ public final class ShadowModel {
             groupOf.put(ref, left);
         }
         expectedAuditActions.add("identity.linked");
+    }
+
+    /**
+     * Records a rule the actors set on a gate.
+     *
+     * <p>Only what was asked for, never how core stores it — the model stays a
+     * partial second copy rather than a reimplementation.
+     */
+    public void ruleSet(String gate, boolean requireLinked) {
+        rules.put(gate, requireLinked);
+    }
+
+    /** Gates the model has set a rule on, and whether it requires linkage. */
+    public Map<String, Boolean> rules() {
+        return Collections.unmodifiableMap(rules);
+    }
+
+    /**
+     * Records an identity that exists but has never been linked to anything.
+     *
+     * <p>Kept SEPARATE from the link graph on purpose. An identity that has only
+     * ever had a code issued for it has no subject in core, so putting it in
+     * {@link #knownIdentities} would make {@code linkage-mirrors-model} report
+     * "core does not know it at all" about an account core is correct to not
+     * know. Two different questions, two different sets.
+     */
+    public void sawUnlinked(String ref) {
+        if (!groupOf.containsKey(ref)) {
+            neverLinked.add(ref);
+        }
+    }
+
+    /** Identities the model has seen and never seen linked. */
+    public Set<String> neverLinked() {
+        return Collections.unmodifiableSet(neverLinked);
     }
 
     /** Records a code as spent. Spent is permanent; §11's single-use property. */

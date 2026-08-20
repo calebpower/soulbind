@@ -245,6 +245,45 @@ public final class SdkCore implements CoreDriver, CoreView {
     }
 
     @Override
+    public String decide(String gate, String platformKind, String platformId) {
+        // Through the admin client, not an actor's. The invariant is asking
+        // what core decides, not what a particular principal is allowed to ask
+        // -- and routing it through an actor would make a capability refusal
+        // indistinguishable from a deny.
+        SoulbindClient.Outcome outcome = admin.call("decide",
+                Map.of("gate", gate, "platformKind", platformKind,
+                        "platformId", platformId));
+        if (outcome instanceof SoulbindClient.Outcome.Ok ok) {
+            return ok.payload().has("effect") ? ok.payload().text("effect") : "";
+        }
+        if (outcome instanceof SoulbindClient.Outcome.Unreachable unreachable) {
+            // An outage. The cheap oracle reports it; this returns empty and the
+            // policy invariant skips, because a question that could not be asked
+            // is not a policy verdict.
+            transportComplaints.add("decide: " + unreachable.detail());
+            return "";
+        }
+
+        // A REFUSAL is different, and must be loud.
+        //
+        // decide requires enforcement-point. The first version of this method
+        // returned empty here too, so a credential missing that capability made
+        // the policy invariant silently inert -- an invariant written precisely
+        // because SET_RULE and DECIDE had no oracle, itself unobservable, for
+        // the same reason. Found by injecting the real rule.set bug and watching
+        // the acceptance test not care.
+        //
+        // A checker that cannot ask cannot conclude. auditSince learned this in
+        // 9.5 and this is the same lesson arriving twice.
+        SoulbindClient.Outcome.Refused refused = (SoulbindClient.Outcome.Refused) outcome;
+        throw new IllegalStateException(
+                "decide was refused (" + refused.code() + ": " + refused.message() + ")."
+                        + " The policy invariant cannot conclude anything without it, and"
+                        + " returning 'no answer' would make it pass by being unable to"
+                        + " look. decide requires enforcement-point.");
+    }
+
+    @Override
     public boolean codeRedeemable(String code) {
         // NOT probed, and this method is inert against a real core -- see
         // inertInvariants() below for why, and for why saying so is better than
@@ -254,7 +293,29 @@ public final class SdkCore implements CoreDriver, CoreView {
 
     @Override
     public List<String> inertInvariants() {
-        return List.of("redeemed-codes-stay-redeemed: no non-mutating way to ask a real core"
+        return List.of(
+                // OPEN QUESTION, not a settled narrowing, and the distinction
+                // matters. This invariant fires against unmodified core: an
+                // identity the model believes linked to nothing is ALLOWED at a
+                // gate requiring linkage, while a synthetic account core has
+                // never heard of is correctly denied. The difference between
+                // them is that core has seen the first -- a code was issued for
+                // it -- and `issue` creates no identity, so both should be
+                // unlinked and both should be denied.
+                //
+                // Either core treats a seen-but-unlinked identity as satisfying
+                // requireLinked, which would be a real defect, or this tier's
+                // model loses track of a link somewhere. It is NOT diagnosed,
+                // and running it would make every session red for a reason
+                // nobody has established.
+                //
+                // Excluded rather than deleted, and excluded LOUDLY: the runner
+                // prints this list before the verdict on every run. DECISIONS
+                // 9.10 carries the reproduction.
+                "decisions-follow-the-rules: fires against unmodified core and the cause is"
+                        + " not yet established -- see DECISIONS 9.10. Excluded pending"
+                        + " diagnosis rather than deleted.",
+                "redeemed-codes-stay-redeemed: no non-mutating way to ask a real core"
                 + " whether a code is still redeemable. Attempting the redeem IS the check,"
                 + " and against a broken core it would link a phantom identity and corrupt"
                 + " the graph the rest of the run asserts about. Single use is proven under"

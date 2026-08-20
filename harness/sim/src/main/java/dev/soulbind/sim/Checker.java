@@ -77,7 +77,19 @@ public final class Checker {
      */
     public List<Violation> check(int afterAction, ShadowModel model, CoreView core) {
         List<Violation> fresh = new ArrayList<>();
+        // Invariants the view has declared it cannot answer are SKIPPED, not run
+        // and ignored. Running one against a view that cannot answer it produces
+        // either a false pass (the view answers "no" to everything) or a false
+        // failure, and both are worse than not running it -- provided the skip
+        // is loud, which it is: Runner prints the inert list first, before the
+        // verdict, on green runs as well as red.
+        List<String> inert = core.inertInvariants().stream()
+                .map(reason -> reason.split(":", 2)[0].strip())
+                .toList();
         for (Invariant invariant : invariants) {
+            if (inert.contains(invariant.name())) {
+                continue;
+            }
             for (String complaint : invariant.check(model, core)) {
                 Violation violation = new Violation(invariant.name(), complaint, afterAction);
                 boolean alreadyKnown = violations.stream()

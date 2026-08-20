@@ -121,6 +121,10 @@ public final class Simulation {
         switch (action.kind()) {
             case ISSUE_CODE, ABANDON_CODE -> {
                 CoreDriver.Result result = driver.issueCode(action.actor(), ref[0], ref[1]);
+                // The model learns the identity EXISTS, whether or not it is
+                // ever linked. That is what lets the policy invariant ask about
+                // accounts linked to nothing.
+                model.sawUnlinked(action.subject());
                 if (result.accepted() && result.value() != null
                         && action.kind() == ActionKind.ISSUE_CODE) {
                     // ABANDON_CODE deliberately does not tell the world, so the
@@ -157,6 +161,7 @@ public final class Simulation {
                         driver.setRule(action.actor(), action.subject(), true);
                 if (result.accepted()) {
                     model.mutated("rule.changed");
+                    model.ruleSet(action.subject(), true);
                 }
                 return result;
             }

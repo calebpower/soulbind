@@ -4738,3 +4738,69 @@ instruction to get it green, and adding an assertion mid-loop means the next red
 run cannot be attributed to the previous fix. It goes in once a run is clean —
 recorded here so it is not lost, because "we noticed but were busy" is how a gap
 becomes permanent.
+
+### 9.10 — An invariant that fires against correct core, and is excluded loudly
+
+9.9 recorded that `SET_RULE` and `DECIDE` had no oracle. Writing one
+(`decisions-follow-the-rules`: a gate requiring linkage must refuse an identity
+linked to nothing) found three things, in order.
+
+**First, it caught the real bug it was written for.** With `rule.set` sending
+`requireLinked: false` — the payload defect of 9.9 — the control fails
+immediately and says exactly why: *"gate forum.post requires linkage and core
+says allow for an account it has never heard of. Either the rule was not applied
+or it was stored requiring nothing."* That is the invariant working.
+
+**Second, it was silently inert before that.** `decide` requires
+`enforcement-point`, and the sim's admin credential held
+`config-management, link-state-reader, code-entry` and not that. The call was
+refused, `SdkCore.decide` returned empty, and the invariant skipped — an
+invariant written *because* two action classes had no oracle, itself
+unobservable, for the same reason. Found by injecting the bug it was meant to
+catch and watching it not care.
+
+Fixed twice over: the credential now holds `enforcement-point`, and a refusal
+from `decide` now **throws** rather than returning "no answer". A checker that
+cannot ask cannot conclude; 9.5 learned this about `auditSince` and it arrived
+again here.
+
+**Third, and unresolved: it fires against unmodified core.**
+
+An identity the model believes is linked to nothing is **allowed** at a gate
+requiring linkage — while a synthetic account core has never heard of is
+correctly **denied**. The only difference between them is that core has *seen*
+the first: a code was issued for it. And `LinkingService.issue` creates no
+identity, so both should be unlinked and both should be denied.
+
+Two possibilities, and they are not close in importance:
+
+1. **Core treats a seen-but-unlinked identity as satisfying `requireLinked`.**
+   That would be a real defect in the policy path — an account that has done
+   nothing but request a code passing a gate that requires linkage.
+2. **This tier's model loses track of a link**, so an identity that really is
+   linked is believed unlinked.
+
+The second is more likely on priors — the tier is days old and core has been
+exercised for eight phases — but "more likely" is not "established", and the
+first is serious enough that guessing is not good enough.
+
+#### Excluded, not deleted, and not quietly
+
+Running it would make every session red for a reason nobody has established,
+which trains people to ignore red. Deleting it would lose both the invariant and
+the question.
+
+So it is declared **inert** by `SdkCore`, and the mechanism now actually skips
+rather than running-and-ignoring: an invariant a view cannot answer produces
+either a false pass or a false failure, and both are worse than not running it —
+*provided the skip is loud*. It is. `Runner` prints the inert list first, before
+the verdict, on green runs as well as red, and there is a test on that ordering.
+
+The reproduction is: grant the sim's admin credential `enforcement-point`, put
+`decisions-follow-the-rules` back in the answerable set, and run
+`harness/sim/acceptance.sh`. The control fails at action 50 with several real
+identities allowed at `game.join`.
+
+**This is a lead, not a finding.** It is written down at this length because the
+next person to look at it should not have to rediscover which of the two
+explanations they are choosing between.
