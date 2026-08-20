@@ -1,0 +1,136 @@
+/*
+ * Copyright (c) 2026 Caleb L. Power
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.soulbind.sim;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+
+/**
+ * The acceptance test, in process.
+ *
+ * <p>§14's Phase 9 gate asks that "a deliberately reverted Phase-2-or-later fix
+ * is rediscovered by a hunting run". That has to be executed against real core
+ * to satisfy the gate, and it is — but the same question is asked here of the
+ * whole loop, in milliseconds, against a small core whose defects can be
+ * switched on one at a time.
+ *
+ * <p>The two are complementary. The session run proves the tier finds a real
+ * defect in real code. This one proves the tier finds <b>every</b> defect it
+ * claims to, including the five nobody has written yet, and it runs on every
+ * build rather than once a session.
+ */
+class SimulationTest {
+
+    private static World world() {
+        return new World(
+                List.of(
+                        new Actor("alex", List.of("game:alex", "chat:alex"), 0),
+                        new Actor("sam", List.of("forum:sam", "chat:sam"), 0),
+                        new Actor("rey", List.of("game:rey", "forum:rey"), 0)),
+                List.of("game.join", "forum.post"));
+    }
+
+    @Test
+    @DisplayName("a correct core survives a long run untouched")
+    void theControl() {
+        // The half that is easy to skip and impossible to do without. A tier
+        // that catches a defective core proves nothing if it also catches a
+        // correct one -- and the only way to find out is to write a correct one
+        // and run it.
+        InMemoryCore core = new InMemoryCore();
+        Simulation.Outcome outcome =
+                Simulation.run(20260820L, world(), core, core, 400, 50);
+
+        assertTrue(outcome.clean(),
+                () -> "a correct core was reported as broken:\n" + outcome.summary());
+        assertTrue(outcome.actionsTaken() > 300,
+                () -> "the run stopped after " + outcome.actionsTaken() + " actions and"
+                        + " proved little");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(InMemoryCore.Defect.class)
+    @DisplayName("every defect is rediscovered by a hunting run")
+    void everyDefectIsCaught(InMemoryCore.Defect defect) {
+        // Parameterised over the enum rather than one test per defect, so a
+        // defect added without a test is impossible -- the case appears the
+        // moment the constant does.
+        InMemoryCore core = new InMemoryCore().with(defect);
+        Simulation.Outcome outcome =
+                Simulation.run(20260820L, world(), core, core, 400, 50);
+
+        assertFalse(outcome.clean(),
+                () -> defect + " was switched on and a 400-action run did not notice.\n"
+                        + "Last actions:\n"
+                        + String.join("\n", outcome.trace().subList(
+                                Math.max(0, outcome.trace().size() - 10),
+                                outcome.trace().size())));
+    }
+
+    @Test
+    @DisplayName("the run says WHEN it first diverged, not just that it did")
+    void violationsAreLocatedInTheRun() {
+        // With the shrinker deferred (DECISIONS 9.1) this is what makes a
+        // failing seed tractable. A violation with no action number means
+        // reading the whole trace.
+        InMemoryCore core = new InMemoryCore().with(InMemoryCore.Defect.REDEEM_DOES_NOT_LINK);
+        Simulation.Outcome outcome =
+                Simulation.run(20260820L, world(), core, core, 400, 25);
+
+        assertFalse(outcome.violations().isEmpty());
+        int first = outcome.violations().get(0).afterAction();
+        assertTrue(first > 0 && first <= 400,
+                () -> "the first violation reports action " + first + ", which is not a"
+                        + " position in this run");
+    }
+
+    @Test
+    @DisplayName("a run is reproducible from its seed, defects and all")
+    void runsAreReproducible() {
+        InMemoryCore first = new InMemoryCore().with(InMemoryCore.Defect.CODE_STAYS_REDEEMABLE);
+        InMemoryCore second = new InMemoryCore().with(InMemoryCore.Defect.CODE_STAYS_REDEEMABLE);
+
+        Simulation.Outcome a = Simulation.run(4242L, world(), first, first, 300, 50);
+        Simulation.Outcome b = Simulation.run(4242L, world(), second, second, 300, 50);
+
+        assertEquals(a.trace(), b.trace(), "one seed produced two different traces");
+        assertEquals(a.violations().toString(), b.violations().toString(),
+                "one seed produced two different verdicts");
+    }
+
+    @Test
+    @DisplayName("the final check runs even when the period does not divide the length")
+    void theEndIsAlwaysChecked() {
+        // A run of 210 with a period of 100 would otherwise leave its last ten
+        // actions unchecked -- and those are the ones with the most accumulated
+        // history behind them, which is where this tier's value is.
+        InMemoryCore core = new InMemoryCore().with(InMemoryCore.Defect.REDEEM_DOES_NOT_LINK);
+        Simulation.Outcome outcome =
+                Simulation.run(31337L, world(), core, core, 210, 100_000);
+
+        assertFalse(outcome.clean(),
+                "a defect present at the end of the run was never checked for, because the"
+                        + " period never came round");
+    }
+}

@@ -1,0 +1,23 @@
+# The committed seed set.
+#
+#     <seed>  <why it is here>
+#
+# Fixed seeds by default, per §11: a tier that draws a fresh seed every run is a
+# tier whose result is not comparable to yesterday's, and a failure nobody can
+# reproduce is a failure nobody will fix.
+#
+# PROMOTION IS PERMANENT. Any seed that has ever found a defect is added here
+# with a dated note and never removed -- not when the defect is fixed, and
+# especially not then. The seed found something once; it is the cheapest
+# available evidence that the fix holds, and deleting it converts a regression
+# test into a story about something that used to happen.
+#
+# The runner prints the promotion line for a seed that fails, because a human
+# has to commit it and a harness that could edit this file would eventually
+# curate it.
+
+# The founding three. Chosen arbitrarily and kept because they are the baseline
+# every run is compared against, not because they are special.
+20260820  baseline
+4242      baseline
+31337     baseline

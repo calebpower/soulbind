@@ -81,4 +81,26 @@ public interface CoreView {
 
     /** What the transport saw go wrong, when {@link #reachable()} is false. */
     List<String> transportComplaints();
+
+    /**
+     * Invariants this view cannot answer, and why.
+     *
+     * <p>Empty for a view that can answer everything, which is the normal case
+     * and the default.
+     *
+     * <p>It exists because one question — is a spent code still redeemable? —
+     * has <b>no non-mutating answer over the protocol</b>. The only way to ask a
+     * real core is to attempt the redeem, and attempting it is the thing being
+     * checked: against a correct core the probe is refused and harmless, and
+     * against a broken one it succeeds, links a phantom identity, and corrupts
+     * the graph the rest of the run is asserting about.
+     *
+     * <p>So the view says so, out loud, and the runner prints it. The
+     * alternative was a view that answered {@code false} and an invariant that
+     * therefore never fired — an assertion that cannot fail, arrived at by
+     * politeness.
+     */
+    default List<String> inertInvariants() {
+        return List.of();
+    }
 }
