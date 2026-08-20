@@ -3708,3 +3708,93 @@ The 100% mutation code coverage is worth separating from the MSI. Every mutable
 line in `src/` is reached by a test — the PHP suite has no blind spots of the
 kind core has 411 of. What it has is 78 places where a test watched something
 happen and did not check what it was.
+
+## Phase 9 — simulated users
+
+### 9.1 — The shrinker is deferred, and the re-entry criteria for it
+
+Phase 9 ships trimmed. **What lands:** the oracle self-test, the generator, the
+actors, the shadow model, the checker, a small committed seed set and the
+promotion rule. **What does not:** the shrinker, and two of the six nemesis
+classes.
+
+#### Why the shrinker is the right thing to defer
+
+A shrinker turns *"seed 481923 fails after 400 actions"* into *"these six
+actions fail"*: bisect the run to the shortest failing prefix, then drop action
+kinds one at a time and keep each removal that still fails.
+
+That is **ergonomics, not detection.** It changes how long a person takes to
+understand a failure; it has no effect whatever on whether the failure is found.
+Detection is the generator, the shadow model and the checker — and all three
+land. A trimmed tier finds exactly the same defects as a full one. It just
+reports them less kindly.
+
+The cost is paid only when a seed actually fails, and it is paid by somebody who
+already knows a real defect exists. That is the best possible moment to spend an
+hour, and the worst possible moment to have spent three weeks in advance.
+
+#### The risk this carries, stated plainly
+
+The failure mode is not "reading traces is tedious". It is **a failing seed
+going uninvestigated because the trace is too long to face.** That would convert
+a working detector into decoration, and it would happen quietly, which is this
+project's whole recurring theme.
+
+Two things guard against it, and they are obligations rather than hopes:
+
+- **The transcript is readable by construction.** The tier emits a per-step
+  transcript in the shape the `journeys` stage already uses for Tier 11
+  evidence, not a raw action dump. A 400-step transcript that reads as prose is
+  a different object from a 400-element array.
+- **A failing seed is never dismissed.** It is promoted to the committed set
+  and investigated, however long that takes. A seed that found a defect once is
+  permanent, per §11 Tier 9.
+
+#### Why two nemesis classes and not the other four
+
+The line is not "how much time is left". It is **whether the defect requires
+accumulated history**:
+
+| Class | Kept | Why |
+|---|---|---|
+| Stale connector credential | **yes** | Only interesting when the credential was retired two hundred actions ago and something still holds it |
+| Act-on-unlinked | **yes** | The interesting case is an identity unlinked long before the connector acts on it |
+| Config flip mid-flow | **yes** | Nothing else in the battery changes runtime configuration underneath an in-progress flow |
+| Abandonment | **yes** | Codes accumulating unredeemed over a long run is a state no other tier constructs |
+| Hostile corpus input at write endpoints | no | Tier 7 drives the same corpus at the same endpoints. Depth adds nothing: a hostile string is hostile on action 1 and on action 400 |
+| Double redeem | no | Proven under concurrency on both backends at the Phase 2 gate, which is a stronger test than a weighted action would be |
+
+Both deferrals are **already covered elsewhere**, which is the whole reason they
+are the ones deferred. Neither is dropped from the system's coverage; they are
+dropped from *this tier's* pool.
+
+#### The gate is unaffected in substance
+
+§14's Phase 9 gate asks for the self-test green, three fixed seeds across both
+backends in a session, and — the important one — *a deliberately reverted
+Phase-2-or-later fix rediscovered by a hunting run*.
+
+**A hunting run does not need a shrinker.** Rediscovery is detection, and
+detection lands in full. What the trimmed tier cannot claim is the plan's full
+*deliverable* list, which is why this is recorded as a departure rather than
+quietly absorbed.
+
+Worth noting that this gate clause got materially cheaper to satisfy during
+Phase 8. The plan says *"until a real defect exists to revert, every new
+assertion is mutation-checked by hand"* — there were none when it was written.
+There are now several, found by mutation coverage rather than by review: the
+nonce retention hole (8.21) and the asymmetric-link path (in `LinkingService`)
+are both genuine, both recent, and both excellent revert candidates.
+
+#### Re-entry criteria
+
+Written down so this does not drift into a permanent omission by default. Build
+the shrinker when **any** of these becomes true:
+
+1. A failing seed goes uninvestigated for more than a week.
+2. A trace of more than roughly a hundred actions has to be read by hand twice.
+3. The tier finds its third real defect — at which point reading traces stops
+   being an occasional cost and becomes a routine one.
+
+Whichever comes first. The shrinker is deferred, not declined.
