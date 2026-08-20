@@ -154,6 +154,45 @@ class LinkingServiceTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("an already-linked refusal distinguishes the same person from two people")
+    void alreadyLinkedSaysWhichKind(Backend backend) {
+        // Both refusals are ALREADY_LINKED and the detail is the only thing that
+        // separates them -- which is the difference between "you already did
+        // this" and "two different people are claiming these accounts". The
+        // first needs no action; the second needs somebody to look. Mutation
+        // coverage found the comparison could be negated with nothing failing,
+        // so the two cases were interchangeable to every test here.
+        try (Fixture f = fixture(backend)) {
+            // Same person: link the pair, then try to link them again.
+            LinkCodeRecord first = f.linking().issue("conn-a", "kind-a", "acct-1", "Alex");
+            f.linking().redeem("conn-b", first.code(), "kind-b", "acct-2", "Alex");
+
+            LinkCodeRecord again = f.linking().issue("conn-a", "kind-a", "acct-1", "Alex");
+            LinkingService.Result.Denied sameSubject = assertInstanceOf(
+                    LinkingService.Result.Denied.class,
+                    f.linking().redeem("conn-b", again.code(), "kind-b", "acct-2", "Alex"));
+            assertEquals(LinkingService.Refusal.ALREADY_LINKED, sameSubject.refusal());
+            assertTrue(sameSubject.detail().contains("each other"),
+                    () -> "two accounts already linked TO EACH OTHER were described as"
+                            + " belonging to different people: " + sameSubject.detail());
+
+            // Two people: a second, independent pair.
+            LinkCodeRecord other = f.linking().issue("conn-c", "kind-c", "acct-3", "Sam");
+            f.linking().redeem("conn-d", other.code(), "kind-d", "acct-4", "Sam");
+
+            LinkCodeRecord across = f.linking().issue("conn-a", "kind-a", "acct-1", "Alex");
+            LinkingService.Result.Denied different = assertInstanceOf(
+                    LinkingService.Result.Denied.class,
+                    f.linking().redeem("conn-c", across.code(), "kind-c", "acct-3", "Sam"));
+            assertEquals(LinkingService.Refusal.ALREADY_LINKED, different.refusal());
+            assertTrue(different.detail().contains("different people"),
+                    () -> "two accounts belonging to DIFFERENT subjects were described as"
+                            + " already linked to each other: " + different.detail());
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
     @DisplayName("a new account redeemed BY an already-linked one joins that subject")
     void redeemingSideKeepsItsSubject(Backend backend) {
         // The asymmetric case, and the one nothing covered. isSymmetric() starts
