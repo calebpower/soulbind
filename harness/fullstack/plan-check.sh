@@ -262,9 +262,16 @@ log "the player page renders real link state, in the right units"
 # Retried, because Plan gathers SERVER_PERIODICAL on its own schedule and the
 # values are absent for a minute or two after stack-up. A single shot here would
 # be a flake that looks like a defect.
+# 24 attempts at 5s. Overridable ONLY so the mutation battery can exercise the
+# failure paths without spending two minutes per mutant; the default is
+# unchanged and is what every real run uses. Plan gathers SERVER_PERIODICAL on
+# its own schedule and the values are genuinely absent for a minute or two after
+# stack-up, so a shorter default would be a flake that reads as a defect.
+SERVER_RETRIES=${PLAN_SERVER_RETRIES:-24}
+
 server_ok=0
 i=0
-while [ "$i" -lt 24 ]; do
+while [ "$i" -lt "$SERVER_RETRIES" ]; do
     server_code=$(fetch "$BASE/v1/extensionData?server=Velocity" "$SERVER_JSON")
     # Gated on the same STRUCTURED read the assertions use, not on a grep for a
     # provider name. Gating on `grep -q linkedPlayers` and then asserting the
@@ -275,7 +282,7 @@ while [ "$i" -lt 24 ]; do
         break
     fi
     i=$((i + 1))
-    [ "$i" -lt 24 ] && sleep 5
+    [ "$i" -lt "$SERVER_RETRIES" ] && sleep 5
 done
 
 if [ "$server_ok" -ne 1 ]; then

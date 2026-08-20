@@ -1,0 +1,29 @@
+# The mutation catalogue for plan-check.sh.
+#
+#     <mutant-name> <player|server>
+#
+# One line per mutation. Every one must turn the stage RED; the runner treats a
+# surviving mutant as a failure and names it. The control -- the unmutated
+# recorded response -- must go green, because a check that fails on everything
+# kills every mutant and asserts nothing. That is not hypothetical: the walker
+# this catalogue was written against could not match any real Plan response, so
+# it failed on the recorded evidence too, and a runner without a control would
+# have reported a perfect score.
+#
+# Shell has no mutation-testing tool and does not need one here. The scripts in
+# harness/ ARE the tests, so mutating them is the wrong operation -- what has to
+# be mutated is what they OBSERVE. That is what this does.
+
+linked-false            player
+linked-null             player
+status-not-linked       player
+status-unknown          player
+platforms-forum-only    player
+platforms-placeholder   player
+proof-null              player
+proof-placeholder       player
+since-seconds           player
+since-zero              player
+aggregate-zero          server
+counters-non-numeric    server
+table-no-columns        server

@@ -159,6 +159,58 @@ class PlanCheckWalkerGuardTest {
                 "a table with no columns satisfied the table probe");
     }
 
+    // --- the mutation catalogue ------------------------------------------------
+
+    @Test
+    @DisplayName("every catalogued mutant is implemented, and the catalogue is not empty")
+    void mutationCatalogueIsWhole() throws IOException {
+        Path catalogue = SourceTree.repoRoot()
+                .resolve("harness/fullstack/mutation/mutants.txt");
+        Path mutator = SourceTree.repoRoot()
+                .resolve("harness/fullstack/mutation/mutate.py");
+        String implemented = Files.readString(mutator, StandardCharsets.UTF_8);
+
+        List<String> names = Files.readAllLines(catalogue, StandardCharsets.UTF_8).stream()
+                .map(String::strip)
+                .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                .map(line -> line.split("\\s+")[0])
+                .toList();
+
+        // The catalogue emptying out is the failure mode worth guarding. Every
+        // claim the runner makes is of the form "each mutant died", and an
+        // empty list satisfies it -- so the runner checks that too, at run time.
+        // This is the cheap version that runs on every build.
+        assertTrue(names.size() >= 12,
+                () -> "the mutation catalogue lists " + names.size() + " mutants; it had 13"
+                        + " when written. A shrinking catalogue is how a check quietly stops"
+                        + " being tested.");
+
+        for (String name : names) {
+            assertTrue(implemented.contains("\"" + name + "\""),
+                    () -> "mutants.txt lists '" + name + "' and mutate.py does not implement"
+                            + " it. The runner exits on an unknown mutant rather than"
+                            + " skipping it, so this is a broken battery, not a silent one"
+                            + " -- but it is cheaper to learn here.");
+        }
+    }
+
+    @Test
+    @DisplayName("the mutation runner still requires a passing control and a non-empty run")
+    void mutationRunnerKeepsItsOwnGuards() throws IOException {
+        String runner = Files.readString(
+                SourceTree.repoRoot().resolve("harness/fullstack/mutation/run.sh"),
+                StandardCharsets.UTF_8);
+
+        // Without the control, a check that rejects EVERYTHING scores a perfect
+        // kill rate. That is not a hypothetical: the walker this battery was
+        // built against could not match any real Plan response, so it failed on
+        // the recorded evidence too.
+        assertTrue(runner.contains("CONTROL FAILED"),
+                "the runner no longer fails when the unmutated response is rejected");
+        assertTrue(runner.contains("no mutants ran"),
+                "the runner no longer fails when it executes zero mutants");
+    }
+
     // --- extracting the readers from the script --------------------------------
 
     /**
