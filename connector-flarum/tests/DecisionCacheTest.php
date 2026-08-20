@@ -70,6 +70,26 @@ final class DecisionCacheTest extends TestCase
     }
 
     #[Test]
+    #[DisplayName('a zero ttl forgets the key rather than writing a doomed entry')]
+    public function zeroTtlForgetsRatherThanWriting(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::zeroTtlForgetsRatherThanWriting(),
+            'the cache does not hold: a zero ttl forgets rather than writes'
+        );
+    }
+
+    #[Test]
+    #[DisplayName('a poisoned generation marker is refused')]
+    public function aPoisonedGenerationIsRefused(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::aPoisonedGenerationIsRefused(),
+            'the cache does not hold: a poisoned generation marker is refused'
+        );
+    }
+
+    #[Test]
     #[DisplayName('expiry is exclusive of the instant it names')]
     public function expiryIsExclusive(): void
     {

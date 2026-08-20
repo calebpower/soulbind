@@ -143,6 +143,97 @@ final class CacheChecks
         return $failures;
     }
 
+    /**
+     * @return list<string>
+     *
+     * A zero TTL must FORGET the key, not write a doomed entry.
+     *
+     * `zeroTtlIsNotCached` above asserts what can be read back, and both
+     * spellings look identical through that lens: with `<= 0` the cache calls
+     * forget(), and with `< 0` it falls through and calls put($key, $json, 0),
+     * which ArrayDecisionStore treats as already expired. Mutation coverage
+     * found exactly that, along with deleting the `return` after the forget.
+     *
+     * The double is what made them look safe. Flarum's real cache backends do
+     * not agree that a zero TTL means "already gone" -- in several of them a
+     * zero or absent TTL means FOREVER, which would cache permanently the one
+     * kind of decision core explicitly said not to keep. So this asserts the
+     * call rather than the readback.
+     */
+    public static function zeroTtlForgetsRatherThanWriting(): array
+    {
+        $failures = [];
+
+        $store = new RecordingDecisionStore();
+        $cache = new DecisionCache(FailMode::CLOSED, $store);
+
+        $cache->store('join', 'chat:abc', self::decision(Effect::ALLOW, 600), self::NOW);
+        $beforeZero = count($store->decisionPuts());
+
+        $cache->store('join', 'chat:abc', self::decision(Effect::DENY, 0), self::NOW);
+
+        $puts = $store->decisionPuts();
+        if (count($puts) !== $beforeZero) {
+            $failures[] = 'a zero-ttl decision was WRITTEN to the store (ttl '
+                . $puts[count($puts) - 1]['ttl'] . ') instead of forgetting the key. A '
+                . 'backend that reads a zero ttl as "no expiry" would then cache forever '
+                . 'the one answer core said not to keep.';
+        }
+
+        $forgets = array_filter(
+            $store->calls(),
+            static fn (array $c): bool => $c['op'] === 'forget'
+        );
+        if ($forgets === []) {
+            $failures[] = 'a zero-ttl decision never called forget(), so an entry cached '
+                . 'a moment earlier is left for whatever the backend does next';
+        }
+
+        return $failures;
+    }
+
+    /**
+     * @return list<string>
+     *
+     * A generation marker with trailing garbage is not a generation.
+     *
+     * The validator is anchored at both ends. Dropping the trailing anchor lets
+     * "123abc" through as 123, and mutation coverage showed nothing noticed --
+     * while `PoisoningDecisionStore` in this very suite establishes that a
+     * hostile store IS a modelled threat. A poisoned marker that parses moves
+     * every lookup into a namespace the attacker chose.
+     *
+     * Dropping the LEADING anchor is harmless by contrast, and is left alone:
+     * "abc123" then matches, casts to 0, and 0 is what the rejection path
+     * returns anyway.
+     */
+    public static function aPoisonedGenerationIsRefused(): array
+    {
+        $failures = [];
+
+        foreach (['123abc', '12 34', "7\x00", 'NaN', '-5', '1e3'] as $poison) {
+            $store = new ArrayDecisionStore();
+            $cache = new DecisionCache(FailMode::CLOSED, $store);
+
+            // Cache an answer, then poison the generation marker behind it.
+            $cache->store('join', 'chat:abc', self::decision(Effect::ALLOW, 600), self::NOW);
+            $store->put("soulbind\x1Fgen\x1Fchat:abc", $poison, 600);
+
+            // The entry was written under generation 0. A poisoned marker that
+            // PARSES moves the lookup elsewhere and the answer vanishes; one
+            // that is correctly refused leaves generation 0 and the answer
+            // reachable. Either way the cache must not honour the poison.
+            $answer = $cache->cached('join', 'chat:abc', self::NOW);
+            if ($answer === null) {
+                $failures[] = "the generation marker '" . $poison . "' was honoured rather "
+                    . 'than refused, so a hostile store can redirect every lookup into a '
+                    . 'namespace it chooses';
+            }
+        }
+
+        return $failures;
+    }
+
     /** @return list<string> */
     public static function expiryIsExclusive(): array
     {
