@@ -154,6 +154,43 @@ class LinkingServiceTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("every entry point registers the platform kind it was handed")
+    void learnsPlatformKinds(Backend backend) {
+        // Core has no compiled-in list of platforms -- it learns them from what
+        // connectors do, and `soulbind doctor`, the admin surface and the
+        // policy engine all read that list back. Deleting any of the three
+        // `kinds.seen(...)` calls left every assertion in this file green:
+        // linking worked, the graph read back correctly, and core simply never
+        // learned that the platform existed. Mutation coverage found all three.
+        try (Fixture f = fixture(backend)) {
+            Storage storage = f.storage();
+            assertFalse(storage.platformKinds().isKnown("kind-a"),
+                    "the fixture started with the kind already registered, so this test"
+                            + " would pass without anything registering it");
+
+            LinkCodeRecord code = f.linking().issue("conn-a", "kind-a", "acct-1", "Alex");
+            assertTrue(storage.platformKinds().isKnown("kind-a"),
+                    "issuing a code did not register the issuing platform kind");
+
+            assertFalse(storage.platformKinds().isKnown("kind-b"));
+            f.linking().redeem("conn-b", code.code(), "kind-b", "acct-2", "Alex too");
+            assertTrue(storage.platformKinds().isKnown("kind-b"),
+                    "redeeming did not register the redeeming platform kind");
+
+            assertFalse(storage.platformKinds().isKnown("kind-c"));
+            f.linking().attest("conn-c", "kind-c", "acct-3", "Alex elsewhere", "oauth");
+            assertTrue(storage.platformKinds().isKnown("kind-c"),
+                    "attesting did not register the attested platform kind");
+
+            assertEquals(
+                    Set.of("kind-a", "kind-b", "kind-c"),
+                    Set.copyOf(storage.platformKinds().list()),
+                    "the registry does not list exactly the kinds these calls used");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
     @DisplayName("symmetry: the same flow works with the sides reversed")
     void isSymmetric(Backend backend) {
         // Core never learns which pairing is "normal", because it never sees a

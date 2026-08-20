@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Remembers nonces for as long as a signature stays fresh.
@@ -56,12 +57,38 @@ public final class NonceStore {
     private final Duration window;
     private final ConcurrentHashMap<String, Instant> seen = new ConcurrentHashMap<>();
     private final AtomicInteger sinceLastSweep = new AtomicInteger();
+    private final AtomicLong sweeps = new AtomicLong();
 
     /** How often insertions trigger a sweep. Amortises the cost without a timer thread. */
     private static final int SWEEP_INTERVAL = 256;
 
+    private final int maxEntries;
+    private final int sweepInterval;
+
     public NonceStore(Duration window) {
+        this(window, MAX_ENTRIES, SWEEP_INTERVAL);
+    }
+
+    /**
+     * The same store with the two thresholds moved, for tests.
+     *
+     * <p>Package-private, and it exists because mutation coverage said the
+     * alternative was pretending. Both branches below — the amortised sweep and
+     * the fail-closed refusal when full — are reachable in production only after
+     * 256 and 1,000,000 insertions respectively. Nothing exercised either: every
+     * existing test called {@link #sweep} by hand, so negating the conditional
+     * that decides whether a sweep ever happens on its own changed nothing that
+     * any assertion could see, and neither did deleting the sweep call outright.
+     *
+     * <p>A million-entry test would take seconds and hundreds of megabytes to
+     * assert a branch. Moving the threshold asserts the same branch in
+     * milliseconds, and the comparison being mutated is the same comparison
+     * either way.
+     */
+    NonceStore(Duration window, int maxEntries, int sweepInterval) {
         this.window = window;
+        this.maxEntries = maxEntries;
+        this.sweepInterval = sweepInterval;
     }
 
     /**
@@ -70,13 +97,13 @@ public final class NonceStore {
      * @return true if this nonce had not been seen inside the window
      */
     public boolean recordIfNew(String nonce, Instant now) {
-        if (sinceLastSweep.incrementAndGet() >= SWEEP_INTERVAL) {
+        if (sinceLastSweep.incrementAndGet() >= sweepInterval) {
             sinceLastSweep.set(0);
             sweep(now);
         }
-        if (seen.size() >= MAX_ENTRIES) {
+        if (seen.size() >= maxEntries) {
             sweep(now);
-            if (seen.size() >= MAX_ENTRIES) {
+            if (seen.size() >= maxEntries) {
                 return false; // fail closed; see MAX_ENTRIES
             }
         }
@@ -92,8 +119,22 @@ public final class NonceStore {
         return seen.size();
     }
 
+    /**
+     * How many sweeps have run.
+     *
+     * <p>For tests, and for the same reason {@link #size} is exposed. Without it
+     * the counter reset in {@link #recordIfNew} is unobservable: deleting it
+     * makes every insertion after the first threshold sweep, which is a
+     * performance collapse and not a behaviour change, so no assertion about
+     * nonces can see it.
+     */
+    public long sweepCount() {
+        return sweeps.get();
+    }
+
     /** Drops everything older than the window. */
     public void sweep(Instant now) {
+        sweeps.incrementAndGet();
         Instant cutoff = now.minus(window);
         for (Map.Entry<String, Instant> entry : seen.entrySet()) {
             if (entry.getValue().isBefore(cutoff)) {

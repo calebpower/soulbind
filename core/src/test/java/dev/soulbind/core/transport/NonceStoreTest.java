@@ -77,6 +77,78 @@ class NonceStoreTest {
         assertFalse(store.recordIfNew("n1", NOW.plusSeconds(1)));
     }
 
+    // --- the two thresholds -------------------------------------------------
+    //
+    // Everything above calls sweep() by hand. Nothing reached the code that
+    // decides whether a sweep happens on its own, or the refusal when the store
+    // is full -- 256 and 1,000,000 insertions away respectively in production.
+    // Mutation coverage found all six: negating either conditional, moving
+    // either boundary, deleting the sweep call and deleting the counter reset
+    // all left every assertion in this file green.
+
+    @Test
+    @DisplayName("insertions eventually sweep on their own, without anyone calling sweep")
+    void sweepsItselfAfterTheInterval() {
+        NonceStore store = new NonceStore(WINDOW, 1_000, 4);
+        assertTrue(store.recordIfNew("old", NOW));
+
+        // Past the window, so `old` is now expired. Three more insertions take
+        // the counter to the interval and the sweep must happen unprompted --
+        // this is the only reclamation a long-running core gets.
+        Instant later = NOW.plus(WINDOW).plusSeconds(1);
+        assertTrue(store.recordIfNew("a", later));
+        assertTrue(store.recordIfNew("b", later));
+        assertTrue(store.recordIfNew("c", later));
+
+        assertEquals(3, store.size(),
+                "the expired entry is still there, so no automatic sweep ran");
+        assertTrue(store.sweepCount() >= 1, "no sweep was triggered by insertion");
+    }
+
+    @Test
+    @DisplayName("the sweep counter resets, so sweeps stay amortised rather than constant")
+    void sweepStaysAmortised() {
+        NonceStore store = new NonceStore(WINDOW, 1_000, 4);
+        for (int i = 0; i < 4; i++) {
+            store.recordIfNew("n" + i, NOW);
+        }
+        assertEquals(1, store.sweepCount(), "the first interval did not sweep exactly once");
+
+        // Three more must NOT sweep. Without the counter reset every insertion
+        // past the first threshold sweeps forever: correct answers, and the cost
+        // of the store goes quadratic in a way no nonce assertion can see.
+        for (int i = 4; i < 7; i++) {
+            store.recordIfNew("n" + i, NOW);
+        }
+        assertEquals(1, store.sweepCount(),
+                "sweeping on every insertion after the first threshold -- the counter is"
+                        + " not being reset");
+
+        store.recordIfNew("n7", NOW);
+        assertEquals(2, store.sweepCount(), "the second interval did not sweep");
+    }
+
+    @Test
+    @DisplayName("a full store refuses rather than growing, and does not record the refused nonce")
+    void failsClosedWhenFull() {
+        // Fail CLOSED: refusing a legitimate request beats accepting a replay,
+        // and an unbounded store is a memory-exhaustion path an attacker
+        // controls. Every entry here is fresh, so the sweep frees nothing.
+        NonceStore store = new NonceStore(WINDOW, 4, 1_000);
+        for (int i = 0; i < 4; i++) {
+            assertTrue(store.recordIfNew("n" + i, NOW));
+        }
+        assertFalse(store.recordIfNew("overflow", NOW),
+                "a full store accepted another nonce instead of failing closed");
+        assertEquals(4, store.size(), "the refused nonce was recorded anyway");
+
+        // And the refusal must not be sticky in the wrong direction: once the
+        // window passes, the store recovers on its own.
+        Instant later = NOW.plus(WINDOW).plusSeconds(1);
+        assertTrue(store.recordIfNew("after-expiry", later),
+                "the store never recovered after its entries expired");
+    }
+
     @Test
     @DisplayName("two threads racing the same nonce: exactly one wins")
     void concurrentSameNonce() throws Exception {
@@ -88,6 +160,7 @@ class NonceStoreTest {
         for (int round = 0; round < 50; round++) {
             NonceStore store = new NonceStore(WINDOW);
             String nonce = "race-" + round;
+            int finalRound = round;
             AtomicInteger winners = new AtomicInteger();
             CountDownLatch ready = new CountDownLatch(threads);
             CountDownLatch go = new CountDownLatch(1);
@@ -116,7 +189,8 @@ class NonceStoreTest {
             }
             assertEquals(
                     1, winners.get(),
-                    () -> "round " + " admitted " + winners.get() + " uses of one nonce");
+                    () -> "round " + finalRound + " admitted " + winners.get()
+                            + " uses of one nonce");
         }
     }
 }

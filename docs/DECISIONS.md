@@ -3531,3 +3531,105 @@ true is that the automated check *enforced* it. From `558df1e` it passed on
 labels that render regardless of value; from `8557416` it could not pass at all.
 The clause rested on evidence a human read, which is exactly the arrangement the
 tier exists to replace.
+
+### 8.20 — Automating the thing this project had been doing by hand
+
+Every vacuous assertion found in Phase 8 was found the same way: break the
+covered code by hand, watch what happens. That operation is mechanical, and
+tools have performed it exhaustively for forty years. Doing it by hand, once per
+assertion, on discipline, was the most laborious standing rule in this
+repository and the one most likely to be skipped on a bad day.
+
+Three tiers now do it mechanically.
+
+**Java — PIT**, invoked directly rather than through the community Gradle
+plugin, whose last release predates Gradle 9 by two major versions. A build tool
+that breaks on upgrade is a tool that gets disabled in a hurry the first time it
+is inconvenient. The command line is a stable interface; the convention plugin
+is forty lines and will not rot.
+
+It is applied from `soulbind.java-common` rather than module by module, so a new
+module cannot be created without it, and it registers only where main sources
+exist — `guards` grades the tree, it is not graded.
+
+**PHP — Infection**, from a checksum-pinned PHAR. `composer require --dev` does
+not resolve: Flarum 1.8 locks `psr/log` to 1.x and Infection 0.35 needs
+`^2 || ^3`. A mutation runner sharing a lock with the code it mutates was never
+a good arrangement, and the PHAR is one checksum instead of a hundred transitive
+packages resolved fresh. It needs a coverage driver, so the pinned PHP image
+gains pcov in a build step.
+
+**Shell — fixtures.** There is no mature mutation tool for POSIX shell and it
+would be the wrong tool: these scripts *are* the tests, so mutating them asks
+nothing useful. What has to be mutated is what they **observe**. So a recorded
+Plan response is replayed with Plan's own wire behaviour, once clean and once
+per catalogued mutation, and the check is required to complain each time.
+
+The runner asserts three things, and the third two are the ones that matter:
+the control must **pass**, at least one mutant must have **run**, and every
+mutant must die. Without the control, a check that rejects everything scores
+100% — which the walker in `8557416` would have done.
+
+#### What the first run found
+
+1,630 mutants across eight modules. 1,015 killed. **416 never executed by any
+test at all, and 199 executed by a test that did not notice.** Those 199 are the
+interesting number: a test ran the line, the line's behaviour changed, and
+nothing failed.
+
+Six of them were in `NonceStore`, which is replay protection. Both thresholds —
+the amortised sweep and the fail-closed refusal when full — sit 256 and
+1,000,000 insertions away in production, and every existing test called
+`sweep()` by hand. Negating the conditional that decides whether a sweep ever
+happens unprompted changed nothing any assertion could see. Neither did deleting
+the sweep call. The thresholds are now injectable for tests, which is not a
+weakening: the comparison being mutated is the same comparison, and asserting a
+branch in milliseconds beats asserting it in a million insertions and several
+hundred megabytes.
+
+Three were `kinds.seen(...)` in `LinkingService.issue`, `redeem` and `attest`.
+Core has no compiled-in list of platforms; it learns them from what connectors
+do, and `soulbind doctor`, the admin surface and the policy engine all read that
+list back. Deleting all three calls left every linking test green: the links
+formed, the graph read back correctly, and core simply never learned the
+platform existed.
+
+`LinkCode.isCanonical` could return `true` unconditionally. Every existing
+assertion was about a string that *is* canonical, so a method answering yes to
+everything passed them all.
+
+The rejection sampling in `LinkCode.generate` could have its limit turned from
+`256 - (256 % 28)` into `256 + (256 % 28)` — which disables rejection entirely
+and restores the modulo bias — with nothing failing. Both mutants produce codes
+of the right length drawn from the right alphabet; only the *distribution*
+changes, and a distribution assertion against a real CSPRNG is either flaky or
+slow. The byte source is now injectable, so a draw the sampler must reject can
+be fed in and its absence asserted.
+
+`SoulbindClient.call` could return `null` on a transport failure. Every test
+went through `decide()`, which falls back to the cache or the fail mode and
+therefore produces a sensible answer whatever `call` returns. The first
+connector to use `call` for something that is not a decision would have taken a
+`NullPointerException` during an outage.
+
+#### Two equivalent mutants, named rather than suppressed
+
+`LinkCode.normalise`'s `c >= 'a'` can become `c > 'a'` harmlessly: `'a'` folds
+to `'A'`, and `'A'` is not in the alphabet, so both spellings reject it. The
+sibling mutant on the same line — `c <= 'z'` — *is* killed, which is how the
+first one is known to be genuinely equivalent rather than merely uncovered.
+
+`JdbcAuditRepository.writeDetail` returning `""` instead of `null` for empty
+detail is equivalent at the seam: `readDetail` treats null and blank
+identically, and nothing queries the column for null.
+
+Neither is excluded from the report. An exclusion list is a place where real
+survivors go to be forgotten; a paragraph is not.
+
+#### No thresholds, yet
+
+Neither PIT nor Infection is gated on a minimum score, and `check` does not
+depend on either. A threshold gets lowered the first time it is inconvenient,
+and a lowered threshold is a decision about what this project permanently stops
+noticing. A slow `check` is a `check` people stop running. Both numbers go in
+when there is one worth defending.

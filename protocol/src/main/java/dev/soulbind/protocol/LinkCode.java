@@ -145,6 +145,26 @@ public final class LinkCode {
      * token for its short life.
      */
     public static String generate(int length) {
+        return generate(length, RANDOM);
+    }
+
+    /**
+     * The same generator over a supplied source of bytes.
+     *
+     * <p>Package-private, for tests. The rejection sampling above is the whole
+     * reason this method is more than three lines, and against
+     * {@code SecureRandom} it is unobservable: mutation coverage showed that
+     * turning the limit into {@code 256 + (256 % bound)} — which disables
+     * rejection entirely and reintroduces the bias — changed nothing any test
+     * could see, and neither did moving the comparison off the boundary. Both
+     * produce codes that are still the right length and still drawn from the
+     * alphabet. The only thing that changes is the distribution, and a
+     * distribution assertion against a real CSPRNG is either flaky or slow.
+     *
+     * <p>With the bytes supplied, it is neither: feed a value the sampler must
+     * reject and assert it does not appear.
+     */
+    static String generate(int length, java.util.Random random) {
         if (length < MIN_LENGTH) {
             throw new IllegalArgumentException(
                     "link code length must be at least " + MIN_LENGTH
@@ -155,7 +175,7 @@ public final class LinkCode {
         int limit = 256 - (256 % bound); // largest multiple of bound at or below 256
         byte[] buf = new byte[1];
         while (sb.length() < length) {
-            RANDOM.nextBytes(buf);
+            random.nextBytes(buf);
             int v = buf[0] & 0xFF;
             if (v >= limit) {
                 continue; // would bias the draw; take another

@@ -18,6 +18,7 @@ package dev.soulbind.sdk;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.policy.Decision;
@@ -148,6 +149,48 @@ class SoulbindClientTest {
         DecisionCache.Answer answer = client.decide(GATE, "kind-a", "acct-1");
         assertEquals(Effect.ALLOW, answer.decision().effect());
         assertEquals(DecisionCache.Source.CACHED, answer.source());
+    }
+
+    @Test
+    @DisplayName("call() on a down transport returns Unreachable carrying the reason")
+    void callReportsTheOutageItself() {
+        // Asserted on call() DIRECTLY, not through decide(). decide() falls back
+        // to the cache or the fail mode, so it produces a sensible answer
+        // whatever call() returns -- including null. Mutation coverage found
+        // exactly that: replacing this return with null left every test here
+        // green, and the first connector using call() for anything but a
+        // decision would take a NullPointerException during an outage, which is
+        // the worst possible moment for one.
+        InMemoryTransport transport = InMemoryTransport.always(allowEnvelope(60)).goDown();
+        SoulbindClient client = client(transport, new DecisionCache());
+
+        SoulbindClient.Outcome outcome = client.call("identity.describe", null);
+
+        SoulbindClient.Outcome.Unreachable unreachable = assertInstanceOf(
+                SoulbindClient.Outcome.Unreachable.class, outcome,
+                "call() did not report the transport failure as an outage");
+        assertNotNull(unreachable.detail(),
+                "the outage carries no reason, so an operator sees no cause");
+        assertFalse(unreachable.detail().isBlank(), "the outage's reason is blank");
+    }
+
+    @Test
+    @DisplayName("a null payload goes on the wire as an empty object, not as null")
+    void nullPayloadIsAnEmptyObject() {
+        // Every call in this file passes null and none of them looked at what
+        // was sent, so negating the null check changed nothing observable. It
+        // would put a JSON `null` where core's dispatcher expects an object --
+        // a refusal on every no-argument operation, from a connector that looks
+        // correct.
+        InMemoryTransport transport = InMemoryTransport.always(allowEnvelope(60));
+        SoulbindClient client = client(transport, new DecisionCache());
+
+        client.call("heartbeat", null);
+
+        assertEquals(1, transport.sendCount(), "nothing was sent");
+        String request = transport.sent().get(0);
+        assertTrue(request.contains("\"payload\":{}"),
+                () -> "a null payload was not sent as an empty object. Sent: " + request);
     }
 
     @Test
