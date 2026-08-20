@@ -70,6 +70,16 @@ final class DecisionCacheTest extends TestCase
     }
 
     #[Test]
+    #[DisplayName('no pair of gate and identity can collide on one cache key')]
+    public function keysCannotBeMadeAmbiguous(): void
+    {
+        $this->assertNoFailures(
+            CacheChecks::keysCannotBeMadeAmbiguous(),
+            'the cache does not hold: keys cannot be made ambiguous'
+        );
+    }
+
+    #[Test]
     #[DisplayName('a zero ttl forgets the key rather than writing a doomed entry')]
     public function zeroTtlForgetsRatherThanWriting(): void
     {

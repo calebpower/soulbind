@@ -227,10 +227,29 @@ final class DecisionCache
         return 'soulbind' . self::KEY_SEPARATOR . 'gen' . self::KEY_SEPARATOR . $identityRef;
     }
 
+    /**
+     * A key that cannot be made ambiguous by its inputs.
+     *
+     * The gate's length is stated rather than inferred from a separator, so no
+     * content can move the boundary. Without it, ("a\x1Fb", "c") and
+     * ("a", "b\x1Fc") join to the same string, and a collision here serves one
+     * subject's decision to another -- an authorization answer for the wrong
+     * identity, from the component whose job is to answer without asking.
+     *
+     * Not validation: refusing a gate name containing the separator would turn
+     * an exotic-but-harmless input into a refused decision, which on a
+     * fail-closed gate is an outage for whoever owns that identity. This cannot
+     * fail, so it needs no failure path.
+     *
+     * The Java SDK's cache carries the same fix for the same reason; both sides
+     * had a comment asserting the separator could not appear in these values,
+     * and neither checked.
+     */
     private function entryKey(string $gate, string $identityRef): string
     {
         return 'soulbind' . self::KEY_SEPARATOR . 'd' . self::KEY_SEPARATOR
             . $this->generation($identityRef) . self::KEY_SEPARATOR
+            . strlen($gate) . self::KEY_SEPARATOR
             . $gate . self::KEY_SEPARATOR . $identityRef;
     }
 }

@@ -101,10 +101,21 @@ public final class DecisionCache {
     /**
      * The cache key separator.
      *
-     * <p>A unit separator, which cannot appear in a gate name or a platform
-     * identifier. Joining with a colon would let the pair
-     * {@code ("a:b", "c")} and {@code ("a", "b:c")} collide on one key -- and a
+     * <p>A unit separator. Joining with a colon would let the pair
+     * {@code ("a:b", "c")} and {@code ("a", "b:c")} collide on one key — and a
      * collision here serves one subject's decision to another.
+     *
+     * <p>An earlier version of this comment went on to say the separator
+     * "cannot appear in a gate name or a platform identifier". Nothing checked
+     * that, and it is not soulbind's to guarantee: a gate name comes from an
+     * operator's configuration and a platform identifier comes from whatever
+     * the platform hands the connector. A rarity is not an impossibility, and
+     * the whole point of the hostile corpus is that the exotic input does
+     * eventually arrive.
+     *
+     * <p>So the key no longer relies on it — see {@link #key}. The separator
+     * stays because it keeps keys readable in a heap dump, not because anything
+     * depends on its absence from the inputs.
      */
     private static final String KEY_SEPARATOR = "\u001F";
 
@@ -195,7 +206,24 @@ public final class DecisionCache {
         entries.clear();
     }
 
+    /**
+     * A key that cannot be made ambiguous by its inputs.
+     *
+     * <p>Length-prefixed rather than merely separated. With a separator alone,
+     * {@code ("a\u001Fb", "c")} and {@code ("a", "b\u001Fc")} produce the same
+     * string, and a collision here serves one subject's decision to another —
+     * an authorization answer for the wrong identity, from a component whose
+     * entire job is to answer quickly without asking.
+     *
+     * <p>Prefixing the gate's length makes that structurally impossible: the
+     * boundary is stated rather than inferred, so no content can move it.
+     *
+     * <p><b>Not validation.</b> Refusing a gate name containing the separator
+     * would turn an exotic-but-harmless input into a refused decision, which on
+     * a fail-closed gate is an outage for whoever owns that identity. This
+     * cannot fail, so it does not need a failure path.
+     */
     private static String key(String gate, String identityRef) {
-        return gate + KEY_SEPARATOR + identityRef;
+        return gate.length() + KEY_SEPARATOR + gate + KEY_SEPARATOR + identityRef;
     }
 }

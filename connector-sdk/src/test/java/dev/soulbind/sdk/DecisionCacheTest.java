@@ -50,6 +50,36 @@ class DecisionCacheTest {
     // --- the gate item ----------------------------------------------------------
 
     @Test
+    @DisplayName("no pair of gate and identity can collide on one cache key")
+    void keysCannotBeMadeAmbiguous() {
+        // The separator does not make a key unambiguous on its own -- it only
+        // moves the problem to inputs that contain it. These two pairs join to
+        // the same string under `gate + SEP + identityRef`, and a collision here
+        // hands one subject's decision to another: an authorization answer for
+        // the wrong identity, from the component whose whole job is to answer
+        // without asking.
+        //
+        // The class comment used to assert that the separator "cannot appear in
+        // a gate name or a platform identifier". Nothing checked it, and it is
+        // not soulbind's to guarantee -- a gate name comes from an operator's
+        // config and a platform identifier from whatever the platform sends.
+        String sep = "\u001F";
+        DecisionCache cache = new DecisionCache();
+
+        Decision allow = new Decision(
+                Effect.ALLOW, Decision.Reason.REQUIREMENTS_MET, "", 600, List.of());
+
+        cache.store("a" + sep + "b", "c", allow, NOW);
+
+        assertTrue(cache.cached("a" + sep + "b", "c", NOW).isPresent(),
+                "the entry is not readable under the key it was stored with");
+        assertTrue(cache.cached("a", "b" + sep + "c", NOW).isEmpty(),
+                "a DIFFERENT gate and identity read back the first pair's decision. The"
+                        + " cache key is ambiguous, and this is an allow being served to"
+                        + " an identity it was never issued for.");
+    }
+
+    @Test
     @DisplayName("GATE: the shipped default is fail-CLOSED")
     void defaultIsFailClosed() {
         // A gate that opens whenever the dispatcher is down is a gate an

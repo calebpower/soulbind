@@ -234,6 +234,37 @@ final class CacheChecks
         return $failures;
     }
 
+    /**
+     * @return list<string>
+     *
+     * No pair of gate and identity can collide on one key.
+     *
+     * A separator alone does not make a key unambiguous -- it moves the problem
+     * to inputs that contain it. These two pairs join to the same string under
+     * the old format, and a collision serves one subject's decision to another.
+     *
+     * `keysCannotCollide` above covers the ordinary case, where the values are
+     * merely different. This covers the case where they are chosen to collide.
+     */
+    public static function keysCannotBeMadeAmbiguous(): array
+    {
+        $sep = "\x1F";
+        $cache = new DecisionCache();
+        $cache->store('a' . $sep . 'b', 'c', self::decision(Effect::ALLOW, 600), self::NOW);
+
+        $failures = [];
+        if ($cache->cached('a' . $sep . 'b', 'c', self::NOW) === null) {
+            $failures[] = 'the entry is not readable under the key it was stored with';
+        }
+        if ($cache->cached('a', 'b' . $sep . 'c', self::NOW) !== null) {
+            $failures[] = 'a DIFFERENT gate and identity read back the first pair\'s '
+                . 'decision. The cache key is ambiguous, and this is an allow being served '
+                . 'to an identity it was never issued for.';
+        }
+
+        return $failures;
+    }
+
     /** @return list<string> */
     public static function expiryIsExclusive(): array
     {

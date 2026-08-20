@@ -4058,3 +4058,62 @@ the one being fixed.
 The lesson is not "test more". It is that after being wrong twice about the same
 file, the next move is not a third attempt at the same *kind* of verification.
 It is to find the part that *can* be verified here and verify it, however small.
+
+### 8.25 — A cache key that documented its own invariant and did not enforce it
+
+Both decision caches — the Java SDK's and the Flarum connector's — built their
+key by joining the gate and the identity reference with a unit separator. The
+Java one carried this comment:
+
+> *A unit separator, which **cannot appear** in a gate name or a platform
+> identifier. Joining with a colon would let the pair `("a:b", "c")` and
+> `("a", "b:c")` collide on one key — and a collision here serves one subject's
+> decision to another.*
+
+The second sentence is exactly right about the danger. The first is an
+unenforced assertion about inputs neither class controls: a gate name comes from
+an operator's configuration, and a platform identifier comes from whatever the
+platform hands the connector. **Nothing checked it on either side.**
+
+So the comment had correctly identified the failure mode, correctly identified
+why a colon was unsafe, and then chosen a rarer character and called the problem
+solved. A unit separator is unusual in a platform identifier. It is not
+impossible, and the hostile corpus exists precisely because the exotic input
+eventually arrives.
+
+The consequence is not a crash. It is an **allow served to an identity it was
+never issued for**, from the component whose entire job is to answer quickly
+without asking core.
+
+#### Length-prefixing rather than validation
+
+The key now states the gate's length before the gate, so the boundary is
+declared instead of inferred and no content can move it.
+
+Validation was the other option and is worse here. Refusing a gate name
+containing the separator turns an exotic-but-harmless input into a refused
+decision, and on a fail-closed gate that is an outage for whoever owns that
+identity. A key that cannot be ambiguous needs no failure path at all.
+
+Note the contrast with `RequestSigner.requireNoSeparator`, which *does*
+validate, and should: there the canonical bytes must be reproducible in two
+languages, so an input that cannot be represented unambiguously has to be
+refused rather than silently re-encoded. Same hazard, different correct answer,
+because one is a wire format and the other is a local lookup.
+
+#### How it was found
+
+Not by review. Infection reported that several `ConcatOperandRemoval` mutants
+survived on the PHP key-construction line — removing a separator changed nothing
+any test noticed. That is a weaker signal than a collision, but it points at the
+same place: **nothing asserted the key was unambiguous**, so nothing would notice
+when it stopped being.
+
+Checking the Java side for the same shape is what turned up the comment, and the
+comment is what named the danger it had not prevented. The nonce retention hole
+of 8.21 was found by the same move — a defect in one implementation is worth
+looking for in the other before assuming it is local.
+
+Both sides now carry a test built from a pair chosen to collide, and both were
+mutation-checked by restoring the old key format: red on the collision
+assertion, green on restore.
