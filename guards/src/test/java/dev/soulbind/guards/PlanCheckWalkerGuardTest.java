@@ -19,6 +19,7 @@ package dev.soulbind.guards;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,10 +54,21 @@ import org.junit.jupiter.api.io.TempDir;
  * fails — which is precisely the failure being guarded against. The script is
  * the source, and this test reads it.
  *
- * <p>Skipped rather than failed when {@code python3} is absent: the script needs
- * it at run time and the session guest has it, so its absence here is a fact
- * about this workstation and not about the check. Nothing else in this test is
- * conditional.
+ * <p><b>This test needs {@code python3}, and the build container does not have
+ * one.</b> The workstation does; the guest host does; the digest-pinned Temurin
+ * image the build verb runs inside does not, and every probe there exits 127.
+ * An earlier version of this comment claimed the opposite and claimed a skip
+ * that was never implemented — so the guard failed the whole battery at the
+ * build stage, before a single tier had run. {@code docs/DECISIONS.md} 8.3 is
+ * the same defect: a guard documenting a rule it did not implement.
+ *
+ * <p>So it skips where the interpreter is absent, and the skip is narrow: it
+ * covers exactly "this environment cannot execute the shipped probes", nothing
+ * about whether they are correct. The property is not left unasserted there —
+ * {@code harness/fullstack/mutation/run.sh} exercises the same probes on the
+ * guest, where {@code python3} exists, against thirteen mutants and a control.
+ * That is a stronger check than this one; this is the cheap version that runs
+ * in a second on a workstation.
  */
 class PlanCheckWalkerGuardTest {
 
@@ -78,6 +91,37 @@ class PlanCheckWalkerGuardTest {
             "linkedSince", "1787201694000");
 
     @TempDir Path tempDir;
+
+    /**
+     * Whether the shipped probes can be executed at all here.
+     *
+     * <p>Probed rather than assumed. Checking a path or an environment variable
+     * would answer a different question — whether something is installed where
+     * this expects it — and the question that matters is whether running it
+     * works.
+     */
+    private static boolean pythonAvailable() {
+        try {
+            Process p = new ProcessBuilder("python3", "--version")
+                    .redirectErrorStream(true)
+                    .start();
+            p.getInputStream().readAllBytes();
+            return p.waitFor() == 0;
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    @BeforeEach
+    void requireAnInterpreter() {
+        assumeTrue(pythonAvailable(),
+                "python3 is not executable here, so the shipped probes cannot be run. This"
+                        + " is the build container, not a verdict on plan-check.sh; the"
+                        + " mutation battery covers the same probes on the guest.");
+    }
 
     @Test
     @DisplayName("the shipped walker reads every provider out of a real Plan response")

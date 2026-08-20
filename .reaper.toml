@@ -237,6 +237,26 @@ cp -r connector-flarum/build/infection/. out/infection/
 # The scope is narrow and stays narrow: a forum, a database and a browser. The
 # game-side images -- Paper, Velocity -- remain Phase 8 as written.
 # ---------------------------------------------------------------------------
+# The shell tier's own mutation battery.
+#
+# HERE rather than in `build`, and the placement is the point. The guard that
+# checks plan-check.sh's readers -- PlanCheckWalkerGuardTest -- needs python3,
+# and the digest-pinned Temurin image the build verb runs inside has none, so
+# every probe there exits 127 and the guard skips. This verb runs on the guest
+# HOST, which does have one.
+#
+# It is also the stronger check: thirteen mutants of a real recorded Plan
+# response, each required to turn the stage red, plus a control that must pass
+# -- against the guard's single read. So the property is not merely restored
+# here, it is asserted harder than the thing that skipped.
+#
+# Cheap and early. No database, no proxy, no forum, so a broken check surfaces
+# in seconds instead of after the tier it guards has spent twenty minutes.
+# ---------------------------------------------------------------------------
+echo "run: shell mutation battery"
+sh harness/fullstack/mutation/run.sh
+
+# ---------------------------------------------------------------------------
 # BOTH engines, because the gate asks for the T5 suite green cross-engine.
 #
 # The connector cannot tell which backend core uses -- that is what the storage

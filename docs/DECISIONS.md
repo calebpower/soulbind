@@ -3798,3 +3798,71 @@ the shrinker when **any** of these becomes true:
    being an occasional cost and becomes a routine one.
 
 Whichever comes first. The shrinker is deferred, not declined.
+
+### 8.22 — A guard that documented a skip it never implemented, and failed the battery at the build stage
+
+The first session run of these eleven commits went red in **56 seconds**, at the
+build verb, before a single tier had started. `PlanCheckWalkerGuardTest` — added
+in 8.19 to catch a walker that could not parse real Plan output — failed three
+of its own cases with `expected: <0> but was: <127>`.
+
+127 is "command not found". **The digest-pinned Temurin image the build verb
+runs inside has no `python3`**, so every probe the guard extracts from
+`plan-check.sh` and executes returns nothing.
+
+Its class comment said:
+
+> *Skipped rather than failed when `python3` is absent: the script needs it at
+> run time and the session guest has it, so its absence here is a fact about
+> this workstation and not about the check.*
+
+Two things wrong with one sentence. There was **no skip** — no `assumeTrue`, not
+even the import. And the direction was inverted: the workstation has `python3`
+and the build container does not, which is the opposite of what it claimed.
+
+This is 8.3 exactly — a guard documenting a rule it did not implement — written
+by somebody who had just finished recording 8.3.
+
+#### Why a prose claim is worse than no claim
+
+An unimplemented skip is not a missing feature. It is a **false statement in the
+place a reader goes to find out whether the behaviour is deliberate.** The next
+person to see this failure would have read that comment, believed the skip
+existed, and gone looking for why it had stopped working — which is strictly
+worse than finding nothing at all.
+
+The comment also cost the run. A guard is supposed to be cheap; this one halted
+the battery before the six things the session existed to verify had run.
+
+#### The skip, now implemented, and what it is allowed to cover
+
+It probes rather than assumes: it runs `python3 --version` and checks the exit
+status, because "is it on the path where I expect" answers a different question
+from "does running it work".
+
+The narrowing covers exactly *"this environment cannot execute the shipped
+probes"* — nothing about whether they are correct. **Verified in both
+directions**, which is the part that would otherwise be another unimplemented
+claim: with `python3` on the path, six tests run and none skip; with it removed
+from `PATH`, six run and six skip, none fail.
+
+#### The property is not left unasserted, and this time the compensation exists
+
+`harness/fullstack/mutation/run.sh` now runs in the **run** verb, which executes
+on the guest host, which does have `python3`.
+
+That is not a consolation prize. It is thirteen mutants of a real recorded Plan
+response, each required to turn the stage red, plus a control that must pass —
+against the guard's single read. The property is asserted *harder* where the
+guard skips than where it runs.
+
+Placed early in the run verb, before the forum and game tiers: it needs no
+database, no proxy and no forum, so a broken check surfaces in seconds rather
+than after the tier it guards has already spent twenty minutes.
+
+#### The general lesson, since this is the second time
+
+A guard that shells out has an **environment dependency**, and an environment
+dependency is a thing to declare and satisfy — not a thing to describe. The
+build container is a JVM toolchain; nothing entitles it to an interpreter, and
+the first guard to want one should have said so somewhere that fails.
