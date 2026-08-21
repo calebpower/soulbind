@@ -195,6 +195,17 @@ public final class Generator {
             candidates.add(new Action(ActionKind.STALE_CREDENTIAL, victim, null, null));
         }
 
+        // A code core has already claimed, offered to an account that does not
+        // own it. The redeeming account is one this actor holds, so a core that
+        // WRONGLY accepted would link something real -- which is what makes the
+        // acceptance worth detecting rather than merely odd.
+        List<String> spent = world.spentCodes();
+        if (!spent.isEmpty() && !actor.identities().isEmpty()) {
+            String code = spent.get(random.nextInt(spent.size()));
+            String ref = actor.identities().get(random.nextInt(actor.identities().size()));
+            candidates.add(new Action(ActionKind.DOUBLE_REDEEM, actor, code, ref));
+        }
+
         return candidates;
     }
 }

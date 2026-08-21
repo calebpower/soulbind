@@ -344,33 +344,29 @@ public final class SdkCore implements CoreDriver, CoreView {
 
     @Override
     public List<String> inertInvariants() {
-        return List.of(
-                // `decisions-follow-the-rules` used to be excluded here. It is
-                // not any more, and the reason it went is worth as much as the
-                // reason it came.
-                //
-                // 9.10 excluded it as an OPEN QUESTION rather than a settled
-                // narrowing: it fired against unmodified core, and either core
-                // treated a seen-but-unlinked identity as satisfying
-                // requireLinked -- a real defect -- or this tier's model lost
-                // track of a link. 9.11 established which. Core is right:
-                // against a live core, `decide` denies a never-seen account and
-                // a seen-but-unlinked one alike. The model was stale, because
-                // all three seeds shared one identity namespace and seeds two
-                // and three replayed names seed one had already linked.
-                //
-                // The per-seed namespace and didWork() fixed that. What had not
-                // happened until now was switching this back on and watching it
-                // stay quiet -- so the tier went on announcing NOT CHECKED for
-                // something already repaired, which is how an exclusion nobody
-                // revisits becomes indistinguishable from a defect nobody
-                // found.
-                "redeemed-codes-stay-redeemed: no non-mutating way to ask a real core"
-                + " whether a code is still redeemable. Attempting the redeem IS the check,"
-                + " and against a broken core it would link a phantom identity and corrupt"
-                + " the graph the rest of the run asserts about. Single use is proven under"
-                + " real concurrency by the Phase 2 gate, which is the stronger test;"
-                + " DECISIONS 9.4.");
+        // NOTHING is inert against a real core any more, and both exclusions
+        // went for different reasons worth keeping apart.
+        //
+        // `decisions-follow-the-rules` was an OPEN QUESTION (9.10): it fired
+        // against unmodified core, and either core was wrong or the tier's
+        // model was. 9.11 established the model was stale -- all three seeds
+        // shared one identity namespace -- and 9.12 switched it back on and
+        // checked it in both directions.
+        //
+        // `redeemed-codes-stay-redeemed` was a settled narrowing (9.4): there
+        // is no operation reporting a code's state, deliberately, since that
+        // would be an oracle for guessing codes. The only way to find out is to
+        // attempt the redeem, and a CHECKER doing that against a broken core
+        // links a phantom identity and corrupts the graph every other invariant
+        // asserts about.
+        //
+        // The way out was never a new operation. It was to stop asking as a
+        // checker and start asking as an ACTOR: DOUBLE_REDEEM attempts a spent
+        // code deliberately, and because the executor knows the code was spent
+        // it knows the answer must be a refusal. An acceptance is recorded as a
+        // violation instead of quietly becoming part of the world. Nothing is
+        // corrupted by asking a question whose answer you already know.
+        return List.of();
     }
 
     @Override

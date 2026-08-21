@@ -151,12 +151,14 @@ Phase 1" ended when Phase 1 shipped them with fixtures.
    unreachable stack is the `up` stage's failure, already reported; a second
    failure from the fuzzer would double-report one defect. Scope: the
    reachability probe only; once reachable, every failure fails.
-4. ~~`decisions-follow-the-rules` is excluded~~ — **re-enabled and verified
-   both ways** (DECISIONS 9.12). Clean against unmodified core on all three
-   seeds; against a core that ignores `requireLinked`, all three fail by name
-   at action 50. One invariant remains excluded — `redeemed-codes-stay-redeemed`
-   — because attempting the redeem *is* the check and would corrupt the graph
-   the rest of the run asserts about (9.4).
+4. ~~Two sim invariants are excluded~~ — **both closed, and the inert list is
+   now empty.** `decisions-follow-the-rules` was re-enabled and checked both
+   ways (9.12). `redeemed-codes-stay-redeemed` was closed differently: the
+   property is now covered by a `DOUBLE_REDEEM` **action**, which attempts a
+   spent code deliberately so the executor knows the answer must be a refusal
+   — rather than a checker probing and corrupting the graph it asserts about
+   (10.22). The runner prints "every invariant is answerable against this
+   core".
 5. **Sim shrinker and two nemesis classes deferred** — departure 9. The tier
    reports real work per seed (`didWork()`), so the deferral cannot make a
    vacuous run look green.

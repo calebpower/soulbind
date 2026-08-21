@@ -6449,3 +6449,56 @@ silently reconciling nothing looks exactly like one that is working.
 This is the connector's first use of `decide`, so the documented grant gains
 `enforcement-point` — and the guard added earlier this phase is what would have
 caught the doc if it had not.
+
+### 10.22 — The last inert invariant, closed by asking as an actor
+
+9.4 recorded `redeemed-codes-stay-redeemed` as a settled narrowing: single use
+is the property this system rests on hardest, and it was the one the **checker**
+could not ask about. No operation reports a code's state — deliberately, since
+that would be an oracle for testing codes without redeeming them, which would
+also defeat the guessing limit added in 10.20. So the only way to find out is
+to attempt the redeem, and a checker doing that against a broken core links a
+phantom identity and corrupts the graph every other invariant is asserting
+about.
+
+**The way out was never a new operation. It was to stop asking as a checker and
+start asking as an actor.**
+
+`DOUBLE_REDEEM` attempts a code the world knows core has already claimed. The
+same call, the same risk of a wrong acceptance — but *deliberate*, so the
+executor knows the answer must be a refusal before it asks. An acceptance is
+recorded as a violation rather than quietly becoming part of the world. Nothing
+is corrupted by asking a question whose answer you already know.
+
+Nothing is written into the model on success either, because success **is** the
+defect, and recording it would make the run's later assertions agree with the
+corruption.
+
+#### A general mechanism, not one special case
+
+Some defects are visible at the moment of the action and nowhere afterwards:
+core accepting a code it had already claimed leaves a graph that looks entirely
+consistent, because the extra link is real. Only the caller knows it asked for
+something that should have been refused.
+
+So `ActionKind` gained `mustBeRefused`, and the executor records a violation
+when such an action is accepted. `STALE_CREDENTIAL` is marked the same way and
+was **not** asserted before — a retired credential being accepted would have
+appeared in the trace and failed nothing.
+
+`REDEEM_FOREIGN` is deliberately not marked: it is refused only when both sides
+already belong to different subjects, which depends on the graph, and a class
+whose expected answer needs a model belongs to an invariant rather than here.
+
+#### Verified in both directions
+
+- Against a real core: three seeds, 400 actions each, **0 violations**, and the
+  runner now prints *"every invariant is answerable against this core"* because
+  the inert list is finally empty.
+- Against a core whose codes are reusable — `isRedeemed` and the atomic claim
+  both defeated — **all three seeds fail**, naming the code and saying what the
+  acceptance did: *"a second redeem just linked an account that should not have
+  been linked."*
+
+Departure 9 shrinks by one: of the two deferred nemesis classes, double redeem
+is implemented. The shrinker remains deferred.

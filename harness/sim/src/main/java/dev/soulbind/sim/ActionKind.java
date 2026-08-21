@@ -70,7 +70,7 @@ public enum ActionKind {
      * depth: the credential must have been rotated some actions ago, and the
      * refusal must not disturb the live session.
      */
-    STALE_CREDENTIAL(2, true),
+    STALE_CREDENTIAL(2, true, true),
 
     /**
      * Act on an identity that is not linked to anything.
@@ -95,14 +95,52 @@ public enum ActionKind {
      * long run is a state no other tier constructs, and expiry, purging and the
      * bounded-store behaviour all live there.
      */
-    ABANDON_CODE(2, true);
+    ABANDON_CODE(2, true),
+
+    /**
+     * Redeem a code core has already claimed.
+     *
+     * <p>The deferred class from 9.1, and the reason it matters is 9.4: single
+     * use is the property this system rests on hardest, and it is the one the
+     * CHECKER cannot ask about. There is no operation reporting a code's state
+     * -- deliberately, since that would be an oracle for guessing codes -- so
+     * the only way to find out is to attempt the redeem, and a checker doing
+     * that against a broken core links a phantom identity and corrupts the
+     * graph every other invariant is asserting about.
+     *
+     * <p>As an ACTION the same attempt is safe, because it is deliberate. The
+     * executor knows the code was spent, so it knows the answer must be a
+     * refusal, and an acceptance is recorded as a violation rather than
+     * silently becoming part of the world. Nothing is corrupted by asking a
+     * question you already know the answer to.
+     */
+    DOUBLE_REDEEM(3, true, true);
 
     private final int weight;
     private final boolean nemesis;
+    private final boolean mustBeRefused;
 
     ActionKind(int weight, boolean nemesis) {
+        this(weight, nemesis, false);
+    }
+
+    ActionKind(int weight, boolean nemesis, boolean mustBeRefused) {
         this.weight = weight;
         this.nemesis = nemesis;
+        this.mustBeRefused = mustBeRefused;
+    }
+
+    /**
+     * Whether core accepting this action is by itself a defect.
+     *
+     * <p>Only for classes where the expected answer is knowable without a
+     * model: a spent code must be refused, and a retired credential must be.
+     * {@code REDEEM_FOREIGN} is deliberately NOT one of these -- it is refused
+     * only when both sides already belong to different subjects, which depends
+     * on the graph.
+     */
+    public boolean mustBeRefused() {
+        return mustBeRefused;
     }
 
     /** Relative likelihood of being chosen, among those currently applicable. */

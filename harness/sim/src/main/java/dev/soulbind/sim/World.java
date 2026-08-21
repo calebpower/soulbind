@@ -97,7 +97,27 @@ public final class World {
         outstandingCodes.put(code, forRef);
     }
 
+    /** Codes core has claimed, kept so a double redeem can be attempted later. */
+    private final java.util.List<String> spentCodes = new ArrayList<>();
+
+    /**
+     * Codes core has already claimed.
+     *
+     * <p>Kept rather than forgotten so {@code DOUBLE_REDEEM} has something to
+     * attempt. Single use is the property that matters most in this system and
+     * it was the one the checker could not ask about without destroying the run
+     * -- see DECISIONS 9.4. Attempting it as a deliberate ACTION, whose refusal
+     * is expected, is the way to cover it: the executor knows the code was
+     * spent, so an acceptance is a violation rather than a surprise.
+     */
+    public java.util.List<String> spentCodes() {
+        return Collections.unmodifiableList(spentCodes);
+    }
+
     public void codeSpent(String code) {
+        if (outstandingCodes.containsKey(code) && !spentCodes.contains(code)) {
+            spentCodes.add(code);
+        }
         outstandingCodes.remove(code);
     }
 

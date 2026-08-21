@@ -128,6 +128,25 @@ public final class Simulation {
             trace.add(i + ": " + action + "  => "
                     + (result.accepted() ? "ok" : "refused: " + result.detail()));
 
+            // Some classes have a knowable answer without consulting the model:
+            // a spent code must be refused, a retired credential must be. An
+            // acceptance is a defect by itself, and it is recorded here rather
+            // than by an invariant because only the executor knows what it just
+            // asked for.
+            if (action.kind().mustBeRefused() && result.accepted()) {
+                checker.record(new Checker.Violation(
+                        action.kind().name().toLowerCase(java.util.Locale.ROOT)
+                                .replace('_', '-'),
+                        "core ACCEPTED " + action.kind() + " for " + action.subject()
+                                + ", which must always be refused. "
+                                + (action.kind() == ActionKind.DOUBLE_REDEEM
+                                        ? "That code was already claimed, so a second"
+                                                + " redeem just linked an account that"
+                                                + " should not have been linked."
+                                        : "That credential was retired."),
+                        i));
+            }
+
             if (checker.isDue(i)) {
                 for (Checker.Violation violation : checker.check(i, model, view)) {
                     trace.add("   !! " + violation);
@@ -213,6 +232,16 @@ public final class Simulation {
                     world.rotated(action.actor());
                 }
                 return result;
+            }
+            case DOUBLE_REDEEM -> {
+                // The same call a normal redeem makes, on a code the world
+                // knows is spent. Nothing is recorded into the model on
+                // success, because success is the defect -- and writing it into
+                // the model would make the run's later assertions agree with
+                // the corruption.
+                String[] target = split(action.detail());
+                return driver.redeemCode(
+                        action.actor(), action.subject(), target[0], target[1]);
             }
             case STALE_CREDENTIAL -> {
                 String[] own = split(action.actor().identities().isEmpty()

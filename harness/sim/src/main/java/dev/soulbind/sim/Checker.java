@@ -105,6 +105,18 @@ public final class Checker {
     }
 
     /** Everything heard so far, in the order it was first heard. */
+    /**
+     * Records a violation the EXECUTOR found, not an invariant.
+     *
+     * <p>Some defects are visible at the moment of the action and nowhere
+     * afterwards: core accepting a code it had already claimed leaves a graph
+     * that looks entirely consistent, because the extra link is real. Only the
+     * caller knows it asked for something that should have been refused.
+     */
+    public void record(Violation violation) {
+        violations.add(violation);
+    }
+
     public List<Violation> violations() {
         return List.copyOf(violations);
     }
