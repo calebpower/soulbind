@@ -10,7 +10,7 @@
 
 [Unit]
 Description=soulbind Discord connector
-Documentation=https://github.com/axonibyte/soulbind
+Documentation=https://github.com/calebpower/soulbind
 After=network-online.target soulbind-core.service
 Wants=network-online.target
 # NOT Requires=: the connector is designed to survive core being down and to

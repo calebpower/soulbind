@@ -11,7 +11,7 @@
 
 [Unit]
 Description=soulbind core
-Documentation=https://github.com/axonibyte/soulbind
+Documentation=https://github.com/calebpower/soulbind
 After=network-online.target
 Wants=network-online.target
 # MariaDB deployments should add the database here; SQLite ones must not, and

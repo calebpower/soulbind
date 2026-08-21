@@ -44,7 +44,7 @@
             "flarum/extension-manager-composer-plugin": false
         }
     },
-    "homepage": "https://github.com/axonibyte/soulbind",
+    "homepage": "https://github.com/calebpower/soulbind",
     "authors": [
         {
             "name": "Caleb L. Power"
