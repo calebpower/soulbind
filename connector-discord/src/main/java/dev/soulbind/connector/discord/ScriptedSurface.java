@@ -197,7 +197,21 @@ public final class ScriptedSurface implements ChatSurface {
         return this;
     }
 
-    public void clear() {
+    /**
+     * Forgets the replies, and <b>only</b> the replies.
+     *
+     * <p>Named {@code clear()} until Phase 10, which read as "reset this
+     * surface" and is not what it does: roles, grant and revoke calls, and the
+     * registered command list all survive. That is deliberate rather than an
+     * omission — the caller that drives every registered command in turn is
+     * iterating {@link #registeredCommands()} while calling this between
+     * commands, and a full reset would empty the list it is walking.
+     *
+     * <p>The name now says which. A method whose name promises more than it
+     * does is a method somebody eventually relies on for the part it does not
+     * do.
+     */
+    public void clearReplies() {
         sent.clear();
     }
 }

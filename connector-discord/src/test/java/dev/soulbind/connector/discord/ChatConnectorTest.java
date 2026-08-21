@@ -17,6 +17,8 @@ package dev.soulbind.connector.discord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.sdk.DecisionCache;
@@ -25,9 +27,13 @@ import dev.soulbind.sdk.transport.InMemoryTransport;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.ParameterizedTest;
 
 /**
  * The connector's logic, entirely against the scripted surface.
@@ -105,8 +111,22 @@ class ChatConnectorTest {
 
         assertTrue(f.surface().lastSent().message().contains("Linked"),
                 f.surface().lastSent().message());
-        assertTrue(f.surface().lastSent().message().contains("1 other account"),
+
+        // "1 other account." with the stop, because "1 other account" is a
+        // PREFIX of "1 other accounts" -- the assertion that stood here passed
+        // whichever branch ran, and mutation found it by negating the choice.
+        assertTrue(f.surface().lastSent().message().contains("1 other account."),
                 f.surface().lastSent().message());
+    }
+
+    @Test
+    @DisplayName("the plural agrees with the count, on both sides of the boundary")
+    void pluralAgreesWithTheCount() {
+        Fixture three = fixture(InMemoryTransport.always(ok(
+                "{\"subjectId\":\"s1\",\"identities\":[{},{},{}]}")));
+        three.connector().handle(invoke("link", MEMBER, "BCDFGHJK"));
+        assertTrue(three.surface().lastSent().message().contains("2 other accounts."),
+                three.surface().lastSent().message());
     }
 
     @Test
@@ -157,8 +177,64 @@ class ChatConnectorTest {
         String message = f.surface().lastSent().message();
 
         assertTrue(message.contains("game"), message);
-        assertTrue(message.contains("verified"), message);
-        assertTrue(message.contains("not yet verified"), message);
+
+        // NOT contains("verified") and contains("not yet verified"): the second
+        // string CONTAINS the first, so a reply that said "not yet verified"
+        // for both identities satisfied them both. Mutation found it -- negating
+        // the verified test changed nothing either assertion could see. The
+        // marker is anchored on its separator, which the two forms do not share.
+        assertEquals(1, countOf(message, "-- verified"),
+                "exactly one identity was proven and the reply does not say which: " + message);
+        assertEquals(1, countOf(message, "-- not yet verified"),
+                "the unproven identity is not marked as such, so a person cannot tell what"
+                        + " still needs doing: " + message);
+    }
+
+    /** How many times a marker appears, so "contains" cannot stand in for "once". */
+    private static int countOf(String haystack, String needle) {
+        int count = 0;
+        int at = haystack.indexOf(needle);
+        while (at >= 0) {
+            count++;
+            at = haystack.indexOf(needle, at + needle.length());
+        }
+        return count;
+    }
+
+    @Test
+    @DisplayName("a present-but-zero verification timestamp is NOT verified")
+    void whoamiTreatsAZeroTimestampAsUnproven() {
+        // The boundary, and the direction that matters: `> 0` rather than
+        // `>= 0`. A record carrying the field set to zero is one nobody has
+        // proven, and reporting it as verified is the exact lie this marker
+        // exists to prevent.
+        Fixture f = fixture(InMemoryTransport.always(ok(
+                "{\"linked\":true,\"identities\":["
+                        + "{\"platformKind\":\"game\",\"display\":\"Alex\","
+                        + "\"verifiedAtEpochSeconds\":0}]}")));
+
+        f.connector().handle(invoke("whoami", MEMBER));
+        String message = f.surface().lastSent().message();
+
+        assertEquals(0, countOf(message, "-- verified"),
+                "an identity with a zero verification time was reported as proven: " + message);
+        assertEquals(1, countOf(message, "-- not yet verified"), message);
+    }
+
+    @Test
+    @DisplayName("/whoami leaves out an empty display rather than printing empty brackets")
+    void whoamiOmitsABlankDisplay() {
+        Fixture f = fixture(InMemoryTransport.always(ok(
+                "{\"linked\":true,\"identities\":["
+                        + "{\"platformKind\":\"game\",\"display\":\"\"}]}")));
+
+        f.connector().handle(invoke("whoami", MEMBER));
+        String message = f.surface().lastSent().message();
+
+        assertFalse(message.contains("()"),
+                "a platform that reported no display name rendered as empty brackets, which"
+                        + " reads as a bug to the person looking at it: " + message);
+        assertTrue(message.contains("game"), message);
     }
 
     @Test
@@ -238,6 +314,157 @@ class ChatConnectorTest {
     }
 
     @Test
+    @DisplayName("rules renders every field, including the ones whose value is falsy")
+    void rulesShowsTheFalsyFieldsToo() {
+        // The whole point of the renderer, stated in its own javadoc: "must be
+        // linked: no" is the answer to "why is everybody getting in", and a
+        // renderer that omitted falsy values would leave exactly that question
+        // unanswered. Nothing asserted it -- the test that existed matched
+        // `contains("discord")`, which the gate NAME already satisfies.
+        Fixture f = fixture(InMemoryTransport.always(ok(
+                "{\"gate\":\"chat.member\",\"requiredKinds\":[],"
+                        + "\"requireLinked\":false,\"graceSeconds\":0,"
+                        + "\"defaultEffect\":\"allow\"}")));
+
+        f.connector().handle(invoke("soulbind", ADMIN, "rules chat.member"));
+        String reply = f.surface().lastSent().message();
+
+        assertTrue(reply.contains("required platforms: (none)"), reply);
+        assertTrue(reply.contains("must be linked: no"), reply);
+        assertTrue(reply.contains("grace: none"), reply);
+        assertTrue(reply.contains("when unmet: allow"), reply);
+    }
+
+    @Test
+    @DisplayName("rules renders the non-falsy values as themselves")
+    void rulesShowsTheRealValues() {
+        Fixture f = fixture(InMemoryTransport.always(ok(
+                "{\"gate\":\"chat.member\",\"requiredKinds\":[\"chat\",\"game\"],"
+                        + "\"requireLinked\":true,\"graceSeconds\":600,"
+                        + "\"defaultEffect\":\"deny\"}")));
+
+        f.connector().handle(invoke("soulbind", ADMIN, "rules chat.member"));
+        String reply = f.surface().lastSent().message();
+
+        assertTrue(reply.contains("required platforms: chat, game"), reply);
+        assertTrue(reply.contains("must be linked: yes"), reply);
+        assertTrue(reply.contains("grace: 600s"), reply);
+        assertTrue(reply.contains("when unmet: deny"), reply);
+    }
+
+    @Test
+    @DisplayName("a rule payload missing fields renders the safe reading, not blanks")
+    void rulesFallsBackWhenFieldsAreAbsent() {
+        // An older core, or a gate with no rule at all. The fallback for "what
+        // happens when unmet" is DENY, and showing a blank there would tell an
+        // administrator nothing about the direction they are failing in.
+        Fixture f = fixture(InMemoryTransport.always(ok("{\"gate\":\"chat.member\"}")));
+
+        f.connector().handle(invoke("soulbind", ADMIN, "rules chat.member"));
+        String reply = f.surface().lastSent().message();
+
+        assertTrue(reply.contains("required platforms: (none)"), reply);
+        assertTrue(reply.contains("must be linked: no"), reply);
+        assertTrue(reply.contains("grace: none"), reply);
+        assertTrue(reply.contains("when unmet: deny"), reply);
+    }
+
+    @Test
+    @DisplayName("an unrecognised refusal shows core's own words, not its error code")
+    void unknownRefusalShowsTheTail() {
+        // The default arm: a reason this build has no wording for still has to
+        // say something a person can act on, and core's message after the colon
+        // is that something. Showing the code instead would be showing them the
+        // one part written for a developer.
+        Fixture f = fixture(InMemoryTransport.always(
+                refusal("some-new-reason: your account is suspended")));
+
+        f.connector().handle(invoke("link", MEMBER, "BCDFGHJK"));
+        String reply = f.surface().lastSent().message();
+
+        // EXACT, not contains. `substring(colon + 2)` off by two still contains
+        // the sentence -- it just carries two characters of the error code in
+        // front of it -- and mutation found that the contains-assertion could
+        // not see the difference.
+        assertEquals("your account is suspended", reply,
+                "the reply is not exactly core's message; either the code leaked in or the"
+                        + " text was cut in the wrong place");
+    }
+
+    @Test
+    @DisplayName("a refusal with no colon at all is still readable")
+    void unknownRefusalWithoutAColon() {
+        Fixture f = fixture(InMemoryTransport.always(refusal("something odd happened")));
+
+        f.connector().handle(invoke("link", MEMBER, "BCDFGHJK"));
+
+        assertEquals(
+                "That did not work: something odd happened",
+                f.surface().lastSent().message());
+    }
+
+    @Test
+    @DisplayName("a message BEGINNING with the separator keeps its whole text")
+    void refusalBeginningWithASeparator() {
+        // The boundary the code chose with `> 0` rather than `>= 0`: a colon at
+        // position zero leaves no reason in front of it, so the whole message is
+        // the reason. Under `>= 0` the reason becomes the empty string and the
+        // person is shown a fragment instead.
+        Fixture f = fixture(InMemoryTransport.always(refusal(": no reason given")));
+
+        f.connector().handle(invoke("link", MEMBER, "BCDFGHJK"));
+
+        assertEquals(
+                "That did not work: : no reason given",
+                f.surface().lastSent().message());
+    }
+
+    @Test
+    @DisplayName("a platform that refuses to revoke is not reported as having revoked")
+    void revokeRefusedIsReportedHonestly() {
+        // RoleEffector logs "revoked" from this boolean. A platform that said
+        // no -- the role was deleted, the bot lost its rank -- must not produce
+        // a log line saying the role came off, because the operator reading it
+        // stops looking.
+        Fixture f = fixture(InMemoryTransport.always(ok("{}")));
+        f.surface().preexistingRole("acct-1", "linked").makeRoleUnavailable("linked");
+
+        assertFalse(f.connector().removeRole("acct-1", "linked"),
+                "the platform refused the revoke and the connector reported success");
+        assertEquals(1, f.surface().revokeCalls().size(),
+                "the platform was never asked, so this test proves nothing");
+    }
+
+    @Test
+    @DisplayName("a gate core will not answer is null, never a verdict")
+    void allowsGateIsNullWhenCoreRefuses() {
+        // Null is not false. A connector lacking enforcement-point that read a
+        // refusal as "denied" would strip every role it had granted.
+        Fixture f = fixture(InMemoryTransport.always(refusal("missing-capability: needs it")));
+        List<String> logged = new ArrayList<>();
+
+        assertNull(
+                f.connector().allowsGate("acct-1", "chat.member", (m, c) -> logged.add(m)),
+                "an unanswerable gate produced a verdict, which is a mass role removal waiting"
+                        + " for a core restart");
+        assertFalse(logged.isEmpty(),
+                "core refused and nothing was logged, so the operator has no way to learn that"
+                        + " reconciliation is silently doing nothing");
+    }
+
+    @Test
+    @DisplayName("a gate core denies is FALSE, so reconciliation can act on it")
+    void allowsGateIsFalseOnDeny() {
+        Fixture f = fixture(InMemoryTransport.always(ok(
+                "{\"effect\":\"deny\",\"reason\":\"not-linked\",\"detail\":\"x\","
+                        + "\"ttlSeconds\":60}")));
+
+        assertEquals(
+                Boolean.FALSE,
+                f.connector().allowsGate("acct-1", "chat.member", (m, c) -> { }));
+    }
+
+    @Test
     @DisplayName("rules without a gate says which word is missing, not the whole usage")
     void rulesWithoutAGateIsSpecific() {
         // "You are in the right place and need one more word" is a different
@@ -253,6 +480,54 @@ class ChatConnectorTest {
                 "core was asked for a rule with no gate named");
         assertTrue(reply.contains("Which gate"),
                 "a subcommand missing its argument got the generic usage line: " + reply);
+    }
+
+    @Test
+    @DisplayName("an unknown SUBcommand gets the usage line, and core is never asked")
+    void unknownSubcommandGetsUsage() {
+        // Distinct from an unknown command: the person is in the right place
+        // and typed the wrong second word. `rulesWithoutAGateIsSpecific` covers
+        // the near-miss; this covers the arm that catches everything else, and
+        // nothing executed it.
+        InMemoryTransport transport = InMemoryTransport.always(ok("{}"));
+        Fixture f = fixture(transport);
+
+        f.connector().handle(invoke("soulbind", ADMIN, "wibble"));
+
+        assertEquals(0, transport.sendCount(),
+                "core was asked about a subcommand this build does not have");
+        assertTrue(f.surface().lastSent().message().startsWith("Usage:"),
+                "an unknown subcommand produced something other than the usage line: "
+                        + f.surface().lastSent().message());
+    }
+
+    @Test
+    @DisplayName("every command that can be refused says something when it is")
+    void refusalsReachThePersonOnEveryCommand() {
+        // The else arms. Nothing executed them -- PIT reported no coverage on
+        // all three -- and a command that goes quiet when core says no is
+        // indistinguishable, to the person who typed it, from a bot that is
+        // broken.
+        record Case(String command, String[] args, String expected) {}
+
+        List<Case> cases = List.of(
+                new Case("whoami", new String[] {}, "look that up"),
+                new Case("soulbind", new String[] {"rules chat.member"}, "read that rule"),
+                new Case("soulbind", new String[] {"connectors"}, "list connectors"));
+
+        for (Case c : cases) {
+            InMemoryTransport transport = InMemoryTransport.always(ok("{}"));
+            transport.goDown();
+            Fixture f = fixture(transport);
+
+            f.connector().handle(invoke(c.command(), ADMIN, c.args()));
+
+            String reply = f.surface().lastSent().message();
+            assertTrue(reply.contains(c.expected()),
+                    "'" + c.command() + " " + String.join(" ", c.args()) + "' did not say what"
+                            + " it had been unable to do: " + reply);
+            assertTrue(f.surface().lastSent().ephemeral(), reply);
+        }
     }
 
     @Test
@@ -360,12 +635,32 @@ class ChatConnectorTest {
         assertEquals(ChatConnector.COMMANDS, f.surface().registeredCommands());
 
         for (String command : f.surface().registeredCommands()) {
-            f.surface().clear();
+            f.surface().clearReplies();
             f.connector().handle(invoke(command, ADMIN));
             assertFalse(
                     f.surface().sent().isEmpty(),
                     () -> "registered command '" + command + "' produced no reply");
         }
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   ", "\t"})
+    @DisplayName("an invoker with no platform id is refused at construction")
+    void invokerNeedsAPlatformId(String platformId) {
+        // Every reply, every role and every gate decision is addressed by this
+        // id. A blank one would produce a connector cheerfully granting roles to
+        // an account that does not exist, and the failure would surface far from
+        // here. Nothing tested the guard; both halves of it survived mutation.
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ChatSurface.Invoker(platformId, "Alex", false),
+                "an invoker was constructed with a blank platform id: "
+                        + quotedOrNull(platformId));
+    }
+
+    private static String quotedOrNull(String value) {
+        return value == null ? "null" : "'" + value + "'";
     }
 
     @Test
@@ -385,7 +680,7 @@ class ChatConnectorTest {
                 "{\"linked\":false,\"code\":\"BCDFGHJK\",\"connectors\":[]}")));
 
         for (String command : ChatConnector.COMMANDS) {
-            f.surface().clear();
+            f.surface().clearReplies();
             f.connector().handle(invoke(command, ADMIN));
             for (ScriptedSurface.Sent sent : f.surface().sent()) {
                 assertTrue(

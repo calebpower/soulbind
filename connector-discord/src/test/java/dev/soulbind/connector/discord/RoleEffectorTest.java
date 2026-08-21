@@ -116,6 +116,69 @@ class RoleEffectorTest {
     }
 
     @Test
+    @DisplayName("a reference this connector cannot read is dropped, not guessed at")
+    void unreadableReferencesAreDropped() {
+        // Each of these returns null from platformIdOf, and nothing executed any
+        // of them -- PIT reported "no coverage" on the two early returns. A ref
+        // with no kind is not a ref this connector may act on, and treating one
+        // as an id would grant a role to whoever happened to hold that string.
+        for (String ref : new String[] {"", "no-colon-at-all", ":leading-colon"}) {
+            Fixture f = fixture(event(1, "subject.requirements-met", "k1", ref, GATE));
+
+            f.effector().drain();
+
+            assertTrue(f.surface().grantCalls().isEmpty(),
+                    "a role was granted for the unusable reference " + quoted(ref)
+                            + ": " + f.surface().grantCalls());
+        }
+    }
+
+    private static String quoted(String value) {
+        return "'" + value + "'";
+    }
+
+    @Test
+    @DisplayName("a rule change that revokes nothing says nothing")
+    void reconcileIsSilentWhenNothingChanges() {
+        // `revoked > 0`, not `>= 0`. A line reading "removed the role from 0
+        // accounts" after every rule edit is noise an operator learns to skip,
+        // and the one that matters is in among it.
+        Fixture f = reconcilingFixture("allow", event(1, "rule.changed", "k1", "", GATE));
+        f.surface().preexistingRole("acct-1", ROLE);
+        f.logged().clear();
+
+        f.effector().drain();
+
+        assertTrue(f.logged().stream().noneMatch(m -> m.contains("no longer qualify")),
+                "a rule change that took nothing away announced that it had: " + f.logged());
+    }
+
+    @Test
+    @DisplayName("a core that cannot be reached at all says so in those words")
+    void unreachableCoreIsNamedAsUnreachable() {
+        // The other arm of describe(). A refusal carries core's own code and
+        // message; an unreachable core has neither, and the line has to say
+        // which of the two happened -- they send an operator to different
+        // places.
+        List<String> logged = new ArrayList<>();
+        InMemoryTransport transport = InMemoryTransport.always(page());
+        transport.goDown();
+
+        SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
+        RoleEffector effector = new RoleEffector(
+                client, new ChatConnector(client, new ScriptedSurface(), "chat"),
+                new IdempotentApplier(), GATE, ROLE, "chat",
+                (message, cause) -> logged.add(message));
+
+        effector.drain();
+
+        assertEquals(1, logged.size(), logged::toString);
+        assertTrue(logged.get(0).contains("core unreachable"),
+                "an unreachable core was reported with an empty reason, so the line reads as"
+                        + " though core answered and said nothing: " + logged);
+    }
+
+    @Test
     @DisplayName("an Error out of a drain is contained, not left to cancel the schedule")
     void drainQuietlyContainsAnError() {
         // Main's scheduled task caught RuntimeException behind a comment saying
@@ -167,6 +230,16 @@ class RoleEffectorTest {
         assertEquals(1, logged.size(),
                 "an outage was either silent or repeated every cycle: " + logged);
         assertTrue(logged.get(0).contains("cannot poll core"), logged.toString());
+
+        // WHAT core said, not merely that it said no. "cannot poll core" alone
+        // sends an operator to check the network for a missing capability.
+        // Mutation found this: describe() could return an empty string and
+        // every assertion above still passed.
+        assertTrue(logged.get(0).contains("internal"),
+                "the outage line does not carry core's error code, in the form"
+                        + " docs/protocol.md uses: " + logged);
+        assertTrue(logged.get(0).contains("core is down"),
+                "the outage line does not carry core's own message: " + logged);
 
         reachable.set(true);
         effector.drain();

@@ -257,6 +257,12 @@ public final class RoleEffector {
             return null;
         }
         int colon = identityRef.indexOf(':');
+        // `< 0`, and the `<= 0` mutant of it is EQUIVALENT rather than
+        // surviving through inattention. A colon at position zero leaves an
+        // empty kind, and an empty kind never equals this connector's, so the
+        // check below returns null for exactly the inputs `<= 0` would catch
+        // here. Recorded so a later sweep skips it rather than rediscovering
+        // it -- DECISIONS 10.28, same treatment as policy's two in 10.19.
         if (colon < 0) {
             return null;
         }
@@ -278,7 +284,10 @@ public final class RoleEffector {
     /** A poll failure in one short phrase, for the latched outage line. */
     private static String describe(SoulbindClient.Outcome outcome) {
         if (outcome instanceof SoulbindClient.Outcome.Refused refused) {
-            return refused.code() + ": " + refused.message();
+            // wireName(), not the enum's toString(). An operator who reads
+            // "INTERNAL" here and searches docs/protocol.md for it finds
+            // `internal`; the log should print the name the document uses.
+            return refused.code().wireName() + ": " + refused.message();
         }
         return "core unreachable";
     }

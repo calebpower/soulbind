@@ -6928,3 +6928,102 @@ One honest wart visible in the same output: the `requirements-met` emitted by
 account core had never seen — there is no subject to name yet. That is accurate
 rather than broken, and effectors route on `identityRef`, but it is worth
 knowing before somebody builds something that joins events to subjects.
+
+### 10.28 — The mutation tail, one: connector-discord
+
+**Before: 273 mutants, 131 killed (48%), 114 executed by nothing, 28 executed by
+a test that did not notice. Test strength 82%.**
+
+**After: 273 mutants, 176 killed (64%), 96 executed by nothing, 1 survivor, and
+that one is an equivalent mutant. Test strength 99%.**
+
+The headline percentage is the least interesting number here. What matters is
+that **every mutant a test actually runs is now caught, bar one**, and the one is
+reasoned about below rather than left as an open question.
+
+#### What the survivors were, and none of them were nothing
+
+* **`contains()` standing in for the assertion nobody wrote.**
+  `whoamiShowsVerification` asserted `contains("verified")` *and*
+  `contains("not yet verified")` — and the second string contains the first, so
+  a reply that marked **both** identities unverified satisfied both assertions.
+  The `/whoami` verified marker, whose entire purpose is telling somebody which
+  account still needs proving, was unasserted. Same shape in `redeem`:
+  `contains("1 other account")` is a prefix of `"1 other accounts"`, so the
+  singular/plural choice was unasserted too. Both now anchor on something the
+  two forms do not share.
+* **The `> 0` on the verification timestamp.** An identity carrying
+  `verifiedAtEpochSeconds: 0` is one nobody has proven. Under `>= 0` it reads as
+  verified — the exact lie the marker exists to prevent — and no test could see
+  the difference.
+* **`describeRule` rendering nothing.** Its javadoc argues that "must be linked:
+  no" is the answer to "why is everybody getting in", and that a renderer
+  omitting falsy values would leave that unanswered. Five mutants across its
+  five fields survived: the test that existed matched `contains("discord")`,
+  which the gate NAME already satisfies.
+* **`explain` cutting the message in the wrong place.** `substring(colon + 2)`
+  off by two still contains the sentence, with two characters of the error code
+  in front of it. The assertion was `contains`; it is now equality.
+* **A revoke the platform refused, reported as done.** `removeRole` returns
+  whatever the surface says, and nothing tested a surface that says no —
+  `RoleEffector` logs "revoked" from that boolean, so an operator would read
+  that a role came off when it had not, and stop looking.
+* **`ChatSurface.Invoker`'s guard.** Both halves of "an invoker needs a platform
+  id" survived. Every reply, role and gate decision is addressed by that id.
+* **`DiscordConfig` entirely.** All ten mutants were "no coverage": the
+  defaults, the fail-mode reading and both validations were reachable only by
+  starting the connector for real. `failMode` defaulting to CLOSED is the one
+  that matters — a connector that failed OPEN by accident admits everybody the
+  moment core is unreachable.
+* **Three refusal arms that replied to nobody.** `whoami`, `rules` and
+  `connectors` each have an else branch for a core that says no, and nothing
+  executed any of them. A command that goes quiet is, to the person who typed
+  it, a broken bot.
+
+#### One defect fixed rather than covered
+
+`ScriptedSurface.clear()` cleared the replies and nothing else — not roles, not
+grant calls, not the registered command list. The name says "reset". The
+behaviour is in fact **required**: the caller that drives every registered
+command in turn iterates `registeredCommands()` while calling this between
+commands, and a full reset would empty the list it is walking. So the behaviour
+stays and the name changes: `clearReplies()`, with the reason in its javadoc.
+A method whose name promises more than it does is one somebody eventually relies
+on for the part it does not do.
+
+The outage line also now prints `refused.code().wireName()` rather than the
+enum's `toString()`. An operator who read `INTERNAL` and searched
+`docs/protocol.md` for it found `internal`.
+
+#### The equivalent mutant, recorded so a later sweep skips it
+
+`RoleEffector.platformIdOf`, `if (colon < 0)` mutated to `<= 0`. A colon at
+position zero leaves an empty kind, and an empty kind never equals this
+connector's, so the kind check two lines down returns null for exactly the
+inputs the mutant would catch. The two are indistinguishable by behaviour. Noted
+in the source at the line, the same treatment policy's two got in 10.19.
+
+#### What is left uncovered, and why
+
+96 mutants, in three places, and the distinction between them matters:
+
+* **`JdaSurface`, 62.** The live-platform adapter. Its decisions are real —
+  four distinct failure paths in `withRole`, each with its own operator-facing
+  message — but reaching them means faking JDA's `RestAction` chain. **This is
+  the same shape as the Velocity group effector that shipped inert**, and the
+  fix that worked there is the one to apply here: `GroupEffector` takes its
+  grant and revoke as lambdas so every behaviour except the lookup is testable
+  without the platform on the classpath. Recommended, not done.
+* **`ScriptedDriver`, 15.** Reported as uncovered and it is not: the full-stack
+  tier runs `scripted-driver` **out of process** as a real connector, which PIT
+  cannot observe. The same caveat the MariaDB paths and the fuzz tier already
+  carry — the number is harsh here rather than flattering.
+* **`Main`, 19.** The entry point. Constructs JDA and blocks. Genuinely hard,
+  and the least valuable of the three.
+
+`ScriptedSurface` is **not** in that list and is not a test double to be waved
+past: `scripted-driver` is a launcher in the distribution and the harness drives
+a live core through it. A `clearReplies()` that stopped clearing, or a
+`registerCommands` that appended instead of replacing, would leave a full-stack
+stage asserting against a previous scenario's state — and passing. Its six
+survivors are now dead.

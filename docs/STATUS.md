@@ -39,6 +39,18 @@ performs exhaustively.
 executed by a test that did not notice.** After the first round of fixes: 1,632
 / 1,039 / 411 / 182, test strength 85%.
 
+**`connector-discord` swept in Phase 10: 48% to 64%, and test strength 82% to
+99%** — 28 survivors to one equivalent mutant, reasoned about at the line so a
+later sweep skips it. The percentage moves less than the strength because 96
+mutants sit in code no unit test executes: `JdaSurface` (the live-platform
+adapter, 62), `Main` (19), and `ScriptedDriver` (15, which the full-stack tier
+does exercise, out of process, where PIT cannot see it). DECISIONS 10.28 names
+each and recommends the `GroupEffector`-shaped seam for `JdaSurface`.
+
+The consequential finds were an assertion pair where one string contained the
+other — so `/whoami` could mark every identity unverified and satisfy both — and
+`DiscordConfig`, whose fail-mode default of CLOSED was executed by nothing.
+
 **`policy` swept again in Phase 10 and taken from 80% to 98%** — seventeen
 survivors to two, both of which are equivalent mutants and are reasoned about in
 DECISIONS 10.19 so a later sweep skips rather than rediscovers them. The
