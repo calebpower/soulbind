@@ -242,6 +242,47 @@ public final class ChatConnector {
         return sb.toString();
     }
 
+    /** Accounts on this platform currently holding a role. */
+    public List<String> holdersOf(String role) {
+        return surface.membersWithRole(role);
+    }
+
+    /**
+     * Whether core still admits this account at a gate.
+     *
+     * <p>The connector's first use of {@code decide}, and it needs
+     * {@code enforcement-point} for it. Used only when reconciling after a rule
+     * change: the ordinary path is event-driven and asks core nothing.
+     *
+     * @return true or false as core answers, and <b>null</b> when core could
+     *     not be asked at all. Null is not false: an outage must not strip
+     *     roles from everybody holding one, which would turn a brief core
+     *     restart into a mass removal somebody then undoes by hand.
+     */
+    public Boolean allowsGate(
+            String platformId, String gate,
+            java.util.function.BiConsumer<String, Throwable> log) {
+        SoulbindClient.Outcome outcome = client.call("decide", new DecideBody(
+                gate, platformKind, platformId));
+        if (outcome instanceof SoulbindClient.Outcome.Ok ok) {
+            return "allow".equals(ok.payload().text("effect"));
+        }
+        if (outcome instanceof SoulbindClient.Outcome.Refused refused) {
+            // A refusal is core answering, not core being unreachable -- but it
+            // is not a policy verdict either. Reported rather than guessed at,
+            // because a connector that lacks enforcement-point would otherwise
+            // silently keep every role forever and look like it was working.
+            log.accept("could not ask about gate '" + gate + "': "
+                    + refused.code() + ": " + refused.message()
+                    + ". Reconciliation after a rule change needs enforcement-point;"
+                    + " without it this connector keeps every role it has granted.", null);
+        }
+        return null;
+    }
+
+    /** The payload for {@code decide}. */
+    private record DecideBody(String gate, String platformKind, String platformId) {}
+
     /**
      * Applies a role for a subject that satisfied a gate.
      *

@@ -220,6 +220,27 @@ let it be tried against a different account. So an overheard code is worth at
 most one claim within its TTL, and its redemption is audited with both
 identities — the Phase 9 tier models exactly this split (`codeConsumed`).
 
+### Guessing codes
+
+Bounded since Phase 10, and it was not before. Eight characters from a
+twenty-eight character alphabet is 3.8×10¹¹, which makes guessing a
+*particular* code hopeless — but an attacker does not want a particular one.
+**Any live code links their account to a stranger's subject**, so the target is
+the whole outstanding set, and nothing limited the attempt rate.
+
+`RedeemThrottle` counts wrong guesses per redeeming account, over a window, and
+refuses past a limit. Only "no such code" counts: expired, already-redeemed and
+already-linked all mean the caller had a real code. A success clears the record.
+
+It fails **open** at capacity — evicting rather than refusing — which is the
+opposite of the nonce store one section above, and deliberately so: refusing at
+capacity would let an attacker who fills the map deny linking to everybody.
+
+Per-account is the finest grain core can manage, because core knows nothing
+about IP addresses or sessions. Connectors are expected to add limits in terms
+their platform understands; this is the floor beneath them, and the floor is
+what catches an attacker spreading attempts across several connectors.
+
 ## Injection and hostile input
 
 The T5 suite runs injection specs cross-engine against both backends; the

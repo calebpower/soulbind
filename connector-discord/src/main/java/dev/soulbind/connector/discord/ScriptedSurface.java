@@ -118,6 +118,18 @@ public final class ScriptedSurface implements ChatSurface {
     }
 
     @Override
+    public List<String> membersWithRole(String role) {
+        if (role == null || role.isBlank()) {
+            return List.of();
+        }
+        return roles.entrySet().stream()
+                .filter(entry -> entry.getValue().contains(role))
+                .map(java.util.Map.Entry::getKey)
+                .sorted()
+                .toList();
+    }
+
+    @Override
     public void registerCommands(List<String> commands) {
         registeredCommands.clear();
         registeredCommands.addAll(commands);

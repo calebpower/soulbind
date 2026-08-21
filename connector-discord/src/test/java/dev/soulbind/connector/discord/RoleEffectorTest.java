@@ -79,6 +79,111 @@ class RoleEffectorTest {
                 surface, transport, logged);
     }
 
+    /**
+     * A fixture whose core answers {@code decide} with a fixed effect.
+     *
+     * @param decideEffect what core says about everybody, or null to refuse
+     *     the question entirely
+     */
+    private Fixture reconcilingFixture(String decideEffect, String... events) {
+        String body = page(events);
+        String decideAnswer = decideEffect == null
+                ? "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"missing-capability\","
+                        + "\"message\":\"enforcement-point\"}}"
+                : "{\"schema\":1,\"ok\":true,\"payload\":{\"effect\":\"" + decideEffect
+                        + "\",\"reason\":\"x\",\"detail\":\"x\",\"ttlSeconds\":60}}";
+
+        InMemoryTransport transport = new InMemoryTransport(request -> {
+            if (request.contains("event.ack")) {
+                return ACK_OK;
+            }
+            if (request.contains("\"decide\"")) {
+                return decideAnswer;
+            }
+            return body;
+        });
+
+        ScriptedSurface surface = new ScriptedSurface();
+        SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
+        ChatConnector connector = new ChatConnector(client, surface, "chat");
+        List<String> logged = new ArrayList<>();
+        return new Fixture(
+                new RoleEffector(
+                        client, connector, new IdempotentApplier(), GATE, ROLE, "chat",
+                        (message, cause) -> logged.add(message)),
+                surface, transport, logged);
+    }
+
+    @Test
+    @DisplayName("a rule change takes the role from whoever no longer qualifies")
+    void ruleChangeRevokes() {
+        // Core emits rule.changed and nothing consumed it, so editing a rule
+        // left every existing grant standing until each holder happened to link
+        // or unlink something else. Core cannot fix that alone: a rule change
+        // can flip every subject at once, and fanning that out inside the
+        // request that changed the rule would hold a connection across the
+        // whole graph. The connector's population is bounded and it already
+        // knows it.
+        Fixture f = reconcilingFixture("deny",
+                event(1, "rule.changed", "k1", "", GATE));
+        f.surface().grantRole("acct-1", ROLE);
+        f.surface().grantRole("acct-2", ROLE);
+
+        f.effector().drain();
+
+        assertFalse(f.surface().hasRole("acct-1", ROLE),
+                "a holder core now denies kept the role");
+        assertFalse(f.surface().hasRole("acct-2", ROLE));
+        assertTrue(f.logged().stream().anyMatch(m -> m.contains("no longer qualify")),
+                "the removal was silent: " + f.logged());
+    }
+
+    @Test
+    @DisplayName("a rule change leaves alone anybody who still qualifies")
+    void ruleChangeKeepsTheQualified() {
+        Fixture f = reconcilingFixture("allow",
+                event(1, "rule.changed", "k1", "", GATE));
+        f.surface().grantRole("acct-1", ROLE);
+
+        f.effector().drain();
+
+        assertTrue(f.surface().hasRole("acct-1", ROLE),
+                "a rule change stripped the role from somebody who still qualifies");
+    }
+
+    @Test
+    @DisplayName("an unanswerable decide revokes NOTHING")
+    void outageDoesNotStripRoles() {
+        // Null is not false. An outage -- or a connector without
+        // enforcement-point -- must not strip roles from everybody holding
+        // one, which would turn a brief core restart into a mass removal
+        // somebody then undoes by hand.
+        Fixture f = reconcilingFixture(null,
+                event(1, "rule.changed", "k1", "", GATE));
+        f.surface().grantRole("acct-1", ROLE);
+
+        f.effector().drain();
+
+        assertTrue(f.surface().hasRole("acct-1", ROLE),
+                "roles were stripped because core could not be asked");
+        assertTrue(f.logged().stream().anyMatch(m -> m.contains("enforcement-point")),
+                "a missing capability was swallowed, so the connector would look like it "
+                        + "was working while reconciling nothing: " + f.logged());
+    }
+
+    @Test
+    @DisplayName("a rule change for ANOTHER gate is not this effector's business")
+    void otherGatesAreIgnored() {
+        Fixture f = reconcilingFixture("deny",
+                event(1, "rule.changed", "k1", "", "some.other.gate"));
+        f.surface().grantRole("acct-1", ROLE);
+
+        f.effector().drain();
+
+        assertTrue(f.surface().hasRole("acct-1", ROLE),
+                "a rule change for an unrelated gate revoked this gate's role");
+    }
+
     @Test
     @DisplayName("a requirements-met event grants the role")
     void grantsOnRequirementsMet() {

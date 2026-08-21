@@ -135,6 +135,37 @@ public final class JdaSurface implements ChatSurface {
                 (guild, member, resolved) -> member.getRoles().contains(resolved));
     }
 
+    @Override
+    public List<String> membersWithRole(String role) {
+        if (role == null || role.isBlank()) {
+            return List.of();
+        }
+        Guild guild = guild().orElse(null);
+        if (guild == null) {
+            return List.of();
+        }
+        List<Role> roles = guild.getRolesByName(role, true);
+        if (roles.isEmpty()) {
+            // A role that does not exist and a role nobody holds are the same
+            // answer for reconciliation, and distinguishing them here would
+            // make every caller handle a case with no different action.
+            return List.of();
+        }
+        try {
+            // loadMembers rather than the cache: GUILD_MEMBERS is requested but
+            // the cache is populated lazily, and reconciling against a partial
+            // view would revoke nothing from the members it had not seen --
+            // silently, and differently on each restart.
+            return guild.findMembers(member -> member.getRoles().contains(roles.get(0)))
+                    .get().stream()
+                    .map(member -> member.getUser().getId())
+                    .toList();
+        } catch (RuntimeException e) {
+            log.accept("could not list holders of role '" + role + "'", e);
+            return List.of();
+        }
+    }
+
     /** How long to wait for a configured guild to become visible. */
     private static final int GUILD_WAIT_ATTEMPTS = 20;
 

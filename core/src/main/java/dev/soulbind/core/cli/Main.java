@@ -22,6 +22,7 @@ import dev.soulbind.core.CoreConfig;
 import dev.soulbind.core.CoreVersion;
 import dev.soulbind.core.events.EventEmitter;
 import dev.soulbind.core.identity.LinkingService;
+import dev.soulbind.core.identity.RedeemThrottle;
 import dev.soulbind.core.policy.GateEvaluator;
 import dev.soulbind.core.registry.Authenticator;
 import dev.soulbind.core.storage.Storage;
@@ -175,6 +176,7 @@ public final class Main {
                                     Duration.ofSeconds(
                                             CoreConfig.linkCodeTtlSeconds(config))),
                             new GateEvaluator(storage.identities(), storage.policy(), clock),
+                            new RedeemThrottle(),
                             codec,
                             clock,
                             (int) window.toSeconds()));

@@ -6371,3 +6371,81 @@ and nothing else has been told half of what is wrong, and the half they were
 told is the half they already knew. The first version of that test appended a
 line to a fixed body and hit TOML's duplicate-key error instead, asserting
 nothing about types at all — whole bodies now.
+
+### 10.20 — Nothing bounded how fast a code could be guessed
+
+A link code is eight characters from a twenty-eight character alphabet:
+3.8×10¹¹ possibilities, and guessing a *particular* one is hopeless. That is
+the reassuring number, and it is the wrong one. **An attacker does not need a
+particular code — any live code links their account to a stranger's subject.**
+With a hundred codes outstanding, a guess lands with probability ~2.6×10⁻¹⁰,
+and nothing at all bounded the guessing rate.
+
+`docs/threat-model.md` said codes were "single-use, expiring, unpredictable"
+and never mentioned online guessing. Raised by the owner while discussing
+something else entirely, which is the useful kind of review.
+
+**Only "no such code" counts as a guess.** Not expired, not already-redeemed,
+not refused because both accounts were already linked — those all mean the
+caller *had* a real code and something else was wrong, and counting them would
+throttle somebody who walked between two platforms too slowly.
+
+**Keyed on the account, not the connector.** Throttling the connector takes a
+whole platform offline over one abuser. The account is who is guessing, and it
+is the finest thing core can see: core deliberately knows nothing about IP
+addresses or sessions, which is exactly why the owner's instinct — let each
+platform limit by whatever it understands — is right. This is the floor beneath
+those, and it is the floor that matters, because an attacker spreading attempts
+across several connectors evades every per-connector limit and still meets this
+one.
+
+**A success clears the record.** Somebody who mistypes twice and gets it right
+is not a threat.
+
+#### It fails open, and that inverts its neighbour deliberately
+
+`NonceStore` fails **closed** at capacity: letting a replay through is worse
+than refusing a request. `RedeemThrottle` must do the opposite. Refusing at
+capacity would let an attacker who fills the map lock every legitimate person
+out of linking — turning a guessing limit into a denial-of-service lever, which
+is a worse weapon than the one it was built to remove. The cost is that a
+determined attacker can age their own record out by making noise from other
+accounts, buying a multiplier on a limit that was already generous.
+
+Two classes, one page apart, choosing opposite behaviours at capacity. Stated
+in both, because the next person to read either will assume consistency.
+
+### 10.21 — Connectors now hear that a rule changed
+
+Narrowing 14 said core does not re-evaluate gates when a rule changes, and
+framed it as work core would have to do. The owner pointed out the better
+shape: core dispatches the notification and each platform syncs its own state.
+
+Core has emitted `rule.changed` since Phase 3. **Nothing consumed it** — not
+the effectors, not the SDK's decision cache. So the gap was never core's; it
+was that no connector listened.
+
+That framing also dissolves the objection that stopped me. I argued grants were
+unbounded because an effector would have to enumerate candidates. But a
+connector reconciling *its own* population is bounded: the accounts on this
+platform holding this role, which the platform can be asked for directly.
+
+**Revocations only, and that asymmetry is the design.** Finding people who
+newly qualify would mean asking core about every member of the platform. Nobody
+is wrongly holding anything in that direction — they get the role on their next
+`requirements-met`. Taking a role away is the half that cannot wait, because
+until it happens somebody has access a rule says they should not.
+
+**Asked of the platform, not remembered.** An operator may have granted or
+removed the role by hand, and a connector reconciling against its own memory
+would fight them. It also survives a restart without persisting anything.
+
+**Null is not false.** A `decide` that cannot be answered — an outage, or a
+connector without `enforcement-point` — revokes nothing. The alternative turns
+a brief core restart into a mass removal somebody then undoes by hand. A
+missing capability is logged rather than swallowed, because a connector
+silently reconciling nothing looks exactly like one that is working.
+
+This is the connector's first use of `decide`, so the documented grant gains
+`enforcement-point` — and the guard added earlier this phase is what would have
+caught the doc if it had not.

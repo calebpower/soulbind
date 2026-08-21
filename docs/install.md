@@ -152,7 +152,7 @@ the capabilities it needs.
 ```sh
 sudo -u soulbind /opt/soulbind/core/bin/core register \
     --name discord \
-    --capabilities code-display,code-entry,effector,link-state-reader \
+    --capabilities code-display,code-entry,effector,link-state-reader,enforcement-point \
     --config /etc/soulbind/soulbind.toml
 ```
 
@@ -161,6 +161,12 @@ Leaving it out gives a connector that links accounts perfectly well and then
 answers "this credential does not hold the capability this operation requires"
 the first time somebody asks what they are linked to. This example was missing
 it until a live smoke found it.
+
+`enforcement-point` is what lets the connector re-check a role after the rule
+beneath it changes. Core emits `rule.changed`; the connector then asks `decide`
+about each account still holding the role and takes it off whoever no longer
+qualifies. Without the capability it keeps every role it has ever granted, and
+says so in its log rather than pretending to reconcile.
 
 The connector's `/soulbind connectors` subcommand additionally needs
 `config-management`. **Most deployments should not grant that** — it is

@@ -39,7 +39,7 @@ t10-auditor  | audit-source,config-management                                   
 # run found /whoami refused: install.md omitted link-state-reader, which is the
 # fifth time this capability has broken a caller. A guard now holds the
 # document to this row.
-discord      | code-display,code-entry,effector,link-state-reader                   | code.issue code.redeem identity.describe
+discord      | code-display,code-entry,effector,link-state-reader,enforcement-point | code.issue code.redeem identity.describe decide
 
 # --- the simulated-user tier ------------------------------------------------
 sim-actor    | code-display,code-entry,enforcement-point,link-state-reader          | code.issue identity.describe decide

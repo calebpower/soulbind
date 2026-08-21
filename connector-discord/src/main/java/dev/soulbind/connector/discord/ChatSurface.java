@@ -93,5 +93,18 @@ public interface ChatSurface {
     boolean hasRole(String platformId, String role);
 
     /** Registers the commands this connector answers. */
+    /**
+     * Every account on this platform currently holding a role.
+     *
+     * <p>Asked of the PLATFORM rather than remembered by the connector. The
+     * platform is authoritative — an operator may have granted or removed the
+     * role by hand, and a connector reconciling against its own memory would
+     * fight them. It also survives a restart without persisting anything.
+     *
+     * <p>Empty when the role does not exist, which is the same answer as
+     * "nobody has it" for reconciliation purposes and needs no special case.
+     */
+    List<String> membersWithRole(String role);
+
     void registerCommands(List<String> commands);
 }

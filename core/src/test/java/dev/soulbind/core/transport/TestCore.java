@@ -90,6 +90,7 @@ final class TestCore implements AutoCloseable {
                                 Duration.ofMinutes(10)),
                         new dev.soulbind.core.policy.GateEvaluator(
                                 storage.identities(), storage.policy(), clock),
+                        new dev.soulbind.core.identity.RedeemThrottle(),
                         codec,
                         clock,
                         (int) window.toSeconds()));

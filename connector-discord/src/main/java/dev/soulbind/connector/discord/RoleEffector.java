@@ -126,6 +126,14 @@ public final class RoleEffector {
             return;
         }
 
+        // BEFORE the identity check, because a rule change names a gate and no
+        // identity at all -- it is a fact about everybody at once, and the
+        // identity-shaped path below would drop it silently.
+        if ("rule.changed".equals(type)) {
+            reconcile();
+            return;
+        }
+
         String platformId = platformIdOf(event.text("identityRef"));
         if (platformId == null) {
             return;
@@ -139,6 +147,59 @@ public final class RoleEffector {
                 // than logged: this stream carries everything, and a line per
                 // uninteresting event is a log nobody reads.
             }
+        }
+    }
+
+    /**
+     * Re-checks everybody holding the role after the rule beneath it changed.
+     *
+     * <p>Core emits {@code rule.changed} and nothing consumed it until now, so
+     * editing a rule left every existing grant standing: somebody who no longer
+     * qualified kept the role until they happened to link or unlink something
+     * else. Core cannot fix this on its own — a rule change can flip every
+     * subject in a deployment at once, and fanning that out inside the request
+     * that changed the rule would hold a connection open across the whole
+     * graph.
+     *
+     * <p>The connector can, because its population is bounded and it already
+     * knows it: the accounts on <em>this</em> platform holding <em>this</em>
+     * role. Each is asked afresh, and the role comes off where the answer
+     * changed.
+     *
+     * <p><b>Revocations only.</b> Finding people who NEWLY qualify would mean
+     * enumerating every member of the platform and asking core about each,
+     * which is unbounded in the one direction that does not matter: nobody is
+     * wrongly holding anything, they simply get it on their next
+     * {@code requirements-met}. Taking a role away is the half that cannot
+     * wait, because until it happens somebody has access a rule says they
+     * should not.
+     */
+    private void reconcile() {
+        if (role == null || role.isBlank() || gate == null || gate.isBlank()) {
+            return;
+        }
+        List<String> holders = connector.holdersOf(role);
+        if (holders.isEmpty()) {
+            return;
+        }
+
+        int revoked = 0;
+        for (String platformId : holders) {
+            Boolean stillAllowed = connector.allowsGate(platformId, gate, log);
+            if (stillAllowed == null) {
+                // Unaskable. NOT a revocation: an outage must not strip roles
+                // from everybody who holds one, which would turn a brief core
+                // restart into a mass removal that then has to be undone by
+                // hand.
+                continue;
+            }
+            if (!stillAllowed && connector.removeRole(platformId, role)) {
+                revoked++;
+            }
+        }
+        if (revoked > 0) {
+            log.accept("rule for gate '" + gate + "' changed; removed '" + role
+                    + "' from " + revoked + " account(s) that no longer qualify", null);
         }
     }
 

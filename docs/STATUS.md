@@ -193,12 +193,14 @@ Phase 1" ended when Phase 1 shipped them with fixtures.
     Removing it would re-download a toolchain each run to prove nothing.
     Narrowing: the gate proves a clean install of *soulbind* onto a machine
     whose prerequisites may already be satisfied (DECISIONS 10.15, 10.16).
-14. **`rule.changed` does not re-evaluate gates.** Linking, unlinking and
-    attesting emit `subject.requirements-met`/`-lost`; editing a *rule* does
-    not. A rule change can flip every subject at once, and doing it well needs
-    a bounded sweep rather than a synchronous fan-out inside the request that
-    changed the rule. So a rule edit does not retroactively grant or revoke
-    roles until each subject next changes (DECISIONS 10.18).
+14. **A rule change revokes but does not grant.** Core emits `rule.changed`
+    and connectors now reconcile: each asks `decide` about the accounts on its
+    own platform holding its role, and takes the role off whoever no longer
+    qualifies. It does **not** hunt for people who newly qualify — that would
+    mean asking core about every member of the platform, and nobody is wrongly
+    holding anything in that direction; they get the role on their next
+    `requirements-met`. Revocation is the half that cannot wait (DECISIONS
+    10.21).
 15. **`t10`'s five-hundred-error watchdog covers its own requests only** — it
     cannot observe 5xxs served to other clients between stages. Scope: the
     stage's own traffic; the forum tier's watchdog covers the browser suite

@@ -25,6 +25,7 @@ import dev.soulbind.core.events.EventRecord;
 import dev.soulbind.core.identity.Identity;
 import dev.soulbind.core.identity.LinkCodeRecord;
 import dev.soulbind.core.identity.LinkingService;
+import dev.soulbind.core.identity.RedeemThrottle;
 import dev.soulbind.core.policy.GateEvaluator;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
@@ -96,6 +97,7 @@ public final class CoreHandlers {
             RuntimeConfigRepository runtimeConfig,
             LinkingService linking,
             GateEvaluator gateEvaluator,
+            RedeemThrottle throttle,
             Codec codec,
             Clock clock,
             int signatureWindowSeconds) {
@@ -302,12 +304,42 @@ public final class CoreHandlers {
                         "a redeem needs the code and the account redeeming it");
             }
 
+            // BEFORE the redeem, and keyed on the account rather than the
+            // connector: throttling the connector would punish everybody on a
+            // platform for one abuser. See RedeemThrottle for why only
+            // "no such code" counts as a guess.
+            String redeemingRef =
+                    request.get().platformKind() + ":" + request.get().platformId();
+            if (!throttle.allow(redeemingRef, clock.instant())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST,
+                        "too many wrong codes from this account; wait "
+                                + throttle.window().toMinutes()
+                                + " minutes and try again. If you are typing a code you were"
+                                + " given, ask for a fresh one -- the old one may have"
+                                + " expired.");
+            }
+
             LinkingService.Result result = linking.redeem(
                     connector.id(),
                     request.get().code(),
                     request.get().platformKind(),
                     request.get().platformId(),
                     request.get().display());
+
+            if (result instanceof LinkingService.Result.Denied refusal
+                    && refusal.refusal() == LinkingService.Refusal.UNKNOWN_CODE) {
+                // ONLY this refusal. Expired, already-redeemed and
+                // already-linked all mean the caller had a real code and
+                // something else was wrong; counting those would throttle
+                // people who are not guessing at all.
+                throttle.recordGuess(redeemingRef, clock.instant());
+            } else if (result instanceof LinkingService.Result.Linked) {
+                // Somebody who mistypes twice and then gets it right is not a
+                // threat, and carrying their failures forward would eventually
+                // lock out a person for being human.
+                throttle.clear(redeemingRef);
+            }
 
             if (result instanceof LinkingService.Result.Denied denied) {
                 // The refusal reason travels as the message, and the code is
