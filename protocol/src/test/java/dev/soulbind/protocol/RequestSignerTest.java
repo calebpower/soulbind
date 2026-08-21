@@ -127,6 +127,30 @@ class RequestSignerTest {
         }
 
         @Test
+        @DisplayName("a separator at the very START is rejected too")
+        void separatorAtIndexZero() {
+            // The case above puts the separator in the middle. Mutation found
+            // that `indexOf(SEPARATOR) >= 0` weakened to `> 0` survived every
+            // test -- because a value BEGINNING with the separator was never
+            // tried, and index 0 is the one value the two conditions disagree
+            // on.
+            //
+            // What that mutant permits: a nonce of "\nb" and a nonce of "" with
+            // a body beginning "b" produce the same canonical bytes, so one
+            // signature is valid for two different requests. That is the exact
+            // ambiguity this guard exists to prevent, reachable by a caller who
+            // chooses their own nonce.
+            for (String leading : java.util.List.of("\nb", "\n", "\nnonce")) {
+                IllegalArgumentException e = assertThrows(
+                        IllegalArgumentException.class,
+                        () -> RequestSigner.canonicalBytes(1L, leading, "body"),
+                        () -> "a nonce beginning with the separator was accepted: "
+                                + leading.replace("\n", "\\n"));
+                assertTrue(e.getMessage().contains("separator"), e.getMessage());
+            }
+        }
+
+        @Test
         @DisplayName("a carriage return in the nonce is ACCEPTED -- deliberately")
         void carriageReturnIsNotTheSeparator() {
             // The separator is LF alone, so a CR creates no ambiguity about

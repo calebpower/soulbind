@@ -6271,3 +6271,58 @@ worth an assertion; a future sweep should skip them rather than rediscover them.
 
 Twelve mutants killed by four new test classes, none of which was written to
 raise a number — each names the person the defect would have reached.
+
+#### The protocol module: 56% → 99%
+
+The same pass over `protocol`, where forty-three survivors became one. Two were
+`SURVIVED` rather than uncovered, and both were in load-bearing places.
+
+**`RequestSigner.requireNoSeparator`: `indexOf(SEPARATOR) >= 0` weakened to
+`> 0` killed no test.** The existing case put the separator in the middle of a
+nonce, and index 0 is the single value on which the two conditions disagree —
+so a value *beginning* with the separator was never tried. What that mutant
+permits is a nonce of `"\nb"` and a nonce of `""` with a body starting `"b"`
+producing identical canonical bytes: one signature valid for two different
+requests, reachable by any caller who chooses their own nonce. That is exactly
+the ambiguity the guard exists to prevent.
+
+**`LinkCode.normalise`'s fold, and a test whose name was a promise it did not
+keep.** The parameterised cases were titled *"strips separators and
+uppercases"* and every input was already uppercase. Weakening the fold's upper
+bound left `z` unfolded, so a code containing one was refused and nothing
+noticed — and people type codes in lowercase constantly.
+
+**`HelloRequest` was entirely uncovered, which was the surprise.** It is not a
+data holder; it carries the forward-compatibility rule stated on its own class:
+a connector built against a newer protocol may claim a capability this core has
+never heard of, and the answer is to grant it nothing extra rather than refuse
+the handshake and take the connector offline over a name. That is the
+difference between a newer connector degrading and failing to start, and
+nothing asserted it.
+
+**`Capability.fromWireName` had no coverage at all.** What rides on it is
+authorization: a wire name read as the wrong capability, or as none, is a
+connector granted or refused the wrong thing. Now round-tripped for every
+constant, derived from `values()` so a capability added later is covered the
+day it is added — which matters, because `link-state-reader` was added
+mid-project and broke four callers.
+
+**The DTO defences turned out not to be trivia.** Nine `x == null ? empty :
+copyOf(x)` lines were uncovered. The codec binds JSON into these records, so a
+field a connector simply *omits* arrives as null: negate the condition and an
+optional field left out of a request throws inside the dispatcher rather than
+defaulting. Which fields are optional is a protocol promise.
+
+The one survivor left is equivalent: `normalise`'s lower fold bound. `a` is not
+in the code alphabet, so folding it to `A` — also absent — or leaving it alone
+both end in the same rejection.
+
+#### A guard caught this work, which is the point of having it
+
+`PlatformVocabularyGuardTest` failed the build: the new tests used a real
+platform's name. Core and protocol learn platform kinds at runtime from
+connector registration, and a name compiled into either means that is no longer
+true — in a *test* as much as in production, because a test naming a platform
+is a test that would have to change when the platform does. Neutral kinds now.
+Third time in this phase a guard has failed my own work rather than somebody
+else's, which is the only real evidence that a guard is doing anything.

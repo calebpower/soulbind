@@ -102,6 +102,15 @@ class LinkCodeTest {
             "'  BCDF2345  ', BCDF2345",
             "'BCDF 2345', BCDF2345",
             "'\tBCDF\t2345\t', BCDF2345",
+            // LOWERCASE, which the name of this test claimed and none of the
+            // cases above exercised -- every input was already uppercase.
+            // Mutation found it: weakening the fold's upper bound left `z`
+            // unfolded, so a code containing one was refused, and nothing
+            // noticed. People type codes in lowercase constantly.
+            "bcdfz345, BCDFZ345",
+            "bcdf2345, BCDF2345",
+            "'bcdf z345', BCDFZ345",
+            "BcDfZ345, BCDFZ345",
         })
         @DisplayName("strips separators and uppercases")
         void normalises(String raw, String expected) {
