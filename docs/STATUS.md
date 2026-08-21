@@ -669,11 +669,13 @@ connector was never audited, while rotating one was — so the log could say a
 credential had been replaced with no record of it being created.
 `Bootstrap.register`'s javadoc had promised that row since Phase 1.
 
-### The proxy group effector — the cause was one operation earlier
+### The proxy group effector — closed, run 25 green on both axes
 
 The `groups` full-stack stage links a player through the real flow and then
 reads **LuckPerms' own JSON storage** for the group. It was red on every run
-since it was written, and it was right every time.
+from 21 to 24 and was right every time; run 25 is green on both storage axes,
+and the whole battery with it (`reaper exit=0`, no stage failed, no mutant
+survived).
 
 Where the chain stands:
 
@@ -685,8 +687,8 @@ Where the chain stands:
 | the drain is scheduled | yes |
 | core emits `subject.requirements-met` | yes, run 24, from `override.set` |
 | the drain applies it | yes, run 24 |
-| the group reaches LuckPerms | **yes, run 24** |
-| the stage can read that it did | fixed after run 24, pending run 25 |
+| the group reaches LuckPerms | yes, run 24 |
+| the stage can read that it did | yes, run 25 |
 
 The stage's smoke admits the player with an operator override so they can run
 `/link`. That identity therefore already satisfied the gate before the link, so
