@@ -204,7 +204,11 @@ public final class JdaSurface implements ChatSurface {
         var whoami = Commands.slash("whoami", "Show what this account is linked to");
         var admin = Commands.slash("soulbind", "Administrative commands")
                 .addOptions(new OptionData(
-                        OptionType.STRING, "subcommand", "connectors", false));
+                        OptionType.STRING, "subcommand",
+                        // Describes the OPTION, not one of its values. It read
+                        // "connectors", which is what Discord showed the person
+                        // typing -- a hint that named half the answer.
+                        "rules <gate>, or connectors", false));
 
         if (guild != null) {
             // Guild-scoped registration appears immediately; global takes up to

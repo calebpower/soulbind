@@ -6109,3 +6109,69 @@ it and an effector holds a role forever for somebody who no longer qualifies.
 `rule.changed` does not trigger re-evaluation. Editing a rule can flip every
 subject at once, and doing that well needs a bounded sweep rather than a
 synchronous fan-out inside the request that changed the rule. Narrowing 15.
+
+#### What the Phase 6 smoke actually exercised
+
+Recorded because the plan names this manual pass as *evidence*, and evidence
+that lives only in a chat log is not evidence. Against a real application, a
+real bot token and a real server, with a person at the keyboard:
+
+| Exercised | Result |
+|---|---|
+| Gateway session, privileged `GUILD_MEMBERS` intent | connected, `Finished Loading!` |
+| Guild-scoped command registration | 3 commands, named guild |
+| `/link` — Discord **issues** a code | code returned, ephemeral |
+| `/link <code>` — Discord **accepts** one | link completed |
+| `/whoami` — link state read back | both identities, both `verified` |
+| Role granted by the effector | applied within one poll |
+| Role revoked on unlink | removed, including via the sibling path |
+| `/soulbind connectors` without `config-management` | refused cleanly |
+| `/link` with a malformed code | told plainly it was invalid |
+
+Both link directions and both effector directions, which matters more than the
+count: core never learns which platform is "normal", and the second round had
+Discord as the *redeemer* where the first had it as the issuer. The two produced
+the same shape, which is the symmetry §7 insists on rather than a coincidence.
+
+`/whoami`'s wording is worth keeping as it is. It reports the **subject's**
+identities rather than "what you are linked to" pairwise, which is the correct
+model — there is no A-linked-to-B in soulbind, only a subject owning identities.
+On a one-identity subject it therefore reads as "known here and nowhere else",
+which is accurate. The concern that it would read oddly did not survive contact
+with the actual output.
+
+The two error paths were checked last and deliberately: a refusal and a
+malformed input are what a person hits first in practice and what a suite covers
+least, because a test asserting "it refused" rarely asks whether the refusal was
+comprehensible.
+
+#### `/soulbind rules` was advertised and did not exist
+
+The smoke's last finding, and the one nothing could have caught but a person
+reading the reply. `handleAdmin`'s usage line said:
+
+```
+Usage: /soulbind <rules|connectors>
+```
+
+and the switch had one case, `connectors`. Typing `rules` fell to `default`,
+which replied with **the same usage line that had just suggested it** — a loop
+with no exit, for somebody doing exactly what they were told.
+
+Implemented rather than deleted from the advert. `rule.get` exists; what does
+not exist is any way to enumerate gates over the protocol, so it takes a gate
+name: `/soulbind rules discord.member`. The single Discord option carries the
+whole subcommand, so it is split on whitespace here.
+
+Missing the gate name gets its **own** message rather than the generic usage
+line. "You are in the right place and need one more word" is a different fact
+from "that is not a subcommand", and answering the first with the second is
+precisely what made the original feel like a dead end.
+
+The option's *description* was the string `"connectors"` — which is what
+Discord shows the person typing, so the built-in hint named half the answer. It
+describes the option now.
+
+Two tests, both mutation-checked by restoring the original defect: reverting
+`rules` to fall through fails them with "core was never asked for the rule" and
+"a subcommand missing its argument got the generic usage line".

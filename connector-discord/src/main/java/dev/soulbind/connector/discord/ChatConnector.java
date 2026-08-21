@@ -160,11 +160,42 @@ public final class ChatConnector {
             return;
         }
         if (invocation.arguments().isEmpty()) {
-            surface.reply(invocation, "Usage: /soulbind <rules|connectors>", true);
+            surface.reply(invocation, USAGE, true);
             return;
         }
 
-        switch (invocation.arguments().get(0)) {
+        // ONE Discord option carries the whole subcommand, so "rules game.join"
+        // arrives as a single string and is split here. It was `rules` being
+        // advertised and unimplemented that made this worth doing properly:
+        // typing it hit the default branch, which replied with the very usage
+        // line that had suggested it -- a loop with no exit, found by somebody
+        // reading the message and asking what it was for.
+        String[] words = invocation.arguments().get(0).trim().split("\\s+");
+
+        switch (words[0]) {
+            case "rules" -> {
+                if (words.length < 2) {
+                    // NOT the generic usage line. "You are in the right place
+                    // and need one more word" is a different message from "that
+                    // is not a subcommand", and answering the first with the
+                    // second is what sent somebody round the loop.
+                    surface.reply(
+                            invocation,
+                            "Which gate? Try `/soulbind rules <gate>`, for example"
+                                    + " `/soulbind rules discord.member`. There is no way to"
+                                    + " list every gate over the protocol, so this needs the"
+                                    + " name.",
+                            true);
+                    return;
+                }
+                SoulbindClient.Outcome outcome =
+                        client.call("rule.get", new GateBody(words[1]));
+                if (outcome instanceof SoulbindClient.Outcome.Ok ok) {
+                    surface.reply(invocation, describeRule(words[1], ok.payload()), true);
+                } else {
+                    surface.reply(invocation, explain(outcome, "read that rule"), true);
+                }
+            }
             case "connectors" -> {
                 SoulbindClient.Outcome outcome = client.call("connector.list", null);
                 if (outcome instanceof SoulbindClient.Outcome.Ok ok) {
@@ -178,9 +209,37 @@ public final class ChatConnector {
                     surface.reply(invocation, explain(outcome, "list connectors"), true);
                 }
             }
-            default -> surface.reply(
-                    invocation, "Usage: /soulbind <rules|connectors>", true);
+            default -> surface.reply(invocation, USAGE, true);
         }
+    }
+
+
+    /** One place the usage line is written, so it cannot advertise a subcommand twice. */
+    private static final String USAGE = "Usage: `/soulbind rules <gate>` or"
+            + " `/soulbind connectors`";
+
+    /** The gate name, for rule.get. */
+    private record GateBody(String gate) {}
+
+    /**
+     * Renders a rule for somebody who is about to change it.
+     *
+     * <p>Every field, including the ones that are empty: "requires nothing" is
+     * the answer to "why is everybody getting in", and a renderer that omitted
+     * falsy values would leave exactly that question unanswered.
+     */
+    private static String describeRule(String gate, dev.soulbind.sdk.Payload rule) {
+        StringBuilder sb = new StringBuilder("Rule for `").append(gate).append("`:");
+        List<String> kinds = rule.has("requiredKinds") ? rule.texts("requiredKinds") : List.of();
+        sb.append("\n  required platforms: ")
+                .append(kinds.isEmpty() ? "(none)" : String.join(", ", kinds));
+        sb.append("\n  must be linked: ")
+                .append(rule.has("requireLinked") && rule.flag("requireLinked") ? "yes" : "no");
+        long grace = rule.has("graceSeconds") ? rule.number("graceSeconds") : 0L;
+        sb.append("\n  grace: ").append(grace == 0 ? "none" : grace + "s");
+        sb.append("\n  when unmet: ")
+                .append(rule.has("defaultEffect") ? rule.text("defaultEffect") : "deny");
+        return sb.toString();
     }
 
     /**

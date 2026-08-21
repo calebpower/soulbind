@@ -209,6 +209,53 @@ class ChatConnectorTest {
     }
 
     @Test
+    @DisplayName("an advertised subcommand does something, rather than repeating the advert")
+    void rulesIsImplemented() {
+        // `rules` was named in the usage line and had no case, so it fell to
+        // default -- which replied with the same usage line that had suggested
+        // it. A person typing what they were told to type got told to type it
+        // again. Found by somebody reading the message and asking what it was
+        // for, which no assertion here was making.
+        InMemoryTransport transport = InMemoryTransport.always(ok(
+                "{\"gate\":\"discord.member\",\"requiredKinds\":[\"discord\",\"game\"],"
+                        + "\"requireLinked\":true,\"graceSeconds\":0,"
+                        + "\"defaultEffect\":\"deny\"}"));
+        Fixture f = fixture(transport);
+
+        f.connector().handle(invoke("soulbind", ADMIN, "rules discord.member"));
+
+        assertEquals(1, transport.sendCount(), "core was never asked for the rule");
+        String reply = f.surface().lastSent().message();
+        assertFalse(reply.startsWith("Usage:"),
+                "an advertised subcommand answered with the usage line that advertises it: "
+                        + reply);
+        assertTrue(reply.contains("discord.member"), reply);
+        assertTrue(reply.contains("discord") && reply.contains("game"),
+                "the rule's required platforms are not shown, which is the thing an "
+                        + "administrator opened it to see: " + reply);
+        assertTrue(reply.contains("deny"),
+                "what happens when the rule is unmet is not shown: " + reply);
+    }
+
+    @Test
+    @DisplayName("rules without a gate says which word is missing, not the whole usage")
+    void rulesWithoutAGateIsSpecific() {
+        // "You are in the right place and need one more word" is a different
+        // message from "that is not a subcommand". Answering the first with the
+        // second is what made the original loop feel like a dead end.
+        InMemoryTransport transport = InMemoryTransport.always(ok("{}"));
+        Fixture f = fixture(transport);
+
+        f.connector().handle(invoke("soulbind", ADMIN, "rules"));
+
+        String reply = f.surface().lastSent().message();
+        assertEquals(0, transport.sendCount(),
+                "core was asked for a rule with no gate named");
+        assertTrue(reply.contains("Which gate"),
+                "a subcommand missing its argument got the generic usage line: " + reply);
+    }
+
+    @Test
     @DisplayName("an administrator is still subject to the CAPABILITY gate")
     void adminStillNeedsTheCapability() {
         // Both gates, not either. A server administrator cannot grant this

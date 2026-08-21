@@ -173,8 +173,9 @@ Phase 1" ended when Phase 1 shipped them with fixtures.
     (tarball unpack, doctor, register, serve, link, export) were rehearsed
     individually against the real artifact (DECISIONS 10.8). First full
     execution is the session run, where it is a hard gate, not a skip.
-12. **The Phase 6 Discord manual smoke is outstanding** — named as evidence,
-    not a tier; batched with the owner's other manual steps by their request.
+12. ~~The Phase 6 Discord manual smoke is outstanding~~ — **done.** Run
+    against a real bot and server; both link directions, both effector
+    directions, and the refusal paths. What it found is in DECISIONS 10.18.
 13. **The clean-install gate resets soulbind's own footprint before installing,
     and leaves prerequisites alone.** It removes the unit, `/opt/soulbind`,
     `/etc/soulbind`, `/var/lib/soulbind` and the service user, so *every* run
