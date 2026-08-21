@@ -437,7 +437,7 @@ SOULBIND_DB=mariadb \
   SOULBIND_PLAN_DB_USER=root \
   SOULBIND_PLAN_DB_PASSWORD=soulbind-test \
   SOULBIND_PLAN_DB_NAME=plan \
-  sh harness/fullstack/run.sh up migrate journeys sim fuzz plan down
+  sh harness/fullstack/run.sh up migrate journeys sim plan fuzz down
 
 podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 """

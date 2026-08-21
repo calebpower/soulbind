@@ -5,7 +5,7 @@ for real, with stages run against the live deployment.
 
 ```sh
 SOULBIND_DB=sqlite  ./run.sh up migrate journeys sim fuzz down
-SOULBIND_DB=mariadb ./run.sh up migrate journeys sim fuzz plan down
+SOULBIND_DB=mariadb ./run.sh up migrate journeys sim plan fuzz down
 ```
 
 ## Why a stage runner and not one script

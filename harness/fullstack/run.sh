@@ -222,7 +222,7 @@ XML
 # below, and FullstackStagesGuardTest asserts this list matches both the
 # functions defined and the stages documented in the README. A stage that is
 # listed but does no work is the exact shape this file exists to prevent.
-STAGES="up migrate journeys sim fuzz plan down"
+STAGES="up migrate journeys sim plan fuzz down"
 
 # The post-condition, checked rather than assumed.
 #
@@ -278,6 +278,24 @@ stage_up() {
             # that has since been torn down, which `reset` can no longer reach.
             "$REAPER_CONTROL/snapshot" "stack-$DB"
             log "snapshot taken as stack-$DB: the stack is up and this point is pristine"
+            # NOTHING IN THIS SCRIPT ROLLS BACK TO IT, and that is worth saying
+            # rather than leaving somebody to discover a snapshot with no
+            # consumer.
+            #
+            # It is an affordance for a PERSON. Every stage here is runnable
+            # alone against a stack that is already up, so somebody debugging a
+            # failure can roll back to this point and re-run one stage against a
+            # known-good deployment instead of spending ninety seconds
+            # rebuilding the world. §12 asks for the snapshot at stack-up rather
+            # than end-of-run for exactly that: rolling back should land you on
+            # a working stack, not an empty machine.
+            #
+            # Automating a rollback BETWEEN stages was considered and rejected:
+            # it means stopping the stack, rolling a dataset back underneath
+            # processes holding files open, and restarting -- and the one
+            # ordering problem it would have solved (hostile input reaching a
+            # deployment that a later stage asserts on) is solved for free by
+            # running `fuzz` last.
         else
             log "no REAPER_CONTROL; not snapshotting (running outside a session)"
         fi
@@ -399,10 +417,19 @@ stage_fuzz() {
     # shellcheck disable=SC1090
     . "$creds"
 
-    # AFTER journeys and sim, deliberately. The point of this stage over
-    # :core:fuzzTest is that the database is no longer empty: subjects,
-    # identities, spent codes, rules and an audit log are all there, and a
-    # malformed request now reaches query paths a fresh core has nothing in.
+    # LAST, and after `plan`, for two reasons that pull the same way.
+    #
+    # The point of this stage over :core:fuzzTest is that the database is no
+    # longer empty -- subjects, identities, spent codes, rules and an audit log
+    # are all there, and a malformed request reaches query paths a fresh core
+    # has nothing in. Later is therefore better: more accumulated state.
+    #
+    # And nothing asserts on the deployment after this. Throwing hostile input
+    # at a live core and THEN asking Plan to render link data would make a plan
+    # failure ambiguous -- damage this stage caused, or a defect in the
+    # connector? Ordering removes the question without needing a rollback
+    # between them, which would mean stopping the stack, rolling the dataset
+    # back under processes holding files open, and restarting.
     if "$HERE/fuzz-live.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
             "$OUT/evidence" 400; then
         result_pass fuzz "hostile input never makes the deployment answer a 5xx"

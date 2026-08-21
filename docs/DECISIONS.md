@@ -5035,3 +5035,49 @@ Runs 9 and 10 both tested the tier as of run 9's build. Run 9's green stands for
 what it was: the state at `d6f1d69`, which still had the shared-namespace bug.
 Run 10's green establishes nothing beyond that, and the Phase 9 fixes remain
 unverified in a session until the next run.
+
+### 8.29 — The snapshot nobody rolls back to
+
+A question worth recording because the answer was half wrong.
+
+**State rollback is not forgotten and is doing real work.** `reaper test` rolls
+`tank/state` back to `@pristine` at the start of every run — visible in the log
+as `rolled_back=tank/state@pristine` — which is why database state does not leak
+between runs, and why the seed-namespace collision of 9.11 was a within-run
+problem rather than a cross-run one.
+
+**It could not have caught the stale binary of 9.13.** Build output lives in
+`tank/work`, which `reset` deliberately does not touch: that dataset holds the
+synced source tree, and rolling it back would fight the sync. Building
+unconditionally remains the right fix.
+
+**But `run.sh` takes `stack-$DB` snapshots that nothing ever rolls back to.** A
+mechanism with an input and no consumer — the exact shape this repository keeps
+objecting to, sitting in its own harness.
+
+#### What it is actually for, stated rather than implied
+
+It is an affordance for a **person**. Every stage is runnable alone against a
+stack that is already up, so somebody debugging a failure can roll back to this
+point and re-run one stage against a known-good deployment instead of spending
+ninety seconds rebuilding the world. §12 asks for the snapshot at stack-up
+rather than end-of-run for precisely that reason: rolling back should land you
+on a working stack, not an empty machine.
+
+That is a real purpose and it is now written where the snapshot is taken,
+because a reader finding an unused snapshot will otherwise assume it is a
+leftover.
+
+#### Automating a rollback between stages: considered, rejected
+
+It would mean stopping the stack, rolling a dataset back underneath processes
+holding files open, and restarting — expensive and easy to get subtly wrong.
+
+And the one problem it would have solved is solved for free by **ordering**. The
+`fuzz` stage throws hostile input at a live deployment; running it before `plan`
+would make a plan failure ambiguous — damage the fuzzer caused, or a defect in
+the connector? Moving `fuzz` to last removes the question, and hands it more
+accumulated state at the same time, which is the whole reason the stage exists.
+
+Two things pulling the same way is usually the sign that the ordering is the
+real answer and the machinery was the workaround.
