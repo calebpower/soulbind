@@ -21,7 +21,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | **Complete — gate passed.** `reaper test` green on both backends in one session (run 13), and Plan renders link data for a player linked through the real flow. Battery covers: the latin1 axis asserted rather than assumed, astral-plane text round-tripped and compared, T7 fuzz against a populated deployment, T8 concurrency re-run in-session on both backends, T11 transcripts for `first-time-player` and `forum-first-user`, and the T5 browser suite with the 5xx watchdog armed on every non-injection pass. `bedrock-player` declined on the plan's own conditional — departure 10 |
 | 9 | Simulated users | **Trimmed tier complete; gate met and now meaningful.** Run 12 green on both backends: three seeds × 400 actions, each reporting real work (6–8 links made, ~100 correctly refused), identical counts on both axes. Four-byte UTF-8 survives a round trip through a latin1 server. Shrinker and two nemesis classes deferred (departure 9). **One open lead:** `decisions-follow-the-rules` excluded pending diagnosis — DECISIONS 9.10 |
-| 10 | Hardening and release | **In progress** — credential rotation, audit export, licence inventory, packaging, install docs and the `doctor` final checks landed. Threat-model pass, T10 and the clean-install gate outstanding |
+| 10 | Hardening and release | **In progress** — every workstation deliverable landed: rotation, audit export, licence inventory, packaging, install docs, `doctor` final checks, the threat model (`docs/threat-model.md`), Tier 10, the install-gate script, and the accumulated narrowings ledger. What remains needs the session: the battery green with `t10` and the clean-install gate on both axes, then the Discord manual smoke batched with the owner's manual steps |
 
 ## Mutation coverage
 
@@ -118,15 +118,69 @@ guard where it could have mattered.
 
 ## Narrowings in force
 
-Both are recorded in the README departures table with the section they override.
+The Phase 10 gate asks for every narrowing accumulated across the phases in one
+human-facing list, each with the reason that covers exactly what it narrows.
+This is that list, current as of Phase 10. Structural departures from the
+specification live in the README departures table; these are the places a
+check deliberately covers less than everything, and what buys each one.
 
-1. **The run verb states there is no battery and exits 0.** Scoped to the run
-   verb at this phase only. `build` runs the real compile, the real test task
-   and every guard; a failure there fails the session.
-2. **Storage, transport and capability guards land in Phase 1.** Their subject
-   code does not exist, so their fixtures could not mean anything.
+**Resolved narrowings from earlier phases** (listed so their absence is a
+statement, not an oversight): Phase 0's "run verb exits 0 with no battery"
+ended when the battery landed; "storage/transport/capability guards deferred to
+Phase 1" ended when Phase 1 shipped them with fixtures.
 
-## Known gaps
+1. **`PlanCheckWalkerGuardTest` skips without `python3`** — probed
+   `assumeTrue`, verified in both directions (6 run/0 skipped with, 6 run/6
+   skipped without). The Temurin build container has no python3; the property
+   is asserted *harder* on the guest host by the shell mutation battery
+   (thirteen mutants against the guard's single read), which runs every
+   `reaper test`. Scope: that one guard class, in that one container.
+2. **The mutation batteries (PIT, Infection) are not in `check`** — invoked
+   explicitly and on the `run` verb, because a full mutation pass per
+   workstation build would make `./gradlew build` minutes long and get
+   worked around. Scope: when they run, not whether; the run verb runs them
+   every session. Known survivor tail recorded under "Mutation coverage".
+3. **`fuzz-live.sh` exits 0 when the deployment is unreachable at start** — an
+   unreachable stack is the `up` stage's failure, already reported; a second
+   failure from the fuzzer would double-report one defect. Scope: the
+   reachability probe only; once reachable, every failure fails.
+4. **`decisions-follow-the-rules` is excluded from the sim's invariant set** —
+   DECISIONS 9.10/9.11: core was proven correct on the disputed case; the
+   tier's shadow model was stale via the shared-namespace defect, since fixed.
+   Re-enabling is open work; the exclusion is one invariant, named in the
+   sim's own "what was not checked" output every run.
+5. **Sim shrinker and two nemesis classes deferred** — departure 9. The tier
+   reports real work per seed (`didWork()`), so the deferral cannot make a
+   vacuous run look green.
+6. **`bedrock-player` journey not implemented** — the plan's own conditional
+   (departure 10): Geyser is not in the composed stack; Floodgate identity
+   handling is covered at Tiers 1/4.
+7. **`guards` and `sim` are outside the licence inventory** — they ship
+   nowhere, so they have no third-party disclosure obligations.
+   `LicenceInventoryGuardTest` holds the exclusion to exactly those two names.
+8. **`fuzz` group excluded from PIT's mutable paths** — mutating the fuzzer
+   mutates the test bed, not the subject. Scope: the fuzz sources only.
+9. **`harness/fullstack/fuzz-live.sh` signs for itself** rather than through
+   `tools/rpc.sh` — it sends deliberately malformed bodies that `rpc.sh`
+   refuses before they reach the wire. Scope: that one script; `redeem.sh`
+   lost its copy for exactly this reason.
+10. **`core-env.sh` container mode is unverified on the workstation** —
+    FreeBSD, no podman. First execution is the session run; the host mode is
+    exercised on every workstation invocation. Stated in the script and in
+    DECISIONS 10.5.
+11. **`harness/install-gate.sh` has never executed end-to-end** — it follows
+    an Ubuntu document on an OS this workstation is not; the pieces
+    (tarball unpack, doctor, register, serve, link, export) were rehearsed
+    individually against the real artifact (DECISIONS 10.8). First full
+    execution is the session run, where it is a hard gate, not a skip.
+12. **The Phase 6 Discord manual smoke is outstanding** — named as evidence,
+    not a tier; batched with the owner's other manual steps by their request.
+13. **`t10`'s five-hundred-error watchdog covers its own requests only** — it
+    cannot observe 5xxs served to other clients between stages. Scope: the
+    stage's own traffic; the forum tier's watchdog covers the browser suite
+    the same way.
+
+## Known gaps## Known gaps
 
 **A failed session leaves the previous run's results on the workstation.**
 reaper's backward sync merges rather than mirrors, so when `reaper test` fails

@@ -222,7 +222,7 @@ XML
 # below, and FullstackStagesGuardTest asserts this list matches both the
 # functions defined and the stages documented in the README. A stage that is
 # listed but does no work is the exact shape this file exists to prevent.
-STAGES="up migrate journeys sim plan fuzz down"
+STAGES="up migrate journeys sim plan t10 fuzz down"
 
 # The post-condition, checked rather than assumed.
 #
@@ -400,6 +400,40 @@ stage_sim() {
         result_fail sim "the committed seeds run clean against a real core" \
             "the trace is in $OUT/evidence/sim-$DB.log; the seed that failed is named" \
             "above, and the line to add to seeds.txt with it"
+        return 1
+    fi
+}
+
+stage_t10() {
+    result_open t10
+    log "t10: deep reads over the sim-accumulated world"
+
+    # Its own principal, not the harness credential: the top-up needs
+    # audit-source, and widening fs-harness's grant for one stage would teach
+    # the capability model backwards. Registered here rather than in stack.sh
+    # because only this stage needs it, and recorded in harness/principals.txt
+    # like every other grant.
+    auditor=$("$REPO/core/build/install/core/bin/core" register --name t10-auditor --quiet \
+        --capabilities audit-source,config-management \
+        --config "$RUN/core/soulbind.toml" 2>/dev/null) || {
+        # Re-runs against a standing stack find the name taken. That is this
+        # stage re-entering, not a defect; but a taken name with no way to
+        # recover the credential means this run cannot proceed as the auditor.
+        result_fail t10 "deep audit reads page cleanly past the single-query ceiling" \
+            "could not register t10-auditor -- if a previous run left it behind," \
+            "the stack was not reset between runs"
+        return 1
+    }
+
+    # BEFORE fuzz, always. This tier's watchdog blames core for any 5xx, and
+    # running it after hostile input would make that blame ambiguous -- the
+    # same ordering reasoning that put fuzz last in the first place.
+    if "$HERE/t10-audit.sh" "http://127.0.0.1:$CORE_PORT" "$auditor" "$OUT/evidence"; then
+        result_pass t10 "deep audit reads page cleanly past the single-query ceiling"
+    else
+        result_fail t10 "deep audit reads page cleanly past the single-query ceiling" \
+            "the trace is in $OUT/evidence/t10-audit.log; the watchdog names the" \
+            "operation and the failing property"
         return 1
     fi
 }

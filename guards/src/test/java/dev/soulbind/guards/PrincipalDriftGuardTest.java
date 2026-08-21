@@ -58,7 +58,11 @@ class PrincipalDriftGuardTest {
 
     private static final List<Path> HARNESS_SCRIPTS = List.of(
             SourceTree.repoRoot().resolve("harness/flarum/stack.sh"),
-            SourceTree.repoRoot().resolve("harness/fullstack/stack.sh"));
+            SourceTree.repoRoot().resolve("harness/fullstack/stack.sh"),
+            // run.sh registers the t10 auditor itself -- the only principal a
+            // single stage needs -- and a registration this guard does not scan
+            // is a grant that can drift out of principals.txt unnoticed.
+            SourceTree.repoRoot().resolve("harness/fullstack/run.sh"));
 
     private static final Pattern GRANT =
             Pattern.compile("--capabilities\\s+([a-z,-]+)");

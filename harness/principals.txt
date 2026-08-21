@@ -31,6 +31,7 @@ proxy        | code-display,code-entry,enforcement-point                        
 fs-harness   | code-entry,config-management,enforcement-point                       | decide rule.set audit.query
 chat         | code-display,code-entry,link-state-reader                            | code.issue identity.describe
 plan         | link-state-reader                                                    | identity.describe
+t10-auditor  | audit-source,config-management                                       | audit.push audit.query
 
 # --- the simulated-user tier ------------------------------------------------
 sim-actor    | code-display,code-entry,enforcement-point,link-state-reader          | code.issue identity.describe decide

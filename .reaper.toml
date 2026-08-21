@@ -280,6 +280,26 @@ sh harness/credential-smoke.sh
 sh harness/tools/audit-export-smoke.sh
 
 # ---------------------------------------------------------------------------
+# The Phase 10 gate: a clean install following only docs/install.md.
+#
+# HERE, on the guest host, because the guest host IS the gate's machine: a
+# fresh Ubuntu VM with systemd, root, and no soulbind on it. The workstation
+# can never run this (FreeBSD; no systemd, no useradd), so this stage is the
+# first and only place the shipped unit file, the packaged samples and the
+# document's own command sequence execute together.
+#
+# It ends with a real cross-platform link read back from core, an audit
+# export that records everything the gate itself did, and a restart the link
+# has to survive. Evidence lands in out/install-gate/ and syncs back.
+#
+# Before the container tiers rather than after: it installs from the tarball
+# the build verb already produced, takes about a minute, and a hardened unit
+# that will not boot should be known before twenty minutes of battery.
+# ---------------------------------------------------------------------------
+echo "run: clean-install gate (docs/install.md, followed literally)"
+sh harness/install-gate.sh out/install-gate
+
+# ---------------------------------------------------------------------------
 # BOTH engines, because the gate asks for the T5 suite green cross-engine.
 #
 # The connector cannot tell which backend core uses -- that is what the storage
@@ -426,7 +446,7 @@ cp -r core/build/test-results/. out/test-results/ 2>/dev/null || {
 # checks should not have to wait for it.
 # ---------------------------------------------------------------------------
 echo "run: full-stack tier (core on sqlite)"
-SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys sim fuzz down
+SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys sim t10 fuzz down
 
 podman exec -i soulbind-mariadb \
   mariadb -h 127.0.0.1 -uroot -psoulbind-test <<'SQL'
@@ -460,7 +480,7 @@ SOULBIND_DB=mariadb \
   SOULBIND_PLAN_DB_USER=root \
   SOULBIND_PLAN_DB_PASSWORD=soulbind-test \
   SOULBIND_PLAN_DB_NAME=plan \
-  sh harness/fullstack/run.sh up migrate journeys sim plan fuzz down
+  sh harness/fullstack/run.sh up migrate journeys sim plan t10 fuzz down
 
 podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 """

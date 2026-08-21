@@ -5680,3 +5680,84 @@ was committed on a red build: the verification command was chained such that the
 failure did not stop the commit, and `BUILD FAILED` scrolled past. The commit
 stands and the fix is on top of it rather than amended in, because the history
 being honest about that is worth more than it being tidy.
+
+### 10.11 — The threat model, and what writing it required checking
+
+`docs/threat-model.md` is §14's pass over the protocol. The rule it is written
+under: every claim is held by a named test, guard, or structural property, and
+the few that are not are marked "(stated, not enforced)" — because a threat
+model that drifts from the code is a comfort document.
+
+Things established by checking rather than recalling:
+
+- **The nonce is consumed before the signature is verified**, but the
+  credential is resolved before either, so unauthenticated traffic can never
+  reach the nonce store. The order was read, not assumed.
+- **The store fails closed at capacity** — refuses rather than evicts. Evicting
+  would re-open the replay window exactly when an attacker can create memory
+  pressure. The cost (an authenticated connector can flood it) is taken
+  knowingly and said out loud.
+- **The claim ordering in `redeem`** — a first draft said "a refusal never
+  hands the code back", which is wrong in both directions: SAME_ACCOUNT
+  refuses *before* the claim (the person can still try correctly), and
+  ALREADY_LINKED refuses *after* it (the code stays claimed, because
+  re-offering a used code lets it be tried against a different account).
+  Corrected against `LinkingService.redeem` before it shipped.
+- **The document's bluntest sentence is its most important**: the credential
+  travels in the `Authorization` header and is the signing key, so anyone who
+  reads one request holds the credential. The HMAC bounds replay and binds
+  the body; it is not TLS and the document refuses to imply otherwise.
+
+The honest-gaps section (in-path attackers, host compromise, malicious
+operators, authenticated DoS, social engineering of the ceremony) exists so
+nobody reads silence as coverage.
+
+### 10.12 — Tier 10, and the driver that swallowed its own verdict
+
+T10 per §11: deep reads over the world the sim just accumulated — the whole
+audit log paged past the 1000-row single-query ceiling in small pages,
+contiguity asserted; a greedy one-request query required to *admit* it was
+truncated; filtered paging required to return exactly the rows a real
+`audit.push` principal contributed; any 5xx fails the stage, and no fault
+injection runs here, so blame is unambiguous. Ordered before `fuzz` for the
+same reason fuzz is last.
+
+Scoped honestly: the plan sketches "Plan pages over hundreds of players", which
+would need hundreds of clients to have joined a real server. What the tier
+actually asserts is the read-path property at depth — and the `plan` stage
+already renders over the sim-accumulated core, since Phase 8 put it after
+`sim`. The depth top-up goes through real `audit.push` operations by a
+registered `t10-auditor` principal (audit-source + config-management, recorded
+in principals.txt; the drift guard now scans `run.sh` because that is where the
+registration lives). Always at least fifty rows, so the filtered-paging
+comparison can never become 0 == 0.
+
+**The first real run of the driver exited 0 on a refusal.** The watchdog fired
+correctly, printed its complaint — and the stage passed, because
+`python3 | tee` reports the *tee's* status in POSIX sh, and `pipefail` is not
+portable `/bin/sh`. The fix captures the driver's status, replays the log, and
+exits with the truth. This is the exact shape of failure the battery exists to
+keep out of every other stage, found in the stage being added to the battery.
+
+### 10.13 — The install gate, and the defect it found before it ever ran
+
+`harness/install-gate.sh` executes `docs/install.md`'s own commands in the
+document's order on the guest host — a fresh Ubuntu VM with systemd, root, and
+no soulbind — ending with a real cross-platform link read back from core, an
+audit export that must contain the gate's own registrations and link, and a
+restart the link must survive. Where the document offers a choice (apt vs
+Temurin), the gate takes the document's primary path and falls back to the
+document's stated alternative, naming which in the evidence.
+
+**Writing it found a defect in the document.** §2 created `/etc/soulbind` as
+`root:root 750` — which locks the `soulbind` user out of its own
+configuration, and the failure would have surfaced two steps later as `doctor`
+unable to read a file that looks perfectly in order. The tell was the gate
+script needing a `chgrp` the document never says: under this gate's own rule —
+anything the script must do that the document does not say is a defect in the
+document — the fix went into the document, and the script now mirrors it.
+
+The gate has never executed end-to-end: the workstation is FreeBSD, with no
+systemd and no useradd, and the pieces were rehearsed individually against the
+real tarball in 10.8. Narrowings ledger item 11; the session run is the first
+full execution, and there it is a hard gate — no systemctl, no pass.

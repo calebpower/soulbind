@@ -52,8 +52,14 @@ directory.
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin soulbind
 sudo mkdir -p /opt/soulbind /etc/soulbind /var/lib/soulbind
 sudo chown soulbind:soulbind /var/lib/soulbind
+sudo chown root:soulbind /etc/soulbind
 sudo chmod 750 /etc/soulbind
 ```
+
+`/etc/soulbind` is group-owned by the service's group deliberately: `750` with
+`root:root` would lock the `soulbind` user out of its own configuration, and
+the failure would arrive later, as `doctor` unable to read a file that looks
+perfectly in order.
 
 ## 3. Unpack core
 
