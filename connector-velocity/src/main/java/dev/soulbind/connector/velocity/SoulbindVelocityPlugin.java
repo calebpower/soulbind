@@ -23,6 +23,7 @@ import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
+import com.velocitypowered.api.plugin.Dependency;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.Player;
@@ -59,7 +60,26 @@ import org.slf4j.Logger;
         name = "soulbind",
         version = "0.1.0",
         description = "Cross-platform account linking",
-        authors = {"Caleb L. Power"})
+        authors = {"Caleb L. Power"},
+        // OPTIONAL, and load-bearing twice over.
+        //
+        // Velocity gives every plugin its own classloader, and a plugin can
+        // only see another's classes if it declares a dependency on it.
+        // Without this, Class.forName("net.luckperms.api.LuckPermsProvider")
+        // throws inside soulbind's loader even with LuckPerms sitting in the
+        // same plugins directory -- so discover() returned absent() and the
+        // group effector was disabled on every proxy that had one. No unit
+        // test can see that: classloader isolation is a property of the running
+        // proxy, and the first full-stack run with LuckPerms installed is what
+        // found it.
+        //
+        // It also fixes ORDER. Velocity starts dependencies first, so LuckPerms
+        // has registered its API before soulbind resolves it -- otherwise the
+        // resolver races start-up and disables itself on an unlucky boot.
+        //
+        // Optional because a proxy without a permissions plugin must still
+        // link accounts and enforce the join gate.
+        dependencies = {@Dependency(id = "luckperms", optional = true)})
 public final class SoulbindVelocityPlugin {
 
     private final ProxyServer proxy;

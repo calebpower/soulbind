@@ -6608,3 +6608,48 @@ stage rather than from the facts: `plan` needs MySQL, LuckPerms with JSON
 storage needs nothing, and the stage runs on both axes. Corrected before it
 shipped, but it is the same species of error as the one this whole entry is
 about — describing a thing by what sits next to it instead of by what it does.
+
+### 10.24 — Run 21: the new stage failed, which is the stage working
+
+`groups` went red on its first execution. That is the correct outcome for a
+stage written to catch a component that was never connected: had it passed
+first time, the honest reading would have been that it was not asserting
+anything.
+
+**The cause is a class of defect no unit test can reach.** Velocity gives every
+plugin its own classloader, and a plugin can see another plugin's classes only
+if it declares a dependency on it. `SoulbindVelocityPlugin` declared none, so
+`Class.forName("net.luckperms.api.LuckPermsProvider")` threw inside soulbind's
+own loader **even with LuckPerms sitting in the same plugins directory** —
+`discover()` returned `absent()`, and the group effector was disabled on every
+proxy that had a permissions plugin.
+
+So 10.23 fixed the resolver and the drain, and the effector was still inert for
+a third reason underneath both. Only a real proxy with a real permissions plugin
+could show that, which is exactly why the stage was worth building.
+
+`@Dependency(id = "luckperms", optional = true)` fixes it, and fixes a second
+thing at the same time: Velocity starts dependencies first, so LuckPerms has
+registered its API before soulbind resolves it. Without that ordering the
+resolver races start-up and disables itself on an unlucky boot — an
+intermittent failure that would have been miserable to chase.
+
+Optional, because a proxy with no permissions plugin must still link accounts
+and enforce the join gate.
+
+#### The stage failed and then said nothing, which is my defect
+
+It printed *"LuckPerms has no file for this player at all:"* followed by an
+empty listing, and *"the connector's own view is in the proxy log:"* followed by
+nothing. Both diagnostics pointed at paths that do not exist — the proxy log is
+`$RUN/velocity.log`, not `$RUN/../proxy.log`.
+
+So the cause had to be reasoned out from the source rather than read from the
+run. **A failing check that cannot say why wastes the run it just spent**, and a
+session run is twenty-five minutes.
+
+It now asks three questions in the order they fail — did LuckPerms load, did
+soulbind see it, did the drain run — dumps the LuckPerms data directory as it
+actually is rather than at a guessed path, copies the proxy log into evidence,
+and queries the audit log to separate "the connector is deaf" from "there was
+nothing to hear".

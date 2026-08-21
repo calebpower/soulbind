@@ -75,14 +75,33 @@ while [ "$i" -lt 40 ]; do
 done
 
 log "FAIL LuckPerms never recorded group.$GROUP for $PLAYER after 80s"
+
+# The diagnostics matter as much as the assertion. The first version of this
+# looked for the proxy log at a path that did not exist, so the stage failed
+# and then said nothing at all -- and the cause had to be guessed at from the
+# source instead of read from the run. A failing check that cannot say why
+# wastes the run it just spent.
 if [ -f "$USER_FILE" ]; then
-    log "the user file exists but has no such group:"
+    log "the user file exists but holds no such group:"
     sed 's/^/    /' "$USER_FILE" | head -20
     cp "$USER_FILE" "$EVIDENCE/luckperms-user.json"
 else
-    log "LuckPerms has no file for this player at all:"
-    ls -la "$RUN/proxy/plugins/luckperms/json-storage/users/" 2>&1 | sed 's/^/    /' | head -10
+    log "LuckPerms has no file for this player. Everything under its data dir:"
+    find "$RUN/proxy/plugins/luckperms" -maxdepth 3 2>&1 | sed 's/^/    /' | head -20
 fi
-log "the connector's own view is in the proxy log:"
-grep -iE 'soulbind|group sync|luckperms' "$RUN/../proxy.log" 2>/dev/null | tail -15 | sed 's/^/    /' || true
+
+# Three questions, in the order they fail: did LuckPerms load at all, did
+# soulbind see it, and did the drain ever run?
+log "did LuckPerms load?"
+grep -iE 'luckperms' "$RUN/velocity.log" 2>/dev/null | head -8 | sed 's/^/    /'     || log "    (nothing about LuckPerms in the proxy log)"
+log "what soulbind said about it:"
+grep -iE 'soulbind|group sync|permissions plugin' "$RUN/velocity.log" 2>/dev/null     | head -12 | sed 's/^/    /' || log "    (nothing from soulbind in the proxy log)"
+
+cp "$RUN/velocity.log" "$EVIDENCE/velocity-groups.log" 2>/dev/null || true
+
+# And whether core emitted anything to act on, which separates "the connector
+# is deaf" from "there was nothing to hear".
+log "did core emit requirements-met?"
+sh "$REPO/tools/rpc.sh" "$CORE" "$ADMIN" audit.query '{"limit":20}' 2>/dev/null     | head -c 600 | sed 's/^/    /' || true
+echo
 exit 1
