@@ -68,6 +68,38 @@ command -v systemctl > /dev/null 2>&1 || fail "no systemctl; this is not the Ubu
 command -v useradd  > /dev/null 2>&1 || fail "no useradd; this is not the Ubuntu host the gate runs on"
 [ "$(id -u)" -eq 0 ] || fail "the gate runs as root on the ephemeral guest; it writes /opt, /etc and systemd units"
 
+# --- precondition: the machine must actually be clean -------------------------
+#
+# This gate asserts that a CLEAN install works. Run 16 proved it was not
+# asserting that: run 14's gate had left /var/lib/soulbind behind -- reaper
+# rolls back the state dataset, not the root disk -- so step 7 hit
+#
+#     a connector named 'game-side' is already registered
+#
+# which is core refusing correctly, on a machine the gate had dirtied itself and
+# then assumed was fresh.
+#
+# The earlier reasoning here was that an install which uninstalls itself is not
+# the thing under test. That is right about cleaning up AFTERWARDS and wrong
+# about establishing the precondition: a gate that says "clean install" must
+# make the machine clean, or it is testing something else and calling it that.
+#
+# Scoped to soulbind's OWN footprint. The JRE stays -- it is a prerequisite, not
+# part of soulbind's install, and doc §1 handles finding one already present.
+# Removing it would mean re-downloading a toolchain every run to prove nothing.
+step "reset any previous install, so 'clean' is true rather than assumed"
+if systemctl list-unit-files 2>/dev/null | grep -q '^soulbind-core\.service'; then
+    run systemctl disable --now soulbind-core || true
+fi
+rm -f /etc/systemd/system/soulbind-core.service
+run systemctl daemon-reload || true
+rm -rf /opt/soulbind /etc/soulbind /var/lib/soulbind
+# The user last, and tolerantly: userdel fails while anything it owns is still
+# running, and by here nothing should be.
+if id soulbind > /dev/null 2>&1; then
+    userdel soulbind >> "$EVIDENCE/transcript.txt" 2>&1 || true
+fi
+
 # --- install.md §1: Java -----------------------------------------------------
 step "Java 25 (doc §1)"
 if command -v java > /dev/null 2>&1 && java -version 2>&1 | grep -qE 'version "(2[5-9]|[3-9][0-9])'; then

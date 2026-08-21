@@ -5909,3 +5909,47 @@ commit made on a red build (see the doctor commit) being the others — and it i
 the same mistake each time: **status through a pipe is the pipe's, not the
 program's.** Verification here now captures the status first and prints
 afterwards.
+
+### 10.16 — Run 16: the gate was not testing what it said it was
+
+Run 16 cleared the operator tools — 10.15's fix held, 26 operations with no
+capability refusals and the export smoke's three mutants caught — and failed at
+the install gate, step 7:
+
+```
+a connector named 'game-side' is already registered. Audit attributes events to
+a connector, so two with one name would make the log ambiguous exactly where it
+is being read to explain something.
+```
+
+Core refusing, correctly, for the reason it says. The database was run 14's:
+`/var/lib/soulbind` sits on the guest's root disk, and reaper rolls back the
+state dataset.
+
+**The gate asserts that a clean install works, and had never established that
+the machine was clean.** On a fresh guest that was true by luck; on any later
+run in the same session it was false, and the gate failed rather than
+re-installing.
+
+10.15 argued that an install which uninstalls itself is not the thing under
+test. That is right about cleaning up *afterwards* and wrong about establishing
+the *precondition*. A gate that says "clean install" has to make the machine
+clean, or it is testing something else under that name. It now removes the
+unit, `/opt/soulbind`, `/etc/soulbind`, `/var/lib/soulbind` and the service
+user before doing anything else.
+
+Scoped to soulbind's own footprint. The JRE stays: it is a prerequisite rather
+than part of soulbind's install, doc §1 explicitly handles finding one already
+present, and removing it would mean re-downloading a toolchain every run to
+prove nothing. Narrowing 13 is rewritten accordingly — its previous wording
+claimed later runs proved "an idempotent re-install", which run 16 showed was
+not true of anything.
+
+**Three runs, three defects, none in soulbind.** 14 found a test that
+manufactured an impossible database and blamed core; 15 found a harness
+inferring a toolchain from whatever the previous run had installed; 16 found a
+gate that assumed the precondition it exists to establish. The thing they have
+in common is that each was a check being wrong about the world rather than the
+world being wrong — which is the failure mode a battery is *supposed* to
+surface before a deployment does, and the reason none of them was found by
+reading.
