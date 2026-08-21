@@ -5171,3 +5171,57 @@ whose condition is false, with the alternative coverage named by the same
 author. Recorded as departure 10 rather than left as an unexplained absence in
 the coverage document, because "named by the plan and not covered" and "declined
 for a stated reason" read very differently to somebody auditing the tier.
+
+### 10.2 — The case no test had ever seen: a database that already existed
+
+Every storage test in this repository starts from nothing.
+`StorageBackends.open` drops and recreates the schema for each one, which is
+right for isolation and leaves one enormous case uncovered: **the deployment
+that has been running**, which is every deployment after its first day.
+
+It had already cost. The charset migration of 8.18 was green on the workstation
+and rejected outright by a real server, twice, because the thing it did wrong
+could only happen against tables that already existed. Three rounds of review
+found the wrong problems (8.23, 8.24). Nothing in the suite could have caught
+it, and nothing in the suite could catch the next one either.
+
+#### Building the old database with the old migrations
+
+`UpgradePathTest` migrates to an earlier version using Flyway's `target`, writes
+rows into it, and then opens the store normally so every remaining migration
+runs.
+
+Using `target` rather than hand-written DDL is the part that makes it honest:
+the "old" schema is built by **the same migration files an older soulbind would
+have run**. A hand-written approximation of a previous schema is a second
+definition of it, and it drifts — silently, in the direction of whatever the
+person writing it believed.
+
+The rows go in with raw SQL for the mirror-image reason. The repositories are
+today's code; using them to populate yesterday's schema would be exercising a
+combination that never existed anywhere.
+
+#### Stopping at version 4, not at the newest minus one
+
+A one-migration upgrade tests one migration. This is meant to test the *path*,
+so it stops far enough back that several run.
+
+And the number of migrations actually applied is asserted, because "the row
+survived" passes trivially against an upgrade that ran nothing at all —
+mutation-checked by setting the target to the current version, which turns the
+test red with *"only 7 migrations are recorded, so the upgrade ran almost
+nothing and this test asserted almost nothing"*.
+
+#### Idempotence, again, but for a different history
+
+Idempotence was already asserted for a database built at the current version.
+This asserts it for one that arrived **by upgrade** — a different history, and
+the one a real deployment has. A restart that is not a no-op is drift per
+restart, and it would show up here and nowhere else.
+
+#### What it still does not cover
+
+The MariaDB half only runs where MariaDB does, so on a workstation this is a
+SQLite-only assertion. That is the same narrowing every storage test carries and
+it is the reason the battery exists — but it is worth saying plainly, because
+the defect this test was written for was specifically a MariaDB one.
