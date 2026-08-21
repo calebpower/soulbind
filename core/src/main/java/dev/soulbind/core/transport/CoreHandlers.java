@@ -27,6 +27,7 @@ import dev.soulbind.core.identity.LinkCodeRecord;
 import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.identity.RedeemThrottle;
 import dev.soulbind.core.policy.GateEvaluator;
+import dev.soulbind.core.policy.GateTransitions;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
 import dev.soulbind.core.storage.IdentityRepository;
@@ -103,6 +104,14 @@ public final class CoreHandlers {
             int signatureWindowSeconds) {
 
         Map<Operation, Dispatcher.Handler> handlers = new LinkedHashMap<>();
+
+        // The same emitter LinkingService uses, over the same evaluator. Not a
+        // second notion of "what an effector is told": one definition, two
+        // callers, which is the whole point of GateTransitions.
+        GateTransitions transitions = new GateTransitions(
+                new dev.soulbind.core.events.EventEmitter(events, clock),
+                identities,
+                gateEvaluator);
 
         handlers.put(Operation.HELLO, (connector, payload) -> {
             var request = codec.bind(payload, HelloRequest.class);
@@ -607,6 +616,14 @@ public final class CoreHandlers {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, e.getMessage());
             }
 
+            // An override changes what GateEvaluator answers, so it changes
+            // what effectors should be doing -- and this emitted nothing at
+            // all, so a subject admitted by hand never had a role or group
+            // applied and one revoked by hand kept theirs. DECISIONS 10.26.
+            List<String> affected = transitions.targetsOf(
+                    override.subjectId(), override.identityRef());
+            Map<String, Set<String>> gatesBefore = transitions.before(affected);
+
             String id = policy.addOverride(
                     override, clock.instant(), "connector:" + connector.id());
 
@@ -616,7 +633,55 @@ public final class CoreHandlers {
                     Map.of("effect", override.effect().wireName(),
                             "reason", override.reason())));
 
+            transitions.emit(gatesBefore, affected);
+
             return WireResponse.ok(Map.of("id", id));
+        });
+
+        handlers.put(Operation.OVERRIDE_REMOVE, (connector, payload) -> {
+            var request = codec.bind(payload, OverrideView.class);
+            if (request.isEmpty()) {
+                return unreadable(Operation.OVERRIDE_REMOVE, OverrideView.class);
+            }
+            OverrideView view = request.get();
+            if (blank(view.gate())) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "override.remove names a gate");
+            }
+            // The same "exactly one target" rule as override.set, stated here
+            // rather than borrowed from PolicyOverride's constructor: this
+            // request carries no effect and no reason, so it cannot build one.
+            boolean bySubject = !blank(view.subjectId());
+            boolean byIdentity = !blank(view.identityRef());
+            if (bySubject == byIdentity) {
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST,
+                        "override.remove names exactly one of subjectId or identityRef");
+            }
+
+            List<String> affected = transitions.targetsOf(
+                    bySubject ? view.subjectId() : null,
+                    byIdentity ? view.identityRef() : null);
+            Map<String, Set<String>> gatesBefore = transitions.before(affected);
+
+            int removed = policy.removeOverridesFor(
+                    view.gate(),
+                    bySubject ? view.subjectId() : null,
+                    byIdentity ? view.identityRef() : null);
+
+            // Audited even when nothing matched. "The operator tried to remove
+            // an override that was not there" is a fact worth having when
+            // somebody later asks why a gate still admits them.
+            audit.append(new AuditEntry(
+                    0L, clock.instant(), "connector:" + connector.id(), "override.removed",
+                    bySubject ? view.subjectId() : null,
+                    byIdentity ? view.identityRef() : null,
+                    view.gate(),
+                    Map.of("removed", Integer.toString(removed))));
+
+            transitions.emit(gatesBefore, affected);
+
+            return WireResponse.ok(Map.of("removed", removed));
         });
 
         handlers.put(Operation.CONFIG_GET, (connector, payload) ->
@@ -826,6 +891,7 @@ public final class CoreHandlers {
                 Operation.RULE_SET,
                 Operation.OVERRIDE_GET,
                 Operation.OVERRIDE_SET,
+                Operation.OVERRIDE_REMOVE,
                 Operation.CONFIG_GET,
                 Operation.CONFIG_SET,
                 Operation.IDENTITY_UNLINK,

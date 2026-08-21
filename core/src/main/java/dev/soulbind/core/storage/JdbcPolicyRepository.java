@@ -209,6 +209,28 @@ final class JdbcPolicyRepository implements PolicyRepository {
     }
 
     @Override
+    public int removeOverridesFor(String gateName, String subjectId, String identityRef) {
+        // Both absent removes NOTHING. A DELETE whose only predicate is the
+        // gate would clear every override on it, including ones this caller
+        // never knew about, and an operator cannot put those back -- the
+        // reasons they carried are gone with them.
+        if ((subjectId == null || subjectId.isBlank())
+                && (identityRef == null || identityRef.isBlank())) {
+            return 0;
+        }
+        boolean bySubject = subjectId != null && !subjectId.isBlank();
+        return jdbc.write("override.remove-for", c -> {
+            try (PreparedStatement ps = c.prepareStatement(
+                    "DELETE FROM policy_override WHERE gate_name = ? AND "
+                            + (bySubject ? "subject_id = ?" : "identity_ref = ?"))) {
+                ps.setString(1, gateName);
+                ps.setString(2, bySubject ? subjectId : identityRef);
+                return ps.executeUpdate();
+            }
+        });
+    }
+
+    @Override
     public int purgeExpiredOverrides(Instant before) {
         return jdbc.write("override.purge", c -> {
             try (PreparedStatement ps = c.prepareStatement(

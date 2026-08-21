@@ -148,8 +148,14 @@ public final class PolicyEngine {
      * <p>A subject-targeted and an identity-targeted override can both match:
      * an operator admitted somebody by identity before they linked, and later
      * banned the subject. The ban wins, which is the only safe reading.
+     *
+     * <p>Public because a caller that needs to know <em>which</em> override
+     * produced an {@code OVERRIDE} decision must not re-derive "strongest" for
+     * itself. Two definitions of that word would disagree the first time either
+     * changed, and the one that matters — deny beats allow — is exactly the one
+     * a second implementation would get wrong.
      */
-    private static Optional<PolicyOverride> strongestOverride(
+    public static Optional<PolicyOverride> strongestOverride(
             SubjectSnapshot snapshot, List<PolicyOverride> overrides, Instant now) {
 
         if (overrides == null || overrides.isEmpty()) {

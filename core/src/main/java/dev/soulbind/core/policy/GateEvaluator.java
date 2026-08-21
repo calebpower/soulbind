@@ -101,6 +101,12 @@ public final class GateEvaluator {
      *       never be taken back when it lapsed. Not granting is the smaller
      *       wrong.
      *   <li><b>Anything that denies</b>, obviously.
+     *   <li><b>An override that expires.</b> Same reasoning as grace, and it
+     *       was missed the first time: nothing re-evaluates on a timer, so a
+     *       group granted for a one-hour override would still be there in
+     *       March. A <em>permanent</em> override changes only when an operator
+     *       changes it, and that now emits — which is what makes it safe to
+     *       count and was not true when this list was first written.
      * </ul>
      *
      * <p>What remains is {@code requirements-met} and an operator's explicit
@@ -111,20 +117,38 @@ public final class GateEvaluator {
      * @param platformId the account on it
      * @return the gate names, in a stable order
      */
+    private static boolean isPermanent(
+            SubjectSnapshot snapshot,
+            List<dev.soulbind.policy.PolicyOverride> overrides,
+            Instant now) {
+
+        // The engine's own notion of "strongest", never a second one: deny
+        // beats allow, and a caller re-deriving that would get exactly the
+        // rule that matters wrong.
+        return PolicyEngine.strongestOverride(snapshot, overrides, now)
+                .map(o -> o.expiresAt() == null)
+                .orElse(false);
+    }
+
     public Set<String> satisfiedGates(String platformKind, String platformId) {
         SubjectSnapshot snapshot = snapshotFor(platformKind, platformId);
         Set<String> satisfied = new LinkedHashSet<>();
 
+        Instant now = clock.instant();
         for (String gate : policy.gates()) {
             Optional<dev.soulbind.policy.Rule> rule = policy.rule(gate);
             if (rule.isEmpty()) {
                 continue;
             }
-            Decision decision = PolicyEngine.decide(
-                    snapshot, rule.get(), policy.overridesFor(gate), clock.instant());
-            if (decision.effect() == Effect.ALLOW
-                    && (decision.reason() == Decision.Reason.REQUIREMENTS_MET
-                            || decision.reason() == Decision.Reason.OVERRIDE)) {
+            List<dev.soulbind.policy.PolicyOverride> overrides = policy.overridesFor(gate);
+            Decision decision = PolicyEngine.decide(snapshot, rule.get(), overrides, now);
+            if (decision.effect() != Effect.ALLOW) {
+                continue;
+            }
+            if (decision.reason() == Decision.Reason.REQUIREMENTS_MET) {
+                satisfied.add(gate);
+            } else if (decision.reason() == Decision.Reason.OVERRIDE
+                    && isPermanent(snapshot, overrides, now)) {
                 satisfied.add(gate);
             }
         }

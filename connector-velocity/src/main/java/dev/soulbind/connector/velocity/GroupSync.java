@@ -206,11 +206,7 @@ final class GroupSync {
         UUID playerId = playerIdOf(event.text("identityRef"));
         if (playerId == null) {
             if (aboutGroups) {
-                log.accept(
-                        "ignoring " + type + " for '" + event.text("identityRef")
-                                + "': not an account on this platform (kind '" + platformKind
-                                + "')",
-                        null);
+                log.accept("ignoring " + type + ": " + whyNotMine(event.text("identityRef")), null);
             }
             return;
         }
@@ -293,6 +289,33 @@ final class GroupSync {
                     + " without it this connector keeps every group it has granted.", null);
         }
         return null;
+    }
+
+    /**
+     * Why a reference yielded no player here, in an operator's terms.
+     *
+     * <p>The first version of this said "not an account on this platform" for
+     * every rejection, including {@code game:some-name} -- a ref whose kind is
+     * exactly this platform's. An operator reading that goes looking at their
+     * platform-kind configuration, which is correct, and finds nothing wrong,
+     * because the actual answer is that the id is not a UUID and no player on
+     * this proxy could ever hold it. A diagnostic that sends somebody to the
+     * wrong place is worse than none.
+     */
+    private String whyNotMine(String identityRef) {
+        if (identityRef == null || identityRef.isBlank()) {
+            return "the event names no identity at all";
+        }
+        int colon = identityRef.indexOf(':');
+        if (colon < 0) {
+            return "'" + identityRef + "' is not a kind:id reference";
+        }
+        if (!identityRef.substring(0, colon).equals(platformKind)) {
+            return "'" + identityRef + "' is on another platform; this connector is '"
+                    + platformKind + "'";
+        }
+        return "'" + identityRef + "' names this platform, but its id is not a UUID,"
+                + " so no player here can hold it";
     }
 
     /**

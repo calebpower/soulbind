@@ -77,6 +77,17 @@ public final class Authorizer {
         RULE_SET(Capability.CONFIG_MANAGEMENT),
         OVERRIDE_GET(Capability.CONFIG_MANAGEMENT),
         OVERRIDE_SET(Capability.CONFIG_MANAGEMENT),
+
+        /**
+         * Take an override back.
+         *
+         * <p>Missing until Phase 10, which made {@code override.set} a
+         * one-way door: an operator could admit somebody by hand and had no
+         * way over the protocol to stop admitting them. It matters more now
+         * that a permanent override grants a role or group — the thing they
+         * could not take back had become a standing permission.
+         */
+        OVERRIDE_REMOVE(Capability.CONFIG_MANAGEMENT),
         CONFIG_GET(Capability.CONFIG_MANAGEMENT),
         CONFIG_SET(Capability.CONFIG_MANAGEMENT),
         CONNECTOR_LIST(Capability.CONFIG_MANAGEMENT),

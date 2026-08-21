@@ -82,6 +82,11 @@ class AuthorizationMatrixTest {
                 put(Operation.RULE_SET, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.OVERRIDE_GET, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.OVERRIDE_SET, Optional.of(Capability.CONFIG_MANAGEMENT));
+                // Removing an override is as administrative as setting one, and
+                // deliberately not weaker: a connector that could take back an
+                // operator's deny-override could admit whoever that override
+                // was keeping out.
+                put(Operation.OVERRIDE_REMOVE, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.CONFIG_GET, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.CONFIG_SET, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.CONNECTOR_LIST, Optional.of(Capability.CONFIG_MANAGEMENT));

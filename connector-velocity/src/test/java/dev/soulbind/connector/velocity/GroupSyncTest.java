@@ -273,6 +273,28 @@ class GroupSyncTest {
     }
 
     @Test
+    @DisplayName("a ref on THIS platform whose id is not a UUID says so, not 'another platform'")
+    void thisPlatformButNotAUuidSaysWhich() {
+        // The first version of this diagnostic said "not an account on this
+        // platform" for every rejection, including a ref whose kind is exactly
+        // this platform's. An operator reads that, goes and checks their
+        // platform-kind configuration, finds it correct, and is no closer --
+        // the actual answer is that no player here could ever hold that id.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+
+        sync(r, "allow", List.of(), log,
+                event(1, "subject.requirements-met", "game:not-a-uuid", GATE)).drain();
+
+        assertTrue(r.granted().isEmpty());
+        assertTrue(log.stream().anyMatch(m -> m.contains("not a UUID")),
+                "the message does not say what is actually wrong with the reference: " + log);
+        assertFalse(log.stream().anyMatch(m -> m.contains("another platform")),
+                "the message blames the platform kind, which is correct here, and sends an"
+                        + " operator to check the one thing that is not the problem: " + log);
+    }
+
+    @Test
     @DisplayName("an Error out of a drain is contained, not left to cancel the schedule")
     void drainQuietlyContainsAnError() {
         // The scheduled task caught RuntimeException while its own comment

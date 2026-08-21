@@ -669,14 +669,13 @@ connector was never audited, while rotating one was — so the log could say a
 credential had been replaced with no record of it being created.
 `Bootstrap.register`'s javadoc had promised that row since Phase 1.
 
-### The proxy group effector — proven reachable, not yet proven effective
+### The proxy group effector — the cause was one operation earlier
 
 The `groups` full-stack stage links a player through the real flow and then
-reads **LuckPerms' own JSON storage** for the group. It is red, and has been red
-on every run since it was written, which is the correct behaviour for a stage
-built to catch a component that was connected to nothing (DECISIONS 10.23).
+reads **LuckPerms' own JSON storage** for the group. It was red on every run
+since it was written, and it was right every time.
 
-Where it stands after run 22:
+Where the chain stands:
 
 | Link in the chain | Proven |
 |---|---|
@@ -684,17 +683,27 @@ Where it stands after run 22:
 | soulbind sees it across the plugin classloader boundary | yes, run 22 (`@Dependency`) |
 | the resolver builds a real effector | yes — `group sync active` requires it |
 | the drain is scheduled | yes |
-| core emits `subject.requirements-met` | **unknown** — the stage asked the wrong store |
-| the group reaches LuckPerms | **no** |
+| core emits `subject.requirements-met` for the linked player | **no, and correctly so** |
+| the group reaches LuckPerms | pending run 24 |
 
-Run 22 could not distinguish the last two, because the stage's diagnostic
-queried the audit log rather than the event outbox, and because every failure
-path in the drain was silent. Both are fixed (DECISIONS 10.25): the stage now
-reads the outbox from sequence 0 and reports the proxy connector's own cursor,
-and the drain reports outages, wrong-gate and wrong-kind drops, successful
-grants, and any `Throwable` that would otherwise cancel the schedule.
+The stage's smoke admits the player with an operator override so they can run
+`/link`. That identity therefore already satisfied the gate before the link, so
+the link produced no transition — and `override.set` emitted nothing at all, so
+nothing had told the effector when the override was set either. DECISIONS 10.26.
 
-**No cause is claimed yet.** The next run's diagnostics identify it.
+Overrides now emit gate transitions on both set and remove; `override.remove`
+exists at all for the first time; and an override that *expires* is deliberately
+excluded from what effectors are told, for the reason grace already is.
+
+## Narrowing in force from 10.26
+
+An override carrying an `expiresAt` is not counted by
+`GateEvaluator.satisfiedGates`, so no role or group is granted for it. It
+narrows exactly one thing — what effectors are **told**. The gate itself still
+honours a temporary override in full: `decide` returns `allow`, and a test
+asserts it. The reason is the one already stated for grace: nothing in this
+system re-evaluates on a timer, so a group granted for a one-hour override would
+never be taken back.
 
 ## Guards in force
 

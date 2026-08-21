@@ -19,6 +19,7 @@ package dev.soulbind.core.identity;
 import dev.soulbind.core.audit.AuditEntry;
 import dev.soulbind.core.events.EventEmitter;
 import dev.soulbind.core.policy.GateEvaluator;
+import dev.soulbind.core.policy.GateTransitions;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.IdentityRepository;
 import dev.soulbind.core.storage.LinkCodeRepository;
@@ -76,7 +77,7 @@ public final class LinkingService {
     private final PlatformKindRepository kinds;
     private final AuditRepository audit;
 
-    private final GateEvaluator gates;
+    private final GateTransitions transitions;
     private final Clock clock;
     private final Duration ttl;
 
@@ -94,7 +95,7 @@ public final class LinkingService {
         this.codes = codes;
         this.kinds = kinds;
         this.audit = audit;
-        this.gates = gates;
+        this.transitions = new GateTransitions(events, identities, gates);
         this.clock = clock;
         this.ttl = ttl;
     }
@@ -105,69 +106,28 @@ public final class LinkingService {
      *
      * <p>The specification (§7) has core emit {@code subject.requirements-met}
      * "per gate whose requirements just became satisfied" as part of the same
-     * transaction as the link. Until Phase 10 it emitted neither that nor its
-     * mirror — the event types were declared in the protocol, documented in
-     * {@code docs/protocol.md} with a paragraph on why they are per-gate, and
-     * consumed by both reference effectors, and nothing anywhere produced
-     * them. The role effector could not fire in any deployment.
+     * transaction as the link.
      *
-     * <p><b>Per identity, not per subject.</b> An effector grants a role on
-     * <em>its own</em> platform and finds its target by reading the event's
-     * {@code identityRef} — {@code RoleEffector} refuses a ref whose kind is
-     * not its own. One event per subject would carry one identity's ref and
-     * every other platform's effector would ignore it, so a two-platform
-     * subject crossing a gate emits one event per side.
+     * <p><b>Delegated.</b> The logic used to live here, which meant only the
+     * operations this service owns ever told an effector anything — and setting
+     * an operator override, which changes exactly the same answer, told nobody.
+     * See {@link GateTransitions} and DECISIONS 10.26.
      *
      * @param before what each identity ref satisfied prior to the change
      * @param refs the identities to re-evaluate, as {@code kind:id}
      */
     private void emitGateTransitions(Map<String, Set<String>> before, Collection<String> refs) {
-        for (String ref : refs) {
-            int colon = ref.indexOf(':');
-            if (colon < 0) {
-                continue;
-            }
-            Set<String> was = before.getOrDefault(ref, Set.of());
-            Set<String> now = gates.satisfiedGates(
-                    ref.substring(0, colon), ref.substring(colon + 1));
-
-            var subject = identities.subjectOf(ref.substring(0, colon), ref.substring(colon + 1));
-            String subjectId = subject.map(s -> s.id()).orElse(null);
-
-            for (String gate : now) {
-                if (!was.contains(gate)) {
-                    events.emit(EventType.SUBJECT_REQUIREMENTS_MET, subjectId, ref, gate, Map.of());
-                }
-            }
-            for (String gate : was) {
-                if (!now.contains(gate)) {
-                    events.emit(
-                            EventType.SUBJECT_REQUIREMENTS_LOST, subjectId, ref, gate, Map.of());
-                }
-            }
-        }
+        transitions.emit(before, refs);
     }
-
 
     /** Every identity ref on a subject, for fan-out to each platform's effector. */
     private List<String> refsOf(String subjectId) {
-        if (subjectId == null) {
-            return List.of();
-        }
-        return identities.identitiesOf(subjectId).stream().map(Identity::ref).toList();
+        return transitions.refsOf(subjectId);
     }
 
     /** What each of these refs satisfies right now, for diffing afterwards. */
     private Map<String, Set<String>> gatesSatisfiedBy(Collection<String> refs) {
-        Map<String, Set<String>> before = new LinkedHashMap<>();
-        for (String ref : refs) {
-            int colon = ref.indexOf(':');
-            if (colon >= 0) {
-                before.put(ref, gates.satisfiedGates(
-                        ref.substring(0, colon), ref.substring(colon + 1)));
-            }
-        }
-        return before;
+        return transitions.before(refs);
     }
 
     /**

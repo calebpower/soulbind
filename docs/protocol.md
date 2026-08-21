@@ -106,6 +106,7 @@ copy of the rule.
 | `rule.set` | `config-management` |
 | `override.get` | `config-management` |
 | `override.set` | `config-management` |
+| `override.remove` | `config-management` |
 | `config.get` | `config-management` |
 | `config.set` | `config-management` |
 | `connector.list` | `config-management` |

@@ -6751,3 +6751,106 @@ it; nothing else did.
 
 So core is not the missing half. Whatever run 23 finds is on the connector side
 of the wire, and it now has five places it can say so.
+
+### 10.26 — An operator's override told nobody, and that was the missing group
+
+Run 23's diagnostics worked, and the answer was one operation earlier than
+anywhere I had been looking.
+
+`GateEvaluator.satisfiedGates` counts an allow-override as satisfying a gate.
+Its own javadoc gives the reason:
+
+> What remains is `requirements-met` and an operator's explicit allow-override —
+> two states that change only when something else emits an event, which is
+> exactly what an effector can track.
+
+**`override.set` emitted nothing.** So the second half of that sentence was
+false: the override state changed with no event, and no connector was ever told.
+An operator admitting somebody by hand never got them a role or a group, and one
+banning somebody by hand never took theirs away.
+
+The full-stack `groups` stage ran red on this for two sessions, and the stage was
+right the whole time. Its smoke admits the player by override so they can run
+`/link` — the documented reason overrides exist — so that identity **already
+satisfied `game.join` before the link**, and the link produced no transition to
+emit. Across 194 events and 22 links in run 23, exactly one link had a side with
+no `requirements-met`, and it was that player.
+
+I spent run 22 and most of run 23 looking at the connector because that was where
+the last three defects had been. The evidence that would have pointed here — the
+event outbox, rather than the audit log — is what 10.25 added.
+
+#### One definition, two callers
+
+The emission lived inside `LinkingService`, which is why only that service's
+operations ever told anybody. It is now `GateTransitions`, used by
+`LinkingService` and by the override handlers, and the shape is deliberately
+snapshot-then-diff rather than "emit what I think I just did": a caller that
+reasons about its own change has to get every rule the policy engine implements
+right, at every call site, whereas a caller that asks the evaluator before and
+after only has to name the accounts it touched.
+
+Per identity, not per subject, for the reason already established in Phase 10 —
+an effector routes on `identityRef` and refuses a kind that is not its own, so a
+subject-scoped override fans out across the subject's graph.
+
+#### The narrowing: an override that expires is not counted
+
+`satisfiedGates` now excludes an override with an `expiresAt`. This is the same
+exclusion grace already carries, and missing it the first time is the same
+oversight: **nothing in this system re-evaluates on a timer**, so a group granted
+for a one-hour override would still be there in March, and the operator who typed
+one hour would have no idea.
+
+It narrows exactly one thing — what effectors are *told*. The gate still honours
+a temporary override completely; `decide` returns `allow` and the test asserts
+it. A permanent override is still counted, and that is now safe rather than
+merely asserted, because setting and removing one emits.
+
+#### `override.set` was a one-way door
+
+There was no `override.remove` in the authorization table. `PolicyRepository`
+had `removeOverride(id)`, and `override.get` returns `OverrideView` with its
+`id` field set to `null` — so removal by id was unreachable over the protocol
+even though the repository could do it. An operator could admit somebody by hand
+and had no way to stop.
+
+That mattered more the moment a permanent override started granting a group: the
+thing they could not take back had become a standing permission.
+
+`override.remove` takes the same target shape as `override.set` — a gate plus
+exactly one of `subjectId` or `identityRef` — for the reason `connector.rotate`
+takes a name: an operator knows the gate and who they admitted, not a uuid this
+system never showed them. Naming neither target is **refused**, and the
+repository refuses it a second time on its own, because a `DELETE` whose only
+predicate is the gate clears overrides nobody asked about and their reasons are
+not recoverable. Both layers are tested; the repository's guard is unreachable
+from the wire, and an unreachable guard nobody tests is a comment.
+
+**Left standing, deliberately:** `OverrideView.id` is still always null. Filling
+it needs the repository to surface ids through `overridesFor`, and target-based
+removal makes id-based removal unnecessary — but a protocol field that is never
+populated is still a small lie, and it is written down here rather than quietly
+tolerated.
+
+#### A diagnostic that sent people to the wrong place
+
+10.25's new wrong-kind message read "not an account on this platform (kind
+'game')" for the ref `game:journey-player-559246` — whose kind is exactly this
+platform's. An operator reading that checks their platform-kind configuration,
+finds it correct, and is no closer; the real answer is that the id is not a UUID
+and no player on a proxy could hold it. The two cases are now distinguished.
+
+Mutation-checked, seven mutants, all killed: `override.set` and
+`override.remove` each stopping emitting, `override.remove` accepting a request
+with no target, expiring overrides counted again, `override.set` ignoring a
+subject target, `removeOverridesFor`'s own no-target guard weakened, and the two
+diagnostic cases collapsed back into one message.
+
+**A note on how the first pass of that check was wrong.** The mutation loop
+restored only the file it was about to mutate, so each run carried every earlier
+mutation with it, and a mutant the suite could not actually kill was reported
+killed. Re-run with every file restored each time, the storage-layer guard
+**survived** — the handler refuses first, so nothing from the wire reaches it.
+That is what the repository-level assertion above exists for. A mutation run
+whose mutants contaminate each other measures nothing.

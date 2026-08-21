@@ -55,6 +55,24 @@ public interface PolicyRepository {
 
     boolean removeOverride(String overrideId);
 
+    /**
+     * Removes every override on a gate for one target.
+     *
+     * <p>By TARGET, not by id, and that is the operator-facing shape for the
+     * same reason {@code connector.rotate} takes a name: an operator knows the
+     * gate and who they admitted, not a uuid this system never showed them.
+     * {@code override.get} does not return ids at all, so removal by id was
+     * unreachable over the protocol — see DECISIONS 10.26.
+     *
+     * <p>Exactly one of {@code subjectId} or {@code identityRef} is meaningful,
+     * matching what {@code PolicyOverride} enforces on the way in. Both null
+     * removes nothing rather than removing everything on the gate, which is the
+     * one mistake here that could not be undone.
+     *
+     * @return how many were removed
+     */
+    int removeOverridesFor(String gateName, String subjectId, String identityRef);
+
     /** Deletes overrides that expired before the given moment. */
     int purgeExpiredOverrides(Instant before);
 }
