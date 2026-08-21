@@ -207,16 +207,13 @@ public final class SoulbindVelocityPlugin {
                 t.setDaemon(true);
                 return t;
             });
-            drains.scheduleWithFixedDelay(() -> {
-                try {
-                    groupSync.drain();
-                } catch (RuntimeException e) {
-                    // Never propagate: an exception out of a scheduled task
-                    // cancels all future runs silently, and the group effector
-                    // would simply stop with nothing said.
-                    logger.warn("group sync failed; it will be retried", e);
-                }
-            }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
+            // drainQuietly, not drain: the containment lives in GroupSync so a
+            // test can watch it work. This was an inline try/catch on
+            // RuntimeException, which does not hold the guarantee its own
+            // comment claimed -- an Error out of a scheduled task cancels every
+            // future run and says nothing.
+            drains.scheduleWithFixedDelay(
+                    groupSync::drainQuietly, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
             logger.info("group sync active: '{}' on gate '{}'",
                     config.findString(VelocityConfig.EFFECTOR_GROUP).orElse(""),
                     config.findString(VelocityConfig.JOIN_GATE).orElse(""));

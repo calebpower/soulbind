@@ -669,6 +669,33 @@ connector was never audited, while rotating one was — so the log could say a
 credential had been replaced with no record of it being created.
 `Bootstrap.register`'s javadoc had promised that row since Phase 1.
 
+### The proxy group effector — proven reachable, not yet proven effective
+
+The `groups` full-stack stage links a player through the real flow and then
+reads **LuckPerms' own JSON storage** for the group. It is red, and has been red
+on every run since it was written, which is the correct behaviour for a stage
+built to catch a component that was connected to nothing (DECISIONS 10.23).
+
+Where it stands after run 22:
+
+| Link in the chain | Proven |
+|---|---|
+| LuckPerms loads on the proxy | yes, run 22 |
+| soulbind sees it across the plugin classloader boundary | yes, run 22 (`@Dependency`) |
+| the resolver builds a real effector | yes — `group sync active` requires it |
+| the drain is scheduled | yes |
+| core emits `subject.requirements-met` | **unknown** — the stage asked the wrong store |
+| the group reaches LuckPerms | **no** |
+
+Run 22 could not distinguish the last two, because the stage's diagnostic
+queried the audit log rather than the event outbox, and because every failure
+path in the drain was silent. Both are fixed (DECISIONS 10.25): the stage now
+reads the outbox from sequence 0 and reports the proxy connector's own cursor,
+and the drain reports outages, wrong-gate and wrong-kind drops, successful
+grants, and any `Throwable` that would otherwise cancel the schedule.
+
+**No cause is claimed yet.** The next run's diagnostics identify it.
+
 ## Guards in force
 
 | Guard | Holds |

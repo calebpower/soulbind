@@ -422,8 +422,9 @@ stage_groups() {
         result_pass groups "a link reaches a real permissions plugin"
     else
         result_fail groups "a link reaches a real permissions plugin" \
-            "the proxy's group effector had never been wired to anything at all" \
-            "(DECISIONS 10.23); this stage is what proves it now is"
+            "a player linked through the real flow, and the permissions plugin" \
+            "never recorded the group -- see the [groups] diagnostics above for" \
+            "which link in the chain broke"
         return 1
     fi
 }

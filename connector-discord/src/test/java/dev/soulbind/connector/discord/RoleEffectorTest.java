@@ -15,6 +15,7 @@
  */
 package dev.soulbind.connector.discord;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -112,6 +113,68 @@ class RoleEffectorTest {
                         client, connector, new IdempotentApplier(), GATE, ROLE, "chat",
                         (message, cause) -> logged.add(message)),
                 surface, transport, logged);
+    }
+
+    @Test
+    @DisplayName("an Error out of a drain is contained, not left to cancel the schedule")
+    void drainQuietlyContainsAnError() {
+        // Main's scheduled task caught RuntimeException behind a comment saying
+        // "nothing escapes into the scheduler". An Error does, and a cancelled
+        // scheduled task is silent: the bot stays online, answers commands, and
+        // never grants another role, with nothing in the log to say when it
+        // stopped.
+        List<String> logged = new ArrayList<>();
+        InMemoryTransport transport = new InMemoryTransport(request -> {
+            throw new NoClassDefFoundError("dev/soulbind/sdk/Payload");
+        });
+        SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
+        RoleEffector effector = new RoleEffector(
+                client, new ChatConnector(client, new ScriptedSurface(), "chat"),
+                new IdempotentApplier(), GATE, ROLE, "chat",
+                (message, cause) -> logged.add(message));
+
+        assertDoesNotThrow(effector::drainQuietly,
+                "an Error escaped the drain; scheduleWithFixedDelay would cancel every"
+                        + " future run and say nothing");
+        assertTrue(logged.stream().anyMatch(m -> m.contains("retried")),
+                "the failure was swallowed without a word: " + logged);
+    }
+
+    @Test
+    @DisplayName("an unreachable core is reported once, and so is its recovery")
+    void pollFailureIsSaidOnceAndRecoveryToo() {
+        // Silence here was deliberate and wrong: a connector that cannot reach
+        // core looks exactly like one with nothing to do. Latched rather than
+        // per-cycle, because at the default poll interval that is a wall of
+        // identical lines an operator learns to scroll past.
+        List<String> logged = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean reachable =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        InMemoryTransport transport = new InMemoryTransport(request -> reachable.get()
+                ? page()
+                : "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"internal\","
+                        + "\"message\":\"core is down\"}}");
+        SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
+        RoleEffector effector = new RoleEffector(
+                client, new ChatConnector(client, new ScriptedSurface(), "chat"),
+                new IdempotentApplier(), GATE, ROLE, "chat",
+                (message, cause) -> logged.add(message));
+
+        effector.drain();
+        effector.drain();
+        effector.drain();
+
+        assertEquals(1, logged.size(),
+                "an outage was either silent or repeated every cycle: " + logged);
+        assertTrue(logged.get(0).contains("cannot poll core"), logged.toString());
+
+        reachable.set(true);
+        effector.drain();
+
+        assertEquals(2, logged.size(), logged.toString());
+        assertTrue(logged.get(1).contains("recovered"),
+                "the outage was announced and its end was not, so the log still reads as"
+                        + " broken: " + logged);
     }
 
     @Test

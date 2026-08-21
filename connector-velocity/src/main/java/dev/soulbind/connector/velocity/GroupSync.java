@@ -62,6 +62,12 @@ final class GroupSync {
     private final Supplier<List<UUID>> onlinePlayers;
     private final BiConsumer<String, Throwable> log;
 
+    /**
+     * Whether the last poll failed, so an outage is reported once rather than
+     * every five seconds.
+     */
+    private boolean pollFailing;
+
     GroupSync(
             SoulbindClient client,
             GroupEffector effector,
@@ -88,6 +94,30 @@ final class GroupSync {
                 && gate != null && !gate.isBlank();
     }
 
+    /**
+     * One drain that cannot escape, whatever it hits.
+     *
+     * <p>This is what the scheduler runs, and it catches {@link Throwable}
+     * rather than {@code RuntimeException}. The plugin's scheduled task already
+     * carried a comment saying an exception out of it "cancels all future runs
+     * silently" — and then caught only {@code RuntimeException}, which leaves
+     * exactly the case that comment describes wide open. A {@code
+     * NoClassDefFoundError} from a shaded jar missing a class this path alone
+     * touches would cancel group sync for the life of the proxy, with nothing
+     * logged and every other feature still working.
+     *
+     * <p>Catching {@code Error} is normally wrong. It is right here because the
+     * alternative is not "fail loudly" but "stop for good, in silence": there
+     * is no supervisor above a cancelled scheduled task to notice.
+     */
+    void drainQuietly() {
+        try {
+            drain();
+        } catch (Throwable t) {
+            log.accept("group sync failed; it will be retried in five seconds", t);
+        }
+    }
+
     /** Fetches one page of events, applies what belongs here, acknowledges. */
     Drained drain() {
         if (!isConfigured()) {
@@ -97,7 +127,26 @@ final class GroupSync {
         if (!(outcome instanceof SoulbindClient.Outcome.Ok ok)) {
             // Not acknowledged, so the cursor does not move and the next poll
             // sees the same events. An outage costs a delay, not a gap.
+            //
+            // SAID ONCE, and said at all. This returned in silence, and a drain
+            // that cannot reach core then looks exactly like a drain with
+            // nothing to do -- which is how a proxy can run for an hour
+            // granting nothing and log not one word about it. Latched rather
+            // than logged every cycle: at a five-second delay an outage would
+            // otherwise write twelve identical lines a minute.
+            if (!pollFailing) {
+                pollFailing = true;
+                log.accept(
+                        "cannot poll core for events (" + describe(outcome) + "); no group will"
+                                + " be granted or revoked until this recovers. Retrying every"
+                                + " five seconds.",
+                        null);
+            }
             return new Drained(0, 0, false);
+        }
+        if (pollFailing) {
+            pollFailing = false;
+            log.accept("event polling recovered; resuming group sync", null);
         }
 
         List<Payload> events = ok.payload().items("events");
@@ -128,10 +177,24 @@ final class GroupSync {
 
     private void apply(Payload event) {
         String type = event.text("type");
+        boolean aboutGroups =
+                "subject.requirements-met".equals(type) || "subject.requirements-lost".equals(type);
 
         if (!gate.equals(event.text("gate"))) {
             // Not this connector's gate. Acting on it would move a group for a
             // requirement nobody tied to it.
+            //
+            // Said out loud for the two types this connector exists to act on,
+            // and only for those: the stream carries everything, so logging
+            // every foreign event would bury the line that matters. A gate
+            // configured as one string and emitted as another is otherwise a
+            // silent no-op -- the drain runs, acknowledges, and grants nothing.
+            if (aboutGroups) {
+                log.accept(
+                        "ignoring " + type + " for gate '" + event.text("gate")
+                                + "': this connector is configured for gate '" + gate + "'",
+                        null);
+            }
             return;
         }
 
@@ -142,15 +205,43 @@ final class GroupSync {
 
         UUID playerId = playerIdOf(event.text("identityRef"));
         if (playerId == null) {
+            if (aboutGroups) {
+                log.accept(
+                        "ignoring " + type + " for '" + event.text("identityRef")
+                                + "': not an account on this platform (kind '" + platformKind
+                                + "')",
+                        null);
+            }
             return;
         }
         switch (type) {
-            case "subject.requirements-met" -> effector.grant(playerId, group);
-            case "subject.requirements-lost" -> effector.revoke(playerId, group);
+            // Reported, not assumed. The effector answers whether it applied
+            // anything, and an operator who has just linked an account needs to
+            // be able to read that it happened -- the alternative is inferring
+            // it from the permissions plugin's own storage, which is what this
+            // connector's own harness had to resort to.
+            case "subject.requirements-met" -> {
+                if (effector.grant(playerId, group)) {
+                    log.accept("granted group '" + group + "' to " + playerId, null);
+                }
+            }
+            case "subject.requirements-lost" -> {
+                if (effector.revoke(playerId, group)) {
+                    log.accept("revoked group '" + group + "' from " + playerId, null);
+                }
+            }
             default -> {
                 // Somebody else's event. The stream carries everything.
             }
         }
+    }
+
+    /** A poll failure in one short phrase, for the latched outage line. */
+    private static String describe(SoulbindClient.Outcome outcome) {
+        if (outcome instanceof SoulbindClient.Outcome.Refused refused) {
+            return refused.code() + ": " + refused.message();
+        }
+        return "core unreachable";
     }
 
     /**

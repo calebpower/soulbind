@@ -17,6 +17,7 @@ package dev.soulbind.core.transport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -393,6 +394,92 @@ class EventDeliveryTest {
                     2, ok(core, clock, "event.subscribe", "{\"after\":4}")
                             .get("events").size(),
                     "an explicit position must be honoured even when the cursor is further on");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("the full-stack link sequence puts a requirements-met on the wire, named and addressed")
+    void theLinkSequencePutsSomethingActionableOnTheWire(Backend backend) throws Exception {
+        // The full-stack `groups` stage performs exactly this sequence and then
+        // waits for a permissions group that never arrives. Nothing between
+        // `GateTransitionTest` -- which reads the outbox through the repository
+        // -- and a live proxy asserted that the event an effector consumes
+        // comes back over `event.subscribe` carrying the two fields an effector
+        // routes on. An event emitted with the right gate and delivered without
+        // it is indistinguishable, from the connector's side, from no event at
+        // all: it drops the page in silence and acknowledges past it.
+        Clock clock = TestCore.fixedClock();
+        try (TestCore core = new TestCore(
+                backend, tempDir,
+                Set.of(Capability.CONFIG_MANAGEMENT, Capability.CODE_DISPLAY,
+                        Capability.CODE_ENTRY, Capability.ENFORCEMENT_POINT), clock)) {
+
+            String player = "d96d427c-e2d6-3a31-8231-cf626a854942";
+            String ref = "game:" + player;
+
+            ok(core, clock, "rule.set",
+                    "{\"gate\":\"game.join\",\"requiredKinds\":[],\"requireLinked\":true,"
+                            + "\"graceSeconds\":0,\"defaultEffect\":\"deny\"}");
+
+            // The gate denies first, as it does for the unlinked player the
+            // stage connects before anything else. This is also what registers
+            // the gate by first mention, and it happens BEFORE the link -- the
+            // ordering the stage relies on.
+            assertEquals(
+                    "deny",
+                    ok(core, clock, "decide",
+                            "{\"gate\":\"game.join\",\"platformKind\":\"game\","
+                                    + "\"platformId\":\"" + player + "\"}")
+                            .get("effect").asText());
+
+            String code = ok(core, clock, "code.issue",
+                    "{\"platformKind\":\"game\",\"platformId\":\"" + player + "\","
+                            + "\"display\":\"Linker\"}")
+                    .get("code").asText();
+
+            ok(core, clock, "code.redeem",
+                    "{\"code\":\"" + code + "\",\"platformKind\":\"harness\","
+                            + "\"platformId\":\"acct-1\"}");
+
+            assertEquals(
+                    "allow",
+                    ok(core, clock, "decide",
+                            "{\"gate\":\"game.join\",\"platformKind\":\"game\","
+                                    + "\"platformId\":\"" + player + "\"}")
+                            .get("effect").asText(),
+                    "the link did not open the gate, so there is nothing for an effector to"
+                            + " act on and the rest of this test would be asserting the wrong"
+                            + " thing");
+
+            // `after: 0` rather than the cursor, for the same reason the stage
+            // now uses it: this reads the outbox as it stands, not as this
+            // connector has consumed it.
+            JsonNode page = ok(core, clock, "event.subscribe", "{\"after\":0,\"limit\":100}");
+
+            List<String> types = new ArrayList<>();
+            JsonNode met = null;
+            for (JsonNode event : page.get("events")) {
+                types.add(event.get("type").asText());
+                if (EventType.SUBJECT_REQUIREMENTS_MET.wireName().equals(
+                                event.get("type").asText())
+                        && ref.equals(event.get("identityRef").asText())) {
+                    met = event;
+                }
+            }
+
+            assertNotNull(met,
+                    "no requirements-met for " + ref + " reached the wire; the outbox delivered "
+                            + types);
+
+            // THE TWO FIELDS AN EFFECTOR ROUTES ON. Either missing and the
+            // connector drops the event silently -- which is precisely the
+            // shape of "the drain ran, acknowledged, and granted nothing".
+            assertEquals("game.join", met.get("gate").asText(),
+                    "the event does not name the gate, so a connector configured for one gate"
+                            + " cannot tell whether this is its business");
+            assertFalse(met.get("subjectId").isNull(),
+                    "the event carries no subject, so nothing can correlate it to the person");
         }
     }
 }

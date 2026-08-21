@@ -16,6 +16,7 @@
 
 package dev.soulbind.connector.velocity;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -121,6 +122,82 @@ class GroupSyncTest {
     }
 
     @Test
+    @DisplayName("a grant is reported, so an operator can read that it happened")
+    void grantsAreReported() {
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+        sync(r, "allow", List.of(), log,
+                event(1, "subject.requirements-met", "game:" + PLAYER, GATE)).drain();
+
+        assertTrue(
+                log.stream().anyMatch(m -> m.contains(GROUP) && m.contains(PLAYER.toString())),
+                "the group was applied and nothing said so; the only way to confirm it was to"
+                        + " read the permissions plugin's own storage: " + log);
+    }
+
+    @Test
+    @DisplayName("an event for another gate says which gate, rather than vanishing")
+    void gateMismatchIsSaidOutLoud() {
+        // THE failure this connector kept producing: every step reports success
+        // -- the drain polls, applies, acknowledges -- and no group appears,
+        // with not one line anywhere saying why. A gate configured as one
+        // string and emitted as another is indistinguishable, from the outside,
+        // from a connector that was never wired up at all.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+
+        sync(r, "allow", List.of(), log,
+                event(1, "subject.requirements-met", "game:" + PLAYER, "somebody.else"))
+                .drain();
+
+        assertTrue(r.granted().isEmpty(),
+                "a group was applied for a gate this connector is not configured for");
+        assertTrue(
+                log.stream().anyMatch(m -> m.contains("somebody.else") && m.contains(GATE)),
+                "the event was dropped in silence, or the message names only one of the two"
+                        + " gates -- an operator needs both to see they differ: " + log);
+    }
+
+    @Test
+    @DisplayName("an unreachable core is reported once, not twelve times a minute")
+    void pollFailureIsSaidOnceAndRecoveryToo() {
+        // Latched deliberately. The drain runs at a five-second delay, so
+        // logging per cycle would put twelve identical lines a minute into a
+        // proxy console during any outage -- and an operator who scrolls past
+        // that noise is an operator who misses the line that matters.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean reachable =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        InMemoryTransport transport = new InMemoryTransport(request -> reachable.get()
+                ? page()
+                : "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"internal\","
+                        + "\"message\":\"core is down\"}}");
+
+        GroupSync s = new GroupSync(
+                new SoulbindClient(transport, "cred", CLOCK, new DecisionCache()),
+                r.effector(), new IdempotentApplier(), GATE, GROUP, "game",
+                List::of, (m, c) -> log.add(m));
+
+        s.drain();
+        s.drain();
+        s.drain();
+
+        assertEquals(1, log.size(),
+                "an outage was either silent or repeated every cycle: " + log);
+        assertTrue(log.get(0).contains("cannot poll core"), log.toString());
+
+        reachable.set(true);
+        s.drain();
+
+        assertEquals(2, log.size(), log.toString());
+        assertTrue(log.get(1).contains("recovered"),
+                "the outage was announced and its end was not, so the console still reads as"
+                        + " broken: " + log);
+    }
+
+    @Test
     @DisplayName("requirements-lost takes it back")
     void revokesOnRequirementsLost() {
         Recording r = recording();
@@ -181,11 +258,44 @@ class GroupSyncTest {
         // The kind is checked, not merely split off: a chat account whose id
         // happened to parse as a UUID would otherwise take a group here.
         Recording r = recording();
-        sync(r, "allow", List.of(), new ArrayList<>(),
+        List<String> log = new ArrayList<>();
+        sync(r, "allow", List.of(), log,
                 event(1, "subject.requirements-met", "chat:" + PLAYER, GATE)).drain();
 
         assertTrue(r.granted().isEmpty(),
                 "a group was applied for an account on another platform: " + r.granted());
+
+        // Said, not merely done. A deployment whose platform kind is misspelled
+        // in the connector's config drops every event on this path, and the
+        // only symptom is a group that never appears.
+        assertTrue(log.stream().anyMatch(m -> m.contains("chat:" + PLAYER)),
+                "the event was dropped without naming the account it was for: " + log);
+    }
+
+    @Test
+    @DisplayName("an Error out of a drain is contained, not left to cancel the schedule")
+    void drainQuietlyContainsAnError() {
+        // The scheduled task caught RuntimeException while its own comment
+        // claimed it caught everything, so an Error -- a NoClassDefFoundError
+        // from a shaded jar, say -- would cancel group sync for the life of the
+        // proxy. Every other feature keeps working and nothing is logged, which
+        // is the hardest possible shape to diagnose.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+        InMemoryTransport transport = new InMemoryTransport(request -> {
+            throw new NoClassDefFoundError("dev/soulbind/sdk/Payload");
+        });
+
+        GroupSync s = new GroupSync(
+                new SoulbindClient(transport, "cred", CLOCK, new DecisionCache()),
+                r.effector(), new IdempotentApplier(), GATE, GROUP, "game",
+                List::of, (m, c) -> log.add(m));
+
+        assertDoesNotThrow(s::drainQuietly,
+                "an Error escaped the drain; scheduleWithFixedDelay would cancel every"
+                        + " future run and say nothing");
+        assertTrue(log.stream().anyMatch(m -> m.contains("retried")),
+                "the failure was swallowed without a word: " + log);
     }
 
     @Test

@@ -132,19 +132,16 @@ public final class Main {
             });
 
             int seconds = DiscordConfig.pollSeconds(config);
-            poller.scheduleWithFixedDelay(() -> {
-                try {
-                    effector.drain();
-                } catch (RuntimeException e) {
-                    // Nothing escapes into the scheduler. A scheduled task that
-                    // throws is cancelled silently, and the effector would stop
-                    // forever with no log line saying it had.
-                    LOG.warn("event drain failed; will retry", e);
-                }
-                // scheduleWithFixedDelay, not AtFixedRate: a drain that takes
-                // longer than the interval must not have another queued behind
-                // it, or a slow core turns into a backlog of pollers.
-            }, 0, seconds, TimeUnit.SECONDS);
+            // drainQuietly, not drain: the containment lives in RoleEffector so
+            // a test can watch it work, and it catches Throwable rather than
+            // RuntimeException -- this was an inline catch that did not hold the
+            // guarantee its own comment claimed.
+            //
+            // scheduleWithFixedDelay, not AtFixedRate: a drain that takes longer
+            // than the interval must not have another queued behind it, or a
+            // slow core turns into a backlog of pollers.
+            poller.scheduleWithFixedDelay(
+                    effector::drainQuietly, 0, seconds, TimeUnit.SECONDS);
 
             LOG.info("polling for events every {}s, granting '{}' on '{}'", seconds, role, gate);
         } else {

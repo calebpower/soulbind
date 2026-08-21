@@ -45,6 +45,12 @@ public final class RoleEffector {
     private final String platformKind;
     private final BiConsumer<String, Throwable> log;
 
+    /**
+     * Whether the last poll failed, so an outage is reported once rather than
+     * on every cycle.
+     */
+    private boolean pollFailing;
+
     public RoleEffector(
             SoulbindClient client,
             ChatConnector connector,
@@ -66,6 +72,24 @@ public final class RoleEffector {
     public record Drained(int seen, int applied, boolean acknowledged) {}
 
     /**
+     * One drain that cannot escape, whatever it hits.
+     *
+     * <p>What the scheduler runs, and it catches {@link Throwable} rather than
+     * {@code RuntimeException}. The scheduled task carried a comment saying
+     * "nothing escapes into the scheduler" and then caught only {@code
+     * RuntimeException} — leaving open exactly the case it described, where an
+     * {@code Error} cancels the task for the life of the process with nothing
+     * logged.
+     */
+    public void drainQuietly() {
+        try {
+            drain();
+        } catch (Throwable t) {
+            log.accept("event drain failed; it will be retried", t);
+        }
+    }
+
+    /**
      * Polls, applies, and acknowledges.
      *
      * <p>Acknowledges only after applying, and only up to the last event that
@@ -78,7 +102,24 @@ public final class RoleEffector {
         if (!(outcome instanceof SoulbindClient.Outcome.Ok ok)) {
             // An outage is not a failure worth shouting about: the cursor did
             // not move, so the next poll gets the same events.
+            //
+            // Not worth shouting EVERY CYCLE, which is not the same as not
+            // worth saying. Returning in silence makes an unreachable core
+            // indistinguishable from a quiet one, and a connector that has
+            // granted nothing for an hour then has no log line explaining it.
+            // Latched, so an outage costs one line and its end costs one more.
+            if (!pollFailing) {
+                pollFailing = true;
+                log.accept(
+                        "cannot poll core for events (" + describe(outcome) + "); no role will"
+                                + " be granted or revoked until this recovers. Still retrying.",
+                        null);
+            }
             return new Drained(0, 0, false);
+        }
+        if (pollFailing) {
+            pollFailing = false;
+            log.accept("event polling recovered; resuming role sync", null);
         }
 
         List<Payload> events = ok.payload().items("events");
@@ -233,4 +274,12 @@ public final class RoleEffector {
     private record PollBody(Long after, Integer limit) {}
 
     private record AckBody(long through) {}
+
+    /** A poll failure in one short phrase, for the latched outage line. */
+    private static String describe(SoulbindClient.Outcome outcome) {
+        if (outcome instanceof SoulbindClient.Outcome.Refused refused) {
+            return refused.code() + ": " + refused.message();
+        }
+        return "core unreachable";
+    }
 }

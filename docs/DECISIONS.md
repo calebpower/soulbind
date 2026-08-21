@@ -6653,3 +6653,101 @@ soulbind see it, did the drain run — dumps the LuckPerms data directory as it
 actually is rather than at a guessed path, copies the proxy log into evidence,
 and queries the audit log to separate "the connector is deaf" from "there was
 nothing to hear".
+
+### 10.25 — Run 22: the classloader fix worked, and the effector is still inert
+
+The `@Dependency` fix from 10.24 did what it was supposed to. Run 22's proxy log
+says so directly:
+
+```
+[luckperms]: Successfully enabled. (took 6141ms)
+[soulbind]: group sync active: 'soulbind-linked' on gate 'game.join'
+```
+
+`group sync active` is printed only when `isConfigured()` holds, and that needs
+`effector.isAvailable()` — so the reflective lookup found LuckPerms, the
+resolver built a real effector, and the drain was scheduled. Three of the four
+things 10.23 and 10.24 fixed are now proven working on a real proxy.
+
+And LuckPerms' `json-storage/users/` was still empty eighty seconds after a
+player linked through the real flow.
+
+**What makes this hard is that nothing said anything.** Between the plugin
+announcing itself at 11:57:57 and the stage giving up at 11:59:54, soulbind
+logged not one further line. Every failure path in the drain was silent:
+
+* a poll that fails returns `Drained(0, 0, false)` without a word, so an
+  unreachable core is indistinguishable from a quiet one;
+* an event for a gate other than the configured one is dropped silently;
+* an identity ref whose kind is not this platform's is dropped silently;
+* a grant that succeeds says nothing, so the only confirmation available is the
+  permissions plugin's own storage — which is what this stage had to resort to;
+* and an `Error` out of the scheduled task cancels every future run, silently.
+
+That last one is a defect in code I wrote for 10.23. The scheduled task's own
+comment said *"Never propagate: an exception out of a scheduled task cancels all
+future runs silently"* — and then it caught `RuntimeException`, which leaves
+exactly the case the comment describes wide open. A `NoClassDefFoundError` from
+the fat jar on a path only the drain touches would stop group sync for the life
+of the proxy while `/link` and the join gate carried on working normally.
+
+So this entry does not name a cause. **It removes the conditions under which a
+cause can hide**, on both effectors:
+
+* `drainQuietly()` catches `Throwable`, logs, and continues. Catching `Error` is
+  normally wrong; it is right here because the alternative is not "fail loudly"
+  but "stop for good, in silence" — there is no supervisor above a cancelled
+  scheduled task to notice. It lives on the effector rather than inline in the
+  scheduler so a test can watch it work.
+* A poll failure is reported **once**, latched, with the refusal code, and its
+  recovery is reported once too. Per-cycle logging at a five-second delay is
+  twelve identical lines a minute, which an operator learns to scroll past.
+* A `requirements-met` or `requirements-lost` dropped for the wrong gate or the
+  wrong platform kind now says so, naming both sides. A gate configured as one
+  string and emitted as another is otherwise a perfect no-op: the drain polls,
+  applies, acknowledges, and grants nothing.
+* A grant or revoke that lands is logged.
+
+The Discord effector had every one of these holes too, including the identical
+`catch (RuntimeException)` under an identical comment claiming more than it did.
+Both are fixed together, because a defect found in one connector's drain is a
+question about the other's.
+
+#### The stage's third diagnostic asked the wrong store
+
+10.24 added "query the audit log to separate *the connector is deaf* from *there
+was nothing to hear*". The audit log is the wrong place: it records
+operator-visible actions, and `requirements-met` lives in the **event outbox**.
+So the diagnostic dumped twenty audit rows, truncated them at 600 bytes, and
+answered a question nobody had asked — and a second run was spent without the
+one fact that would have identified the cause.
+
+It now reads the outbox with `event.subscribe {"after": 0}`, which starts from
+the beginning rather than from the calling credential's cursor and moves no
+cursor (core advances only on ack). It reports whether the event was emitted at
+all, every event type present if it was not, **and the proxy connector's own
+cursor**. Those two facts together are the whole answer: emitted and acked past
+means the connector saw it and dropped it; emitted and not acked means no poll
+ever got through.
+
+The stage's JUnit failure message asserted a cause too — *"the proxy's group
+effector had never been wired to anything at all"* — which run 22's own evidence
+contradicts. A failure message is a report of what was observed, not a standing
+claim about why. It now states what happened and points at the diagnostics.
+
+#### One half of the question is now answered without a session
+
+`EventDeliveryTest` gained the sequence the `groups` stage performs — set the
+rule, deny the unlinked player, issue, redeem, allow — and then reads
+`event.subscribe` and asserts a `subject.requirements-met` for that identity
+comes back **carrying its gate and its subject**. It passes on both backends.
+
+That is not a duplicate of `GateTransitionTest`, which reads the outbox through
+the repository. Nothing covered the step between: an event emitted correctly and
+delivered without the two fields an effector routes on is, from the connector's
+side, indistinguishable from no event at all — it drops the page in silence and
+acknowledges past it. Mutating `CoreHandlers.toView` to drop either field kills
+it; nothing else did.
+
+So core is not the missing half. Whatever run 23 finds is on the connector side
+of the wire, and it now has five places it can say so.

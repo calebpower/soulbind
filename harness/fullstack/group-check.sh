@@ -101,7 +101,46 @@ cp "$RUN/velocity.log" "$EVIDENCE/velocity-groups.log" 2>/dev/null || true
 
 # And whether core emitted anything to act on, which separates "the connector
 # is deaf" from "there was nothing to hear".
+#
+# The FIRST version of this asked audit.query, which is the wrong store: the
+# audit log records operator-visible actions, and requirements-met lives in the
+# event outbox. It dumped twenty audit rows, truncated them at 600 bytes, and
+# answered a question nobody had asked -- so a run that failed here still could
+# not say which half was broken, and the cause had to be guessed at from the
+# source a second time.
+#
+# `after: 0` explicitly, so this reads the outbox from the beginning rather than
+# from the ADMIN credential's own cursor. Subscribing never advances a cursor
+# (core advances only on ack), so this observes without disturbing what the
+# proxy is about to receive.
 log "did core emit requirements-met?"
-sh "$REPO/tools/rpc.sh" "$CORE" "$ADMIN" audit.query '{"limit":20}' 2>/dev/null     | head -c 600 | sed 's/^/    /' || true
-echo
+EVENTS=$EVIDENCE/events.json
+sh "$REPO/tools/rpc.sh" "$CORE" "$ADMIN" event.subscribe '{"after":0,"limit":500}' \
+    > "$EVENTS" 2>/dev/null || log "    (event.subscribe failed)"
+if [ -s "$EVENTS" ]; then
+    # One event per line, so grep can answer rather than a 600-byte prefix.
+    MET=$(tr '{' '\n' < "$EVENTS" | grep 'subject.requirements-met' | head -8)
+    if [ -n "$MET" ]; then
+        log "core DID emit it -- so the event existed and the connector did not act:"
+        echo "$MET" | sed 's/^/    /'
+    else
+        log "core emitted NO requirements-met at all. Every type in the outbox:"
+        tr '{' '\n' < "$EVENTS" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p' \
+            | sort | uniq -c | sed 's/^/    /'
+    fi
+fi
+
+# How far the PROXY's own cursor has moved. Together with the line above this
+# is the whole answer: emitted and acked past means the connector saw it and
+# dropped it; emitted and not acked means the connector never got a poll
+# through. Subscribing as the proxy with no `after` reports that connector's
+# cursor without moving it.
+if [ -f "$RUN/core/creds.env" ]; then
+    # shellcheck disable=SC1091
+    . "$RUN/core/creds.env"
+    log "the proxy connector's event cursor, and what is still queued for it:"
+    sh "$REPO/tools/rpc.sh" "$CORE" "$PROXY_CRED" event.subscribe '{"limit":5}' 2>/dev/null \
+        | tr '{' '\n' | sed -n 's/.*"cursor":\([0-9]*\).*/    cursor=\1/p;s/.*"type":"\([^"]*\)".*/    queued: \1/p' \
+        | head -10
+fi
 exit 1
