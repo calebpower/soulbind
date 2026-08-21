@@ -6175,3 +6175,43 @@ describes the option now.
 Two tests, both mutation-checked by restoring the original defect: reverting
 `rules` to fall through fails them with "core was never asked for the rule" and
 "a subcommand missing its argument got the generic usage line".
+
+### 9.12 — The excluded invariant, re-enabled and checked both ways
+
+9.10 excluded `decisions-follow-the-rules` as an **open question** rather than a
+settled narrowing: it fired against unmodified core, and either core treated a
+seen-but-unlinked identity as satisfying `requireLinked` — a real defect — or
+the tier's model lost track of a link.
+
+9.11 established which. Core is right. The model was stale, because all three
+seeds shared one identity namespace and seeds two and three replayed names seed
+one had already linked. The per-seed namespace and `didWork()` fixed that.
+
+**What had not happened until now is switching it back on.** The tier went on
+printing NOT CHECKED for something already repaired — which is how an exclusion
+nobody revisits becomes indistinguishable from a defect nobody found. Ten runs
+reported "3 of 3 seeds clean" alongside a line saying this was not among the
+things checked, and nobody read the second half.
+
+Re-enabled and verified **in both directions**, which is what 9.10 never got:
+
+- Against unmodified core: three seeds, 400 actions each, **0 violations**.
+- Against a core mutated to ignore `requireLinked` — one line in
+  `PolicyEngine` — **all three seeds fail**, at action 50, naming the invariant
+  and the gate: *"gate forum.post requires linkage and core says allow for an
+  account it has never heard of."*
+
+The never-seen probe is what makes it non-vacuous. The real unlinked set empties
+out within a few dozen actions as the actors link everything they own, so a
+version looping only over `neverLinked()` asserts nothing by the time a rule
+exists — the first version of this invariant was exactly that, and the
+acceptance test caught it. An identity core has never heard of cannot empty out
+and is definitionally unlinked, so the probe always has something true to
+assert.
+
+One invariant is still excluded, and it is a settled narrowing rather than an
+open question: `redeemed-codes-stay-redeemed` has no non-mutating way to ask a
+real core whether a code is still redeemable. Attempting the redeem *is* the
+check, and against a broken core it would link a phantom identity and corrupt
+the graph the rest of the run asserts about. Single use is proven under real
+concurrency by the Phase 2 gate, which is the stronger test (9.4).

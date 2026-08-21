@@ -345,27 +345,26 @@ public final class SdkCore implements CoreDriver, CoreView {
     @Override
     public List<String> inertInvariants() {
         return List.of(
-                // OPEN QUESTION, not a settled narrowing, and the distinction
-                // matters. This invariant fires against unmodified core: an
-                // identity the model believes linked to nothing is ALLOWED at a
-                // gate requiring linkage, while a synthetic account core has
-                // never heard of is correctly denied. The difference between
-                // them is that core has seen the first -- a code was issued for
-                // it -- and `issue` creates no identity, so both should be
-                // unlinked and both should be denied.
+                // `decisions-follow-the-rules` used to be excluded here. It is
+                // not any more, and the reason it went is worth as much as the
+                // reason it came.
                 //
-                // Either core treats a seen-but-unlinked identity as satisfying
-                // requireLinked, which would be a real defect, or this tier's
-                // model loses track of a link somewhere. It is NOT diagnosed,
-                // and running it would make every session red for a reason
-                // nobody has established.
+                // 9.10 excluded it as an OPEN QUESTION rather than a settled
+                // narrowing: it fired against unmodified core, and either core
+                // treated a seen-but-unlinked identity as satisfying
+                // requireLinked -- a real defect -- or this tier's model lost
+                // track of a link. 9.11 established which. Core is right:
+                // against a live core, `decide` denies a never-seen account and
+                // a seen-but-unlinked one alike. The model was stale, because
+                // all three seeds shared one identity namespace and seeds two
+                // and three replayed names seed one had already linked.
                 //
-                // Excluded rather than deleted, and excluded LOUDLY: the runner
-                // prints this list before the verdict on every run. DECISIONS
-                // 9.10 carries the reproduction.
-                "decisions-follow-the-rules: fires against unmodified core and the cause is"
-                        + " not yet established -- see DECISIONS 9.10. Excluded pending"
-                        + " diagnosis rather than deleted.",
+                // The per-seed namespace and didWork() fixed that. What had not
+                // happened until now was switching this back on and watching it
+                // stay quiet -- so the tier went on announcing NOT CHECKED for
+                // something already repaired, which is how an exclusion nobody
+                // revisits becomes indistinguishable from a defect nobody
+                // found.
                 "redeemed-codes-stay-redeemed: no non-mutating way to ask a real core"
                 + " whether a code is still redeemable. Attempting the redeem IS the check,"
                 + " and against a broken core it would link a phantom identity and corrupt"
