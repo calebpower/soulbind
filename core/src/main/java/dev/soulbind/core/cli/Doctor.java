@@ -28,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 
 /**
@@ -169,54 +170,48 @@ public final class Doctor {
      * error about a file, several layers away from the cause.
      */
     private static List<Finding> examineStorageLocation(Config config) {
-        if (Backend.fromConfigName(config.getString(CoreConfig.STORAGE_BACKEND))
-                .filter(b -> b == Backend.SQLITE).isEmpty()) {
+        Optional<Backend> backend =
+                Backend.fromConfigName(config.getString(CoreConfig.STORAGE_BACKEND));
+        if (backend.isEmpty()) {
             return List.of();
         }
-
         String url = config.getString(CoreConfig.STORAGE_URL);
-        String prefix = "jdbc:sqlite:";
-        if (!url.startsWith(prefix)) {
-            return List.of();
-        }
-        String path = url.substring(prefix.length());
-        if (path.isBlank() || path.startsWith(":")) {
-            // ":memory:" and friends. Not a file, nothing to check, and the
-            // configuration validator has already had its say about whether it
-            // is a sensible thing to run a deployment on.
-            return List.of();
-        }
 
+        // Which backend keeps files, and where, is not something this class may
+        // know: a doctor that parses a jdbc:sqlite: URL has learned which
+        // database is in use, and the storage seam exists so that nothing
+        // outside core.storage does. The seam guard caught the first version
+        // doing precisely that. Backend answers both questions instead.
         List<Finding> findings = new ArrayList<>();
-        Path database = Path.of(path);
 
-        if (!database.isAbsolute()) {
+        if (backend.get().isRelativeLocation(url)) {
             findings.add(new Finding(
                     Level.WARN, "storage",
-                    "the database path '" + path + "' is relative, so it resolves against the "
+                    "the configured storage location is relative, so it resolves against the "
                             + "working directory -- which under systemd is not where you ran "
                             + "this command. Use an absolute path."));
         }
 
-        Path directory = database.toAbsolutePath().getParent();
-        if (directory == null) {
+        Optional<Path> directory = backend.get().writableDirectory(url);
+        if (directory.isEmpty()) {
             return findings;
         }
-        if (!Files.isDirectory(directory)) {
+
+        Path where = directory.get();
+        if (!Files.isDirectory(where)) {
             findings.add(new Finding(
                     Level.FAIL, "storage",
-                    directory + " does not exist, so the database cannot be created there. "
+                    where + " does not exist, so the database cannot be created there. "
                             + "mkdir it and chown it to the user the service runs as."));
-        } else if (!Files.isWritable(directory)) {
+        } else if (!Files.isWritable(where)) {
             findings.add(new Finding(
                     Level.FAIL, "storage",
-                    directory + " is not writable by this user. SQLite needs to create the "
-                            + "database and its journal there. chown it to the service user, "
-                            + "and if the unit sets ProtectSystem=strict make sure the path is "
-                            + "in ReadWritePaths=."));
+                    where + " is not writable by this user. The database and its journal are "
+                            + "created there. chown it to the service user, and if the unit "
+                            + "sets ProtectSystem=strict make sure the path is in "
+                            + "ReadWritePaths=."));
         } else {
-            findings.add(new Finding(
-                    Level.OK, "storage", directory + " is writable"));
+            findings.add(new Finding(Level.OK, "storage", where + " is writable"));
         }
         return findings;
     }
@@ -230,20 +225,27 @@ public final class Doctor {
      */
     private static List<Finding> examineUnusedSettings(Config config) {
         List<Finding> findings = new ArrayList<>();
-        boolean sqlite = Backend.fromConfigName(config.getString(CoreConfig.STORAGE_BACKEND))
-                .filter(b -> b == Backend.SQLITE).isPresent();
-
-        if (sqlite && config.findString(CoreConfig.STORAGE_USER).isPresent()) {
-            findings.add(new Finding(
-                    Level.WARN, "storage",
-                    "storage.user is set and SQLite ignores it. If you meant to use MariaDB, "
-                            + "storage.backend still says sqlite."));
+        Optional<Backend> backend =
+                Backend.fromConfigName(config.getString(CoreConfig.STORAGE_BACKEND));
+        if (backend.isEmpty()) {
+            return findings;
         }
-        if (!sqlite && config.findString(CoreConfig.STORAGE_USER).isEmpty()) {
+        boolean needsUser = backend.get().usesCredentials();
+        boolean hasUser = config.findString(CoreConfig.STORAGE_USER).isPresent();
+
+        if (hasUser && !needsUser) {
             findings.add(new Finding(
                     Level.WARN, "storage",
-                    "storage.user is not set, and this backend needs one. Connecting will "
-                            + "fail at start-up rather than here."));
+                    "storage.user is set and the configured backend, '"
+                            + backend.get().configName() + "', ignores it. If you meant a "
+                            + "different backend, storage.backend still says '"
+                            + backend.get().configName() + "'."));
+        }
+        if (needsUser && !hasUser) {
+            findings.add(new Finding(
+                    Level.WARN, "storage",
+                    "storage.user is not set, and the configured backend needs one. "
+                            + "Connecting will fail at start-up rather than here."));
         }
         return findings;
     }

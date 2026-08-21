@@ -26,6 +26,8 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import dev.soulbind.core.storage.Backend;
+import dev.soulbind.core.storage.StorageBackends;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,15 +51,56 @@ class DoctorFilesystemTest {
 
     @TempDir Path tempDir;
 
-    private Path writeConfig(String storage) throws IOException {
+    /**
+     * A config file whose storage points at {@code where}.
+     *
+     * <p>Backend name and URL both come from the storage helper. Writing
+     * {@code jdbc:sqlite:} here would give this test compile-time knowledge of
+     * which database is in use, and the storage seam guard fired on exactly
+     * that when this file was first written -- twice, since moving the parsing
+     * into {@code Backend} fixed the production side and left the test naming
+     * it anyway.
+     */
+    private Path writeConfig(Path where, String extra) throws IOException {
+        Backend backend = StorageBackends.any();
         Path file = tempDir.resolve("soulbind.toml");
         Files.writeString(file, """
                 [server]
                 port = 7180
 
                 [storage]
-                """ + storage + "\n", StandardCharsets.UTF_8);
+                backend = "%s"
+                url = "%s"
+                %s
+                """.formatted(
+                        StorageBackends.configNameFor(backend),
+                        StorageBackends.jdbcUrlFor(backend, where),
+                        extra),
+                StandardCharsets.UTF_8);
         return file;
+    }
+
+    private Path writeConfig(Path where) throws IOException {
+        return writeConfig(where, "");
+    }
+
+    /**
+     * Skips when the configured backend keeps nothing on this machine.
+     *
+     * <p>The narrowing is exactly that and no more: these checks are about a
+     * directory the service has to write, and a backend reached over the
+     * network has none. Asked through {@link Backend} rather than by naming a
+     * backend, so the question stays on the right side of the seam.
+     */
+    private static String urlOf(Path where) {
+        return StorageBackends.jdbcUrlFor(StorageBackends.any(), where);
+    }
+
+    private static void assumeLocalFiles(Path where) {
+        assumeTrue(
+                StorageBackends.any().writableDirectory(urlOf(where)).isPresent(),
+                "the available backend keeps no local files, so there is no directory"
+                        + " for these checks to be about");
     }
 
     private static List<String> details(List<Doctor.Finding> findings, String check,
@@ -74,8 +117,7 @@ class DoctorFilesystemTest {
         assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
                 "no POSIX permissions on this filesystem, so there is nothing to check");
 
-        Path config = writeConfig(
-                "backend = \"sqlite\"\nurl = \"jdbc:sqlite:" + tempDir + "/s.db\"");
+        Path config = writeConfig(tempDir);
 
         Files.setPosixFilePermissions(config, PosixFilePermissions.fromString("rw-r--r--"));
         List<String> warned = details(Doctor.examine(config), "permissions", Doctor.Level.WARN);
@@ -95,8 +137,8 @@ class DoctorFilesystemTest {
     @Test
     @DisplayName("a database directory that does not exist fails, naming the directory")
     void missingDatabaseDirectoryFails() throws IOException {
-        Path config = writeConfig("backend = \"sqlite\"\nurl = \"jdbc:sqlite:"
-                + tempDir.resolve("nowhere/soulbind.db") + "\"");
+        assumeLocalFiles(tempDir.resolve("nowhere"));
+        Path config = writeConfig(tempDir.resolve("nowhere"));
 
         List<String> failed = details(Doctor.examine(config), "storage", Doctor.Level.FAIL);
         assertEquals(1, failed.size(),
@@ -117,8 +159,8 @@ class DoctorFilesystemTest {
         Path locked = Files.createDirectory(tempDir.resolve("locked"));
         Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("r-xr-xr-x"));
         try {
-            Path config = writeConfig("backend = \"sqlite\"\nurl = \"jdbc:sqlite:"
-                    + locked.resolve("soulbind.db") + "\"");
+            assumeLocalFiles(locked);
+            Path config = writeConfig(locked);
 
             List<String> failed = details(Doctor.examine(config), "storage", Doctor.Level.FAIL);
             assertEquals(1, failed.size(),
@@ -136,7 +178,8 @@ class DoctorFilesystemTest {
     @Test
     @DisplayName("a relative database path warns that systemd will resolve it elsewhere")
     void relativeDatabasePathWarns() throws IOException {
-        Path config = writeConfig("backend = \"sqlite\"\nurl = \"jdbc:sqlite:soulbind.db\"");
+        assumeLocalFiles(tempDir);
+        Path config = writeConfig(Path.of("a-relative-directory"));
 
         List<String> warned = details(Doctor.examine(config), "storage", Doctor.Level.WARN);
         assertTrue(warned.stream().anyMatch(d -> d.contains("relative")),
@@ -151,16 +194,19 @@ class DoctorFilesystemTest {
     void unusedSettingIsFlagged() throws IOException {
         // Everything works. The finding is here because a setting that appears
         // present and has no effect is how somebody loses an afternoon.
-        Path config = writeConfig("backend = \"sqlite\"\nurl = \"jdbc:sqlite:"
-                + tempDir + "/s.db\"\nuser = \"soulbind\"");
+        assumeTrue(!StorageBackends.any().usesCredentials(),
+                "the available backend uses credentials, so storage.user is not an unused"
+                        + " setting on it -- this check is about one that is");
+        Path config = writeConfig(tempDir, "user = \"soulbind\"");
 
         List<String> warned = details(Doctor.examine(config), "storage", Doctor.Level.WARN);
         assertTrue(warned.stream().anyMatch(d -> d.contains("storage.user")),
-                "storage.user is set, SQLite ignores it, and nothing said so. Found: "
+                "storage.user is set, the configured backend ignores it, and nothing"
+                        + " said so. Found: "
                         + warned);
-        assertTrue(warned.stream().anyMatch(d -> d.contains("sqlite")),
-                "the finding does not point at the likely mistake -- meaning to use MariaDB"
-                        + " and leaving the backend on sqlite: " + warned);
+        assertTrue(warned.stream().anyMatch(d -> d.contains("storage.backend")),
+                "the finding does not point at the likely mistake -- meaning to use a"
+                        + " different backend and changing one line of two: " + warned);
     }
 
     @Test
@@ -169,8 +215,7 @@ class DoctorFilesystemTest {
         // The control for all of the above. Every check here fires on a
         // specific defect; one that fired on a correct installation would make
         // the doctor useless in the way that matters -- ignored.
-        Path config = writeConfig(
-                "backend = \"sqlite\"\nurl = \"jdbc:sqlite:" + tempDir + "/soulbind.db\"");
+        Path config = writeConfig(tempDir);
 
         List<Doctor.Finding> findings = Doctor.examine(config);
         List<Doctor.Finding> failures = findings.stream()

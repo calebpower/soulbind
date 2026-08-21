@@ -5647,3 +5647,36 @@ Run against the shipped sample config on a machine where `/var/lib/soulbind`
 does not exist, it now fails with that as the reason — which is the install
 document's step 2, and confirms the document's ordering puts directory creation
 before the check that depends on it.
+
+#### The doctor learned which database was in use, twice
+
+The first version of these checks parsed a `jdbc:sqlite:` URL and named
+`Backend.SQLITE`, and the storage seam guard failed the build. It was right to:
+a doctor that knows what a SQLite URL looks like is a caller that has learned
+which database is in use, which is the thing the seam exists to prevent.
+
+Fixed by moving the knowledge behind the seam rather than by exempting the
+doctor. `Backend` gained `usesCredentials()`, `writableDirectory(url)` and
+`isRelativeLocation(url)`; the doctor asks those questions and never learns the
+answers' shape. The findings improved as a side effect — they name the
+configured backend rather than saying "SQLite", so they stay true for a backend
+added later.
+
+Then it failed **again**, on the test file, which was still writing
+`jdbc:sqlite:` by hand. Fixing production and leaving the test asserting against
+a hardcoded URL would have left the seam half-crossed, and the guard covers test
+sources for exactly that reason. The tests go through `StorageBackends` like
+every other config-writing test, and skip via `Backend`'s own predicates when
+the available backend keeps no local files — a narrowing that is exactly the
+checks' subject and no wider.
+
+And a third time, on an assertion *message* containing the word. That one is
+the guard being blunter than it needs to be, but the cost of rewording a string
+is a string, and the cost of an exemption is a guard that has learned to make
+exceptions.
+
+**A process note, recorded because it matters more than the defect.** This work
+was committed on a red build: the verification command was chained such that the
+failure did not stop the commit, and `BUILD FAILED` scrolled past. The commit
+stands and the fix is on top of it rather than amended in, because the history
+being honest about that is worth more than it being tidy.
