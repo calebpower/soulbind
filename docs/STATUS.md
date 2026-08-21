@@ -175,7 +175,16 @@ Phase 1" ended when Phase 1 shipped them with fixtures.
     execution is the session run, where it is a hard gate, not a skip.
 12. **The Phase 6 Discord manual smoke is outstanding** — named as evidence,
     not a tier; batched with the owner's other manual steps by their request.
-13. **`t10`'s five-hundred-error watchdog covers its own requests only** — it
+13. **The clean-install gate is a clean install once per guest** — it installs
+    packages, creates a user, writes `/etc` and enables a systemd unit, and
+    reaper rolls back the state dataset rather than the root disk, so those
+    survive into every later `reaper test` in the same session. First run on a
+    fresh guest proves a clean install; later runs prove an idempotent
+    re-install. Not fixed by making the gate uninstall itself — an install that
+    undoes itself is not the thing under test — but by stopping anything else
+    inferring the machine's toolchain from what is lying on it (DECISIONS
+    10.15).
+14. **`t10`'s five-hundred-error watchdog covers its own requests only** — it
     cannot observe 5xxs served to other clients between stages. Scope: the
     stage's own traffic; the forum tier's watchdog covers the browser suite
     the same way.

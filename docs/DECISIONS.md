@@ -5816,3 +5816,96 @@ it.
 It restores the database to utf8mb4 afterwards. `freshSchema` would cover it,
 but a failure between the two would leave every later MariaDB test poisoned
 with a fault nobody would trace back here.
+
+### 10.15 — Run 15: the gate's own side effects broke the stage before it
+
+Run 15 got past the MariaDB unit stage — 10.14's fix held, though the stage it
+was fixing was never reached — and failed earlier in the run verb, at the
+operator tools, with:
+
+```
+[core-env] mode: host
+ERROR: JAVA_HOME is set to an invalid directory: .
+```
+
+Run 14 chose **container** mode on the same guest. Run 15 chose **host**. The
+machine changed between them, and what changed it was run 14's own
+clean-install gate: it installed `openjdk-25-jre-headless`, and reaper rolls
+back the `state` dataset, not the guest's root disk. The gate's apt install
+outlived the run that performed it.
+
+**Two bugs in one line of `core_env_init`.**
+
+`command -v java` proves a *runtime* exists. Gradle needs a *toolchain*, and
+`openjdk-25-jre-headless` has no `javac` — so even the mode choice was wrong on
+its own terms. And a bare `java` off `PATH` is not a path, so
+`dirname $(dirname "$JAVA")` produced `.`, which is what reached gradle. The
+workstation never saw either, because it always passes an absolute `JAVA`.
+
+The derivation was wrong in a third way nobody had hit yet: on the usual Linux
+layout `/usr/bin/java` is a symlink through `/etc/alternatives` into the real
+JDK, and two `dirname`s of the symlink give `/usr`.
+
+Now: an explicitly supplied `JAVA` wins, because a caller naming one has made
+the decision. Otherwise podman, because a digest-pinned image is the same
+toolchain every time and whatever happens to be installed on a shared guest is
+not. Only then a JDK found on `PATH`, and it must have a `javac`. The resolver
+follows symlinks and then **checks** that the result contains one, because a
+`JAVA_HOME` without a `javac` is not a `JAVA_HOME` and saying so here costs one
+line — letting gradle discover it costs a stage failure naming neither this
+file nor the reason.
+
+Verified against all four cases, including a JRE-shaped directory that must be
+refused. The first attempt at that case was a bad simulation: the fake JRE's
+`java` was a symlink to a real JDK, so resolving it correctly found the JDK and
+the case "failed" for being right. A JRE with its own `java` is what the check
+actually needed.
+
+#### The gate is a clean install once per guest, and that is now written down
+
+The underlying fact is not a bug and cannot be fixed away: the clean-install
+gate installs packages, creates a user, writes `/etc` and enables a systemd
+unit, because that is what installing means. Those survive into every later
+`reaper test` in the same session.
+
+So the gate proves *a clean install* on a fresh guest, and *an idempotent
+re-install* on any run after the first. Narrowings ledger item 15. The response
+was not to make the gate tidy up after itself — an install that uninstalls
+itself is not the thing under test — but to stop anything else inferring the
+machine's toolchain from what happens to be lying on it.
+
+#### And the precedence was backwards
+
+The fix above had its own bug, found by re-running the smoke rather than
+assuming. `core_env_java_home` consulted an ambient `JAVA_HOME` *before* an
+explicitly supplied `JAVA`. This workstation carries
+`JAVA_HOME=/usr/local/openjdk17`, which has a perfectly good `javac` — so a
+caller passing `JAVA=/usr/local/openjdk25/bin/java` was overruled by the
+environment it was trying to override, and core started under Java 17 and died
+at class load:
+
+```
+UnsupportedClassVersionError: dev/soulbind/core/cli/Main has been compiled by a
+more recent version of the Java Runtime (class file version 69.0), this version
+only recognizes class file versions up to 61.0
+```
+
+A caller who names a JDK has made the decision, and nothing ambient outranks
+it. That is the same rule the build follows — bare `java` here is 17, and every
+toolchain in this repository is declared rather than inherited. The resolver
+now follows it too.
+
+A **version floor** went in alongside: the resolved JDK is asked its own
+version and refused below core's `--release` level, because the alternative is
+the message above, which names neither the harness nor the cause.
+
+#### A note on how both of these hid
+
+Both failures were invisible for a while because the verification commands
+piped through `grep`/`tail`, and a POSIX pipeline reports the *last* command's
+status. The smoke exited non-zero; `tail` exited zero; the harness reported
+success. That is the third instance this phase — the t10 driver (10.12) and a
+commit made on a red build (see the doctor commit) being the others — and it is
+the same mistake each time: **status through a pipe is the pipe's, not the
+program's.** Verification here now captures the status first and prints
+afterwards.

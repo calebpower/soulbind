@@ -46,24 +46,111 @@ CORE_ENV_CONTAINER=""
 # for the caller it was written against and pointed one directory above the
 # repository for the next one, which surfaced as "./gradlew: not found" --
 # a sourced POSIX shell file has no reliable way to find its own path.
+# Where the JDK actually lives.
+#
+# NOT `dirname $(dirname "$JAVA")` on whatever string was handed over. That
+# works for an absolute path and produces "." for a bare `java` off PATH, which
+# is what run 15 handed to gradle. It is also wrong for the usual Linux layout,
+# where /usr/bin/java is a symlink through /etc/alternatives into the real JDK:
+# two dirnames of the symlink give /usr, which has no bin/javac under it.
+#
+# Resolved, then CHECKED. A JAVA_HOME that does not contain a javac is not a
+# JAVA_HOME, and saying so here costs one line; letting gradle discover it
+# costs a stage failure that names neither this file nor the reason.
+# Core is built --release 25 (build-logic/soulbind.java-25.gradle.kts), so a
+# JDK below that starts core and then dies with UnsupportedClassVersionError at
+# class load -- a message about "class file version 69.0" that names nothing an
+# operator or a stage can act on.
+CORE_ENV_MIN_JDK=25
+
+core_env_java_home() {
+    # EXPLICIT JAVA FIRST. This ordering was the other way round for exactly
+    # one run and it cost a green smoke: this workstation carries an ambient
+    # JAVA_HOME=/usr/local/openjdk17, which has a perfectly good javac, so a
+    # caller passing JAVA=/usr/local/openjdk25/bin/java was overruled by the
+    # environment it was trying to override. Core then failed to start with a
+    # LinkageError two layers from the cause.
+    #
+    # A caller who names a JDK has made the decision. Nothing ambient outranks
+    # it -- which is the same rule the build itself follows, since bare `java`
+    # on this machine is 17 and every toolchain here is declared rather than
+    # inherited.
+    binary=${JAVA:-}
+    if [ -z "$binary" ] || [ ! -x "$binary" ]; then
+        binary=""
+        if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/javac" ]; then
+            binary=$JAVA_HOME/bin/java
+        else
+            binary=$(command -v javac 2>/dev/null) || binary=""
+        fi
+    fi
+    if [ -z "$binary" ]; then
+        echo "[core-env] cannot find a JDK: set JAVA to its bin/java" >&2
+        return 1
+    fi
+
+    resolved=$(readlink -f "$binary" 2>/dev/null) || resolved=$binary
+    [ -n "$resolved" ] || resolved=$binary
+    home=$(dirname "$(dirname "$resolved")")
+
+    if [ ! -x "$home/bin/javac" ]; then
+        echo "[core-env] $home has no bin/javac, so it is a JRE or not a JDK at all." >&2
+        echo "[core-env] Derived from '$binary'. Set JAVA to a JDK's bin/java." >&2
+        return 1
+    fi
+
+    # Checked here rather than left to fail at class load. The version is read
+    # from the JDK itself, not assumed from a path name.
+    major=$("$home/bin/java" -version 2>&1 | head -1 \
+        | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p')
+    if [ -n "$major" ] && [ "$major" -lt "$CORE_ENV_MIN_JDK" ]; then
+        echo "[core-env] $home is Java $major; core is built for $CORE_ENV_MIN_JDK." >&2
+        echo "[core-env] It would start and then die with UnsupportedClassVersionError." >&2
+        echo "[core-env] Set JAVA to a $CORE_ENV_MIN_JDK+ JDK's bin/java." >&2
+        return 1
+    fi
+    echo "$home"
+}
+
 core_env_init() {
     CORE_ENV_WORK=$1
     CORE_ENV_PORT=$2
     CORE_ENV_REPO=$3
 
-    if command -v java > /dev/null 2>&1 || [ -x "${JAVA:-}" ]; then
+    # Order matters, and run 15 is why.
+    #
+    # The first version asked `command -v java` first and took host mode if it
+    # found one. On the guest that was true only because the CLEAN-INSTALL GATE
+    # had installed a JRE the run before -- reaper rolls back the state dataset,
+    # not the root disk, so the gate's apt install outlived its own run. Run 14
+    # chose container mode; run 15, on the same guest, chose host, and gradle
+    # died with "JAVA_HOME is set to an invalid directory: ." two stages before
+    # anything it could have been blamed on.
+    #
+    # Two separate bugs in that one line. `java` proves a RUNTIME exists, and
+    # gradle needs a toolchain to compile -- openjdk-25-jre-headless has no
+    # javac. And a bare `java` from PATH is not a path, so the JAVA_HOME
+    # arithmetic below produced ".".
+    #
+    # So: an explicitly supplied JAVA wins, because a caller naming one has
+    # made the decision. Otherwise podman, because a digest-pinned image is the
+    # same toolchain every time and whatever is installed on a shared guest is
+    # not. Only then a JDK found on PATH, and it must be a JDK.
+    if [ -n "${JAVA:-}" ] && [ -x "${JAVA:-}" ]; then
         CORE_ENV_MODE=host
     elif command -v podman > /dev/null 2>&1; then
         CORE_ENV_MODE=container
+    elif command -v javac > /dev/null 2>&1; then
+        CORE_ENV_MODE=host
     else
-        echo "[core-env] neither a JDK nor podman is available; cannot run core" >&2
+        echo "[core-env] no JDK and no podman: a JRE alone cannot build core." >&2
+        echo "[core-env] set JAVA to a JDK's bin/java, or install podman." >&2
         return 1
     fi
     echo "[core-env] mode: $CORE_ENV_MODE"
 
     if [ "$CORE_ENV_MODE" = host ]; then
-        : "${JAVA:=java}"
-        JAVA_HOME=$(dirname "$(dirname "$JAVA")")
+        JAVA_HOME=$(core_env_java_home) || return 1
         export JAVA_HOME
         (cd "$CORE_ENV_REPO" && ./gradlew --no-daemon --quiet :core:installDist)
     else
