@@ -120,6 +120,19 @@ class GateTransitionTest {
             assertTrue(met.stream().allMatch(e -> "chat.member".equals(e.gate())),
                     "the event does not name the gate that opened, so an effector cannot"
                             + " tell which of its configured roles to grant");
+
+            // The SUBJECT too, and not only the identity. Mutation found the
+            // subject lookup's ref-parsing arithmetic surviving: corrupt it and
+            // the lookup misses, every event carries a null subjectId, and the
+            // assertions above are all still satisfied because they read the
+            // identityRef. A consumer correlating events to a subject -- audit,
+            // or anything joining the two -- would find nothing to correlate.
+            String subjectId = f.storage().identities()
+                    .subjectOf("kind-a", "acct-1").orElseThrow().id();
+            assertTrue(met.stream().allMatch(e -> subjectId.equals(e.subjectId())),
+                    "an event carried the wrong subject, or none: "
+                            + met.stream().map(EventRecord::subjectId).toList()
+                            + " expected " + subjectId);
         }
     }
 
