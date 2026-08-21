@@ -6326,3 +6326,48 @@ true — in a *test* as much as in production, because a test naming a platform
 is a test that would have to change when the platform does. Neutral kinds now.
 Third time in this phase a guard has failed my own work rather than somebody
 else's, which is the only real evidence that a guard is doing anything.
+
+#### `connector-sdk` 68% → 88%, and `config` 77% → 88%
+
+**A public SDK overload used by nothing.**
+`IdempotentApplier.applyOnce(String, Consumer<String>)` was uncovered because
+it is called nowhere — not in production, not in tests. Kept rather than
+deleted: it is published surface a connector author may reasonably reach for,
+and its entire value is that the effect is told which key it is running under.
+An effect handed the wrong string would key its own bookkeeping wrongly, which
+is the one mistake this class exists to prevent. Now asserted.
+
+**`Payload` — trusted twenty-odd times from other modules, asserted in none.**
+Every connector reads core's answers through it. The contract worth pinning is
+what happens on fields that are *absent*: every accessor is total, so a
+connector reading an optional field need not guard every call — and the cost is
+that a misread field looks exactly like an absent one, which makes `has()` the
+only way to tell "core said no" from "core said nothing". A null body behaves
+the same way, because an outage is not a payload.
+
+**`HttpTransport`'s endpoint.** A trailing slash in an operator's `core.url`
+would produce `//v1/rpc`, which some servers route and some do not — the same
+configuration working on one deployment and 404ing on the next, with nothing in
+either explaining it. `endpoint()` is package-private so a test can see what
+the URL became.
+
+**Edit distance could not be tested through the thing that uses it.** Three
+mutants in `ConfigLoader.editDistance` survived a suite of suggestion tests,
+and adding more suggestion tests did not kill them: the suggestion depends only
+on whether the distance is *under a threshold*, so the arithmetic can be wrong
+and every input still land on the same side. The first attempt at fixing this
+made it worse in an instructive way — the new cases were all distance 1 and 4,
+never touching the 2/3 boundary the threshold actually sits on.
+
+Made package-private and tested as the pure function it is. The empty-string
+rows catch a broken initialisation row and the equal-length rows catch an outer
+loop that stops one character short, neither of which any suggestion would ever
+reveal.
+
+**`describeType` had one branch of five.** The wrong-type message named a
+string found where an integer was wanted, and nothing exercised integer,
+boolean, float or the fallback. An operator reading "must be an integer, found"
+and nothing else has been told half of what is wrong, and the half they were
+told is the half they already knew. The first version of that test appended a
+line to a fixed body and hit TOML's duplicate-key error instead, asserting
+nothing about types at all — whole bodies now.

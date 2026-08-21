@@ -208,6 +208,51 @@ class ConfigLoaderTest {
         }
 
         @Test
+        @DisplayName("the suggestion threshold holds at its edges, in both directions")
+        void suggestionThresholdEdges() {
+            // The two tests above cover a near miss and an unrelated word. The
+            // EDGE between them was never pinned, and mutation found the
+            // distance calculation's arithmetic surviving as a result -- it
+            // could be wrong by one in either direction and still produce a
+            // suggestion for "hosts" and none for "quixotic".
+            //
+            // Distance 1 and 2 must suggest; 3 must not. That threshold is the
+            // whole design: close enough to be a typo, far enough not to send
+            // an operator to change a key that was already correct.
+            assertTrue(problemFor("server.hos").contains("did you mean 'server.host'"),
+                    "one deletion did not suggest: " + problemFor("server.hos"));
+            assertTrue(problemFor("server.hxst").contains("did you mean 'server.host'"),
+                    "one substitution did not suggest: " + problemFor("server.hxst"));
+            assertTrue(problemFor("server.hoss").contains("did you mean 'server.host'"),
+                    "one transposed character did not suggest: " + problemFor("server.hoss"));
+
+            // TWO edits still suggests -- the last distance that does.
+            assertTrue(problemFor("server.hoxy").contains("did you mean 'server.host'"),
+                    "two edits did not suggest: " + problemFor("server.hoxy"));
+
+            // THREE does not. This is the actual edge, and the first version of
+            // this test missed it entirely: every case was distance 1 or 4, so
+            // the arithmetic could be wrong by one in either direction and
+            // still pass. Mutation said so by surviving unchanged.
+            assertFalse(problemFor("server.hxyz").contains("did you mean"),
+                    "a key three edits away was confidently suggested, which sends an "
+                            + "operator to change a key that was already correct: "
+                            + problemFor("server.hxyz"));
+        }
+
+        /** The reported problem for one unknown key under {@code [server]}. */
+        private String problemFor(String fullKey) {
+            String leaf = fullKey.substring(fullKey.indexOf('.') + 1);
+            ConfigException e = assertThrows(ConfigException.class, () -> parse("""
+                    [server]
+                    host = "h"
+                    port = 1
+                    %s = "x"
+                    """.formatted(leaf)));
+            return e.getMessage();
+        }
+
+        @Test
         @DisplayName("a value of the wrong type is reported with both types")
         void wrongType() {
             ConfigException e = assertThrows(ConfigException.class, () -> parse("""
@@ -249,6 +294,59 @@ class ConfigLoaderTest {
                     e.problems().stream().anyMatch(p -> p.contains("server.port")
                             && p.contains("must be an integer")),
                     () -> e.problems().toString());
+        }
+
+        @Test
+        @DisplayName("the type actually found is named, whatever it was")
+        void namesTheTypeItFound() {
+            // The case above covers one branch -- a string where an integer was
+            // wanted -- and mutation showed the rest of describeType was never
+            // executed at all. An operator reading "must be an integer, found"
+            // and nothing else has been told half of what went wrong, and the
+            // half they were told is the half they already knew.
+            //
+            // Whole bodies rather than a line appended to a fixed one: TOML
+            // refuses a redefined key, so the first attempt at this reported a
+            // duplicate-key error and asserted nothing about types at all.
+            assertTrue(problemsFor("""
+                    [server]
+                    host = "h"
+                    port = 42.5
+                    """).contains("found a float"));
+
+            assertTrue(problemsFor("""
+                    [server]
+                    host = 42
+                    port = 1
+                    """).contains("found an integer"));
+
+            assertTrue(problemsFor("""
+                    [server]
+                    host = true
+                    port = 1
+                    """).contains("found a boolean"));
+
+            assertTrue(problemsFor("""
+                    [server]
+                    host = "h"
+                    port = 1
+                    tls = "yes"
+                    """).contains("found a string"));
+
+            // The fallback branch: something the schema has no name for at all.
+            // It still says what it found rather than trailing off.
+            String array = problemsFor("""
+                    [server]
+                    host = [1, 2]
+                    port = 1
+                    """);
+            assertTrue(array.contains("found "), array);
+            assertFalse(array.contains("found nothing"), array);
+        }
+
+        /** The reported message for a configuration that will not load. */
+        private String problemsFor(String toml) {
+            return assertThrows(ConfigException.class, () -> parse(toml)).getMessage();
         }
 
         @Test

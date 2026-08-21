@@ -126,6 +126,19 @@ public final class HttpTransport implements Transport {
         // HttpClient holds no resource this class owns.
     }
 
+    /**
+     * The URL this transport will actually post to.
+     *
+     * <p>Package-private, and only so a test can assert what {@code coreUrl}
+     * was turned into. An operator who writes a trailing slash in
+     * {@code core.url} would otherwise get {@code //v1/rpc}, which some servers
+     * route and some do not — a configuration that works on one deployment and
+     * 404s on the next, with nothing in either saying why.
+     */
+    java.net.URI endpoint() {
+        return endpoint;
+    }
+
     private static String trimTrailingSlash(String url) {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }

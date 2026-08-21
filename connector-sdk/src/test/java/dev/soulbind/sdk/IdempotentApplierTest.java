@@ -159,4 +159,25 @@ class IdempotentApplierTest {
             assertEquals(1, applied.get(), "one event was applied more than once");
         }
     }
+
+    @Test
+    @DisplayName("the Consumer overload hands the effect its own key")
+    void consumerOverloadReceivesTheKey() {
+        // NO_COVERAGE in a mutation sweep: this overload is used nowhere, in
+        // production or in tests. It stays because it is published SDK surface
+        // a connector author may reasonably reach for -- and its entire value
+        // is that the effect is told which key it is running under. An effect
+        // handed the wrong string would key its own bookkeeping wrongly, which
+        // is the one mistake this class exists to prevent.
+        IdempotentApplier applier = new IdempotentApplier();
+        java.util.List<String> received = new java.util.ArrayList<>();
+
+        assertTrue(applier.applyOnce("event-7", (java.util.function.Consumer<String>) received::add));
+        assertEquals(java.util.List.of("event-7"), received,
+                "the consumer was not given the idempotency key it is running under");
+
+        // And it dedupes on the same key as the other form.
+        assertFalse(applier.applyOnce("event-7", (java.util.function.Consumer<String>) received::add));
+        assertEquals(1, received.size(), "a repeated key ran the effect twice");
+    }
 }

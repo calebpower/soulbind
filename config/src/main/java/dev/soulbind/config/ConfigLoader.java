@@ -212,7 +212,17 @@ public final class ConfigLoader {
         return best == null ? "" : "; did you mean '" + best + "'?";
     }
 
-    private static int editDistance(String a, String b) {
+    /**
+     * Levenshtein distance.
+     *
+     * <p>Package-private rather than private, and only so a test can check the
+     * arithmetic against known distances. Three mutants in this method survived
+     * a whole suite of suggestion tests: the suggestion only depends on whether
+     * the distance is under a threshold, so the numbers could be wrong and
+     * every input still fall on the same side. A pure function is worth
+     * asserting as one.
+     */
+    static int editDistance(String a, String b) {
         int[] previous = new int[b.length() + 1];
         int[] current = new int[b.length() + 1];
         for (int j = 0; j <= b.length(); j++) {
