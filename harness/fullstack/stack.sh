@@ -522,6 +522,20 @@ wait_for_port paper "$PAPER_PORT" 240
 log "starting velocity"
 cp "$REPO/connector-velocity/build/libs"/*.jar "$RUN/proxy/plugins/"
 
+# LuckPerms, so the group effector has something real to act on.
+#
+# JSON storage rather than the default H2, and that is what makes this
+# assertable: a group grant lands in a file the stage can read, instead of an
+# embedded database it would need a client for. The connector does not know or
+# care which storage LuckPerms uses.
+cp "$CACHE/luckperms-$LUCKPERMS_VERSION.jar" "$RUN/proxy/plugins/"
+mkdir -p "$RUN/proxy/plugins/luckperms"
+cat > "$RUN/proxy/plugins/luckperms/config.yml" <<'LPCONF'
+storage-method: json
+server: global
+sync-minutes: -1
+LPCONF
+
 # Plan itself, and the connector that registers with it.
 #
 # Both on the PROXY: §16 prefers bootstrapping the Plan connector on Velocity
@@ -623,6 +637,9 @@ decisiontimeoutmillis = 2000
 
 [platform]
 kind = "game"
+
+[effector]
+group = "soulbind-linked"
 TOML
 
 if [ -n "${SOULBIND_PLAN_DB_HOST:-}" ]; then

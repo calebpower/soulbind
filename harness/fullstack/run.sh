@@ -222,7 +222,7 @@ XML
 # below, and FullstackStagesGuardTest asserts this list matches both the
 # functions defined and the stages documented in the README. A stage that is
 # listed but does no work is the exact shape this file exists to prevent.
-STAGES="up migrate journeys sim plan t10 fuzz down"
+STAGES="up migrate journeys sim plan groups t10 fuzz down"
 
 # The post-condition, checked rather than assumed.
 #
@@ -400,6 +400,30 @@ stage_sim() {
         result_fail sim "the committed seeds run clean against a real core" \
             "the trace is in $OUT/evidence/sim-$DB.log; the seed that failed is named" \
             "above, and the line to add to seeds.txt with it"
+        return 1
+    fi
+}
+
+stage_groups() {
+    result_open groups
+    log "groups: does the proxy's effector reach LuckPerms?"
+
+    creds="$RUN/core/creds.env"
+    if [ ! -s "$creds" ]; then
+        result_fail groups "a link reaches a real permissions plugin" \
+            "no credentials at $creds -- the up stage did not write them"
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    . "$creds"
+
+    if "$HERE/group-check.sh" "$RUN" "$OUT/evidence" \
+            "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED"; then
+        result_pass groups "a link reaches a real permissions plugin"
+    else
+        result_fail groups "a link reaches a real permissions plugin" \
+            "the proxy's group effector had never been wired to anything at all" \
+            "(DECISIONS 10.23); this stage is what proves it now is"
         return 1
     fi
 }

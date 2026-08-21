@@ -446,7 +446,7 @@ cp -r core/build/test-results/. out/test-results/ 2>/dev/null || {
 # checks should not have to wait for it.
 # ---------------------------------------------------------------------------
 echo "run: full-stack tier (core on sqlite)"
-SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys sim t10 fuzz down
+SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys sim groups t10 fuzz down
 
 podman exec -i soulbind-mariadb \
   mariadb -h 127.0.0.1 -uroot -psoulbind-test <<'SQL'
@@ -480,7 +480,7 @@ SOULBIND_DB=mariadb \
   SOULBIND_PLAN_DB_USER=root \
   SOULBIND_PLAN_DB_PASSWORD=soulbind-test \
   SOULBIND_PLAN_DB_NAME=plan \
-  sh harness/fullstack/run.sh up migrate journeys sim plan t10 fuzz down
+  sh harness/fullstack/run.sh up migrate journeys sim plan groups t10 fuzz down
 
 podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 """

@@ -6578,3 +6578,33 @@ reaches `NOTICE` is an undisclosed third party.
 the above is unit-tested and none of it has run against a real proxy with a real
 permissions plugin — which is precisely the condition that let the original bug
 live. Adding it to the tier is the next piece.
+
+#### And the stage that would have caught it
+
+Unit tests cover `GroupSync`'s logic. None of them would have caught the
+original defect, because the defect was that nothing *called* it — and a unit
+test calls it by definition. What was missing was a permissions plugin in the
+composed stack.
+
+LuckPerms is now pinned by SHA-256 in `harness/fullstack/pins.env` and installed
+into the proxy, on **both** axes: it is configured with JSON storage, so unlike
+`plan` it needs no database.
+
+**JSON storage is what makes the assertion honest.** A group grant lands in a
+file the stage reads directly. Asking the proxy console instead would accept an
+answer from a plugin that had not persisted anything, and the whole class of bug
+here is a component that looks connected and is not.
+
+The `groups` stage asserts the far end of the chain and nothing short of it: a
+player linked through the real flow, a rule that genuinely requires something,
+core emitting `subject.requirements-met`, the connector's drain picking it up,
+and **LuckPerms holding the group**. It also sets the rule itself rather than
+assuming one, because a gate requiring nothing emits no transition and the
+stage would pass having proven nothing.
+
+**A false claim caught in review.** The README row first said "mariadb axis
+only, alongside `plan`". That was written from the shape of the neighbouring
+stage rather than from the facts: `plan` needs MySQL, LuckPerms with JSON
+storage needs nothing, and the stage runs on both axes. Corrected before it
+shipped, but it is the same species of error as the one this whole entry is
+about — describing a thing by what sits next to it instead of by what it does.
