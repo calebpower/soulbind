@@ -118,7 +118,10 @@ class LinkingServiceTest {
                 new LinkingService(
                         new EventEmitter(storage.events(), clock),
                         storage.identities(), storage.linkCodes(), storage.platformKinds(),
-                        storage.audit(), clock, TTL),
+                        storage.audit(),
+                        new dev.soulbind.core.policy.GateEvaluator(
+                                storage.identities(), storage.policy(), clock),
+                        clock, TTL),
                 clock);
     }
 

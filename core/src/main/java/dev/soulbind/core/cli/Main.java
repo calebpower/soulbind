@@ -22,6 +22,7 @@ import dev.soulbind.core.CoreConfig;
 import dev.soulbind.core.CoreVersion;
 import dev.soulbind.core.events.EventEmitter;
 import dev.soulbind.core.identity.LinkingService;
+import dev.soulbind.core.policy.GateEvaluator;
 import dev.soulbind.core.registry.Authenticator;
 import dev.soulbind.core.storage.Storage;
 import dev.soulbind.core.transport.Codec;
@@ -167,9 +168,13 @@ public final class Main {
                             new LinkingService(
                                     new EventEmitter(storage.events(), clock),
                                     storage.identities(), storage.linkCodes(),
-                                    storage.platformKinds(), storage.audit(), clock,
+                                    storage.platformKinds(), storage.audit(),
+                                    new GateEvaluator(
+                                            storage.identities(), storage.policy(), clock),
+                                    clock,
                                     Duration.ofSeconds(
                                             CoreConfig.linkCodeTtlSeconds(config))),
+                            new GateEvaluator(storage.identities(), storage.policy(), clock),
                             codec,
                             clock,
                             (int) window.toSeconds()));

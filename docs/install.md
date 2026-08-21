@@ -152,9 +152,20 @@ the capabilities it needs.
 ```sh
 sudo -u soulbind /opt/soulbind/core/bin/core register \
     --name discord \
-    --capabilities code-display,code-entry,effector \
+    --capabilities code-display,code-entry,effector,link-state-reader \
     --config /etc/soulbind/soulbind.toml
 ```
+
+`link-state-reader` is what `/whoami` needs — it calls `identity.describe`.
+Leaving it out gives a connector that links accounts perfectly well and then
+answers "this credential does not hold the capability this operation requires"
+the first time somebody asks what they are linked to. This example was missing
+it until a live smoke found it.
+
+The connector's `/soulbind connectors` subcommand additionally needs
+`config-management`. **Most deployments should not grant that** — it is
+administrative, it would let a chat bot read the whole audit log, and without
+it that one subcommand simply refuses while everything else works.
 
 This prints the credential **once**. Core keeps only a hash and cannot show it
 to you again. Put it straight into the connector's `.env` file.

@@ -16,6 +16,7 @@
 
 package dev.soulbind.guards;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -25,6 +26,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.HashSet;
+import java.util.stream.Collectors;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -125,5 +128,66 @@ class PrincipalDriftGuardTest {
                         + ". A grant that lives only in a shell script is one the credential"
                         + " smoke cannot check, which is how four callers were found one"
                         + " session run at a time. DECISIONS 10.3.");
+    }
+
+    @Test
+    @DisplayName("the grant docs/install.md tells operators to use is recorded too")
+    void documentedGrantIsRecorded() throws IOException {
+        // The smoke covers the harness's own principals. The grant an OPERATOR
+        // types comes from docs/install.md, and nothing checked that -- so it
+        // sat there missing link-state-reader until a live Discord run had
+        // /whoami refused with "this credential does not hold the capability
+        // this operation requires". Fifth caller of identity.describe to be
+        // broken by that grant (DECISIONS 9.8, 10.3).
+        //
+        // A document is not a script, so the drift check above could not see
+        // it. This one reads the document.
+        Path install = SourceTree.repoRoot().resolve("docs/install.md");
+        assertTrue(Files.isRegularFile(install), "docs/install.md is missing");
+
+        Set<String> recorded = new HashSet<>();
+        for (String line : Files.readAllLines(PRINCIPALS)) {
+            String text = line.strip();
+            if (text.isEmpty() || text.startsWith("#")) {
+                continue;
+            }
+            String[] columns = text.split("\\|");
+            if (columns.length >= 2) {
+                recorded.add(normalise(columns[1]));
+            }
+        }
+        assertFalse(recorded.isEmpty(), "parsed no grants out of principals.txt");
+
+        Matcher m = Pattern.compile("--capabilities\\s+([a-z0-9,\\-]+)")
+                .matcher(Files.readString(install));
+        List<String> undocumented = new ArrayList<>();
+        int found = 0;
+        while (m.find()) {
+            found++;
+            String grant = normalise(m.group(1));
+            if (!recorded.contains(grant)) {
+                undocumented.add(m.group(1));
+            }
+        }
+
+        assertTrue(found > 0,
+                "docs/install.md contains no --capabilities example, so this guard asserted"
+                        + " nothing. If the registration section moved, follow it.");
+        assertTrue(undocumented.isEmpty(),
+                "docs/install.md tells operators to register with grants that"
+                        + " harness/principals.txt does not record, so nothing ever checks"
+                        + " that they are sufficient: " + undocumented
+                        + ". Add each to principals.txt with the operations it must be"
+                        + " permitted -- credential-smoke.sh then attempts them against a"
+                        + " real core in about thirty seconds.");
+    }
+
+    /** Capability lists compared as sets, so ordering and spacing do not matter. */
+    private static String normalise(String capabilities) {
+        return Arrays.stream(capabilities.split(","))
+                .map(String::strip)
+                .filter(c -> !c.isEmpty())
+                .sorted()
+                .collect(Collectors.joining(","));
     }
 }

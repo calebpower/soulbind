@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.Permission;
+import java.util.function.BooleanSupplier;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
@@ -134,9 +135,67 @@ public final class JdaSurface implements ChatSurface {
                 (guild, member, resolved) -> member.getRoles().contains(resolved));
     }
 
+    /** How long to wait for a configured guild to become visible. */
+    private static final int GUILD_WAIT_ATTEMPTS = 20;
+
+    private static final long GUILD_WAIT_MILLIS = 500L;
+
+    /**
+     * Polls until the configured guild is visible, or the budget runs out.
+     *
+     * <p>Extracted and given its pause as a parameter so a test can exercise
+     * the decision without waiting or without a Discord. The thing worth
+     * testing is not the sleeping.
+     *
+     * @param available whether the guild can be seen right now
+     * @param attempts how many times to look
+     * @param pause what to do between looks
+     * @return true if it appeared within the budget
+     */
+    static boolean awaitGuild(BooleanSupplier available, int attempts, Runnable pause) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            if (available.getAsBoolean()) {
+                return true;
+            }
+            pause.run();
+        }
+        return false;
+    }
+
     @Override
     public void registerCommands(List<String> commands) {
-        Guild guild = guild().orElse(null);
+        boolean wantsGuild = guildId != null && !guildId.isBlank();
+
+        // REFUSING, rather than registering globally instead.
+        //
+        // The first live run of this connector registered three commands
+        // globally while platform.guild named a server -- the bot had not been
+        // invited to it yet, so the guild was not visible. The fallback was
+        // silent apart from one log line, and it left three global commands on
+        // the application: they appear in EVERY server the bot is ever added
+        // to, take up to an hour to propagate, and stay until somebody deletes
+        // them. Cleaning that up is manual and nothing tells the operator it
+        // is needed.
+        //
+        // A typo in the guild id does exactly the same thing. So an operator
+        // who names a server and gets global registration has a
+        // misconfiguration hidden from them by the very mechanism meant to be
+        // helpful. Global registration remains available -- by LEAVING
+        // platform.guild unset, which is a choice rather than an accident.
+        if (wantsGuild && !awaitGuild(
+                () -> guild().isPresent(), GUILD_WAIT_ATTEMPTS, JdaSurface::pause)) {
+            throw new IllegalStateException(
+                    "platform.guild names '" + guildId + "' and this bot cannot see that"
+                            + " server after " + (GUILD_WAIT_ATTEMPTS * GUILD_WAIT_MILLIS / 1000)
+                            + "s. Registering the commands globally instead would put them in"
+                            + " every server this bot is in, for up to an hour, and leave them"
+                            + " there -- so this refuses rather than quietly doing something"
+                            + " other than what the configuration asks. Check that the bot has"
+                            + " been invited to that server and that the id is correct; or"
+                            + " unset platform.guild to register globally on purpose.");
+        }
+
+        Guild guild = wantsGuild ? guild().orElseThrow() : null;
 
         var link = Commands.slash("link", "Link this account to another platform")
                 .addOptions(new OptionData(
@@ -153,14 +212,29 @@ public final class JdaSurface implements ChatSurface {
             // strictly better experience, and for a test it is the difference
             // between a run and a wait.
             guild.updateCommands().addCommands(link, whoami, admin).queue(
-                    success -> log.accept("registered " + commands.size() + " commands", null),
+                    // The count comes from what Discord acknowledged, not from
+                    // the argument: the two agreeing is a coincidence today and
+                    // a lie the first time they do not.
+                    registered -> log.accept(
+                            "registered " + registered.size() + " commands to guild "
+                                    + guildId, null),
                     failure -> log.accept("could not register commands", failure));
         } else {
             jda.updateCommands().addCommands(link, whoami, admin).queue(
-                    success -> log.accept(
-                            "registered " + commands.size() + " commands globally; they can "
-                                    + "take up to an hour to appear", null),
+                    registered -> log.accept(
+                            "registered " + registered.size() + " commands globally; they can "
+                                    + "take up to an hour to appear, in every server this bot "
+                                    + "is in. Set platform.guild to scope them to one.", null),
                     failure -> log.accept("could not register commands", failure));
+        }
+    }
+
+    /** Sleeps between looks, restoring the interrupt rather than swallowing it. */
+    private static void pause() {
+        try {
+            Thread.sleep(GUILD_WAIT_MILLIS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

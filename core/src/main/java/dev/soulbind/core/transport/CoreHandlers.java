@@ -25,6 +25,7 @@ import dev.soulbind.core.events.EventRecord;
 import dev.soulbind.core.identity.Identity;
 import dev.soulbind.core.identity.LinkCodeRecord;
 import dev.soulbind.core.identity.LinkingService;
+import dev.soulbind.core.policy.GateEvaluator;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
 import dev.soulbind.core.storage.IdentityRepository;
@@ -94,6 +95,7 @@ public final class CoreHandlers {
             EventRepository events,
             RuntimeConfigRepository runtimeConfig,
             LinkingService linking,
+            GateEvaluator gateEvaluator,
             Codec codec,
             Clock clock,
             int signatureWindowSeconds) {
@@ -408,29 +410,11 @@ public final class CoreHandlers {
             // an operator cannot write a rule for a gate they cannot see.
             policy.gateSeen(q.gate(), connector.id(), null);
 
-            var subject = identities.subjectOf(q.platformKind(), q.platformId());
-            String ref = q.platformKind() + ":" + q.platformId();
-
-            SubjectSnapshot snapshot;
-            if (subject.isEmpty()) {
-                snapshot = SubjectSnapshot.unlinked(ref, clock.instant());
-            } else {
-                List<Identity> graph = identities.identitiesOf(subject.get().id());
-                Set<String> verified = new TreeSet<>();
-                Instant firstSeen = clock.instant();
-                for (Identity identity : graph) {
-                    if (identity.isVerified()) {
-                        verified.add(identity.platformKind());
-                    }
-                    if (identity.createdAt().isBefore(firstSeen)) {
-                        firstSeen = identity.createdAt();
-                    }
-                }
-                // firstSeen from the graph, not from the caller: grace computed
-                // from a connector-supplied time is grace anybody can extend.
-                snapshot = new SubjectSnapshot(
-                        subject.get().id(), ref, verified, graph.size(), firstSeen);
-            }
+            // The SAME snapshot the requirements-met emission is computed
+            // from. It used to be built here, and a second copy of this is how
+            // an effector comes to grant a role for a gate that decide refuses.
+            SubjectSnapshot snapshot =
+                    gateEvaluator.snapshotFor(q.platformKind(), q.platformId());
 
             Decision decision = PolicyEngine.decide(
                     snapshot,

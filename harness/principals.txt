@@ -33,6 +33,14 @@ chat         | code-display,code-entry,link-state-reader                        
 plan         | link-state-reader                                                    | identity.describe
 t10-auditor  | audit-source,config-management                                       | audit.push audit.query
 
+# --- the grant docs/install.md tells operators to use --------------------------
+# Here because the smoke covers the harness's OWN principals, and the one an
+# operator actually types came from a document nothing checked. A live Discord
+# run found /whoami refused: install.md omitted link-state-reader, which is the
+# fifth time this capability has broken a caller. A guard now holds the
+# document to this row.
+discord      | code-display,code-entry,effector,link-state-reader                   | code.issue code.redeem identity.describe
+
 # --- the simulated-user tier ------------------------------------------------
 sim-actor    | code-display,code-entry,enforcement-point,link-state-reader          | code.issue identity.describe decide
 sim-admin    | config-management,link-state-reader,code-entry,enforcement-point     | identity.describe decide rule.set config.set audit.query

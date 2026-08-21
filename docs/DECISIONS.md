@@ -5999,3 +5999,113 @@ SQLite, which has no charset to be created under, and ran on MariaDB.
 Four runs to get here, and the three failures were all checks being wrong about
 the world rather than the world being wrong. That is the outcome a battery is
 for; the alternative was finding each of them in a deployment.
+
+### 10.18 — The effector half did not exist, and a manual smoke found it
+
+The Phase 6 manual smoke — a real bot, a real server, a person typing `/link` —
+found three things. The third is the reason manual smokes are in the plan.
+
+#### `/whoami` was refused, and the documentation caused it
+
+`docs/install.md` told operators to register the Discord connector with
+`code-display,code-entry,effector`. The connector calls `identity.describe`,
+which needs `link-state-reader`. So an operator following the document got a
+connector that links accounts perfectly and then answers "this credential does
+not hold the capability this operation requires" the first time anybody asks
+what they are linked to.
+
+Fifth caller of `identity.describe` broken by that grant (9.8, 10.3). The
+existing defence — `principals.txt` plus `credential-smoke.sh` — covers the
+*harness's* principals. The grant an operator actually types lived in a
+document nothing read. A guard now parses `--capabilities` out of
+`docs/install.md` and fails the build unless `principals.txt` records it, so the
+thirty-second smoke covers it every run.
+
+#### Commands registered globally while a guild was named
+
+The first run registered three commands globally although `platform.guild` was
+set — the bot had not been invited to the server yet, so the guild was not
+visible, and the code fell back to global with one log line. That left three
+global commands on the application: visible in every server the bot is ever
+added to, an hour to propagate, and there until deleted by hand.
+
+My first diagnosis was a race in `awaitReady()`. It was wrong, and a restart
+disproved it: with the bot already in the guild, guild setup completes before
+registration. The owner's explanation — the bot was added late — was correct.
+
+The defect is real anyway, and it is the fallback rather than the timing. A
+typo'd guild id does the same thing. So a configured-but-invisible guild now
+**refuses to start**, naming the id and the two likely causes. Global
+registration is still available by leaving `platform.guild` unset, which is a
+decision rather than an accident.
+
+#### `subject.requirements-met` was never emitted by anything
+
+Setting up the role effector surfaced it. `RoleEffector` acts on exactly two
+event types. Core emits five, and neither is among them.
+
+Both were declared in `EventType`, documented in `docs/protocol.md` as part of
+the wire contract — with a paragraph explaining why they are per-gate — and
+specified in the plan §7: core emits them "per gate whose requirements just
+became satisfied". Nothing produced them. **The effector half of the product
+could not fire in any deployment**, and the same was true of
+`connector-velocity`'s `GroupEffector`.
+
+**Why ten phases of testing missed it.** `RoleEffectorTest` injects the event
+and proves the role is applied. The full-stack battery drives `decide`, a
+different path. Phase 4's gate — 100 mutations delivered in order and applied
+once — put the events into the stream itself. Every test asserted one half
+against the other half's assumption, and nobody checked that the event the
+effector waits for is one core sends. Two oracles that never met.
+
+#### What was built
+
+`LinkingService` now brackets each mutation — redeem, attest, unlink — with a
+before/after diff of the gates each identity satisfies, and emits the
+transitions in the same call path as the change.
+
+**Per identity, not per subject.** An effector grants on its own platform and
+finds its target from the event's `identityRef`, refusing a ref whose kind is
+not its own. One event per subject would carry one identity's ref and every
+other platform's effector would ignore it.
+
+**One evaluator.** `GateEvaluator` is used by the emission *and* by `decide`,
+which previously built its snapshot inline. Two copies is how an effector comes
+to grant a role for a gate that `decide` refuses — a person holding a role that
+does not admit them, with nothing reporting it because each half is correct
+alone.
+
+**Three exclusions from "satisfied".** A gate with no rule, because gates are
+recorded on first *mention* and emitting would hand a standing role to every
+subject the moment any connector asked about one. Grace, because it is an
+explicit temporary reprieve and nothing re-evaluates on a timer, so the role
+would never come back off. And anything that denies.
+
+#### The vacuous test, caught by mutation
+
+Five tests, mutation-checked. Deleting the emission failed three. But making
+unruled gates count as satisfied changed **nothing** — such a gate is satisfied
+before and after any change, so it never yields a transition, and the
+event-level test passed either way. It was asserting nothing.
+
+Rewritten to assert against `GateEvaluator` directly, where the behaviour lives.
+It kills the mutant now. Recorded because the test looked entirely reasonable
+and was worthless, and only mutation said so.
+
+#### Proven live
+
+Against the real bot and server: `/link` typed by a person, code redeemed as
+the game side, core emitting `requirements-met` per identity, and the role
+appearing on the account within one poll — with nothing touching Discord's API
+but the effector. Then `identity.unlink`, `requirements-lost` for **both** the
+removed identity and its sibling, and the role removed.
+
+The sibling case is the one worth naming: unlinking the *game* identity is what
+takes the *Discord* role away, because the subject drops below the rule. Miss
+it and an effector holds a role forever for somebody who no longer qualifies.
+
+#### Not done, deliberately
+
+`rule.changed` does not trigger re-evaluation. Editing a rule can flip every
+subject at once, and doing that well needs a bounded sweep rather than a
+synchronous fan-out inside the request that changed the rule. Narrowing 15.

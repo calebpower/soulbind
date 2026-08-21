@@ -18,6 +18,7 @@ package dev.soulbind.core.identity;
 
 import dev.soulbind.core.audit.AuditEntry;
 import dev.soulbind.core.events.EventEmitter;
+import dev.soulbind.core.policy.GateEvaluator;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.IdentityRepository;
 import dev.soulbind.core.storage.LinkCodeRepository;
@@ -26,9 +27,12 @@ import dev.soulbind.protocol.EventType;
 import dev.soulbind.protocol.LinkCode;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Issuing and redeeming link codes.
@@ -71,6 +75,8 @@ public final class LinkingService {
     private final LinkCodeRepository codes;
     private final PlatformKindRepository kinds;
     private final AuditRepository audit;
+
+    private final GateEvaluator gates;
     private final Clock clock;
     private final Duration ttl;
 
@@ -80,6 +86,7 @@ public final class LinkingService {
             LinkCodeRepository codes,
             PlatformKindRepository kinds,
             AuditRepository audit,
+            GateEvaluator gates,
             Clock clock,
             Duration ttl) {
         this.events = events;
@@ -87,8 +94,80 @@ public final class LinkingService {
         this.codes = codes;
         this.kinds = kinds;
         this.audit = audit;
+        this.gates = gates;
         this.clock = clock;
         this.ttl = ttl;
+    }
+
+
+    /**
+     * Emits the per-gate transitions a mutation just caused.
+     *
+     * <p>The specification (§7) has core emit {@code subject.requirements-met}
+     * "per gate whose requirements just became satisfied" as part of the same
+     * transaction as the link. Until Phase 10 it emitted neither that nor its
+     * mirror — the event types were declared in the protocol, documented in
+     * {@code docs/protocol.md} with a paragraph on why they are per-gate, and
+     * consumed by both reference effectors, and nothing anywhere produced
+     * them. The role effector could not fire in any deployment.
+     *
+     * <p><b>Per identity, not per subject.</b> An effector grants a role on
+     * <em>its own</em> platform and finds its target by reading the event's
+     * {@code identityRef} — {@code RoleEffector} refuses a ref whose kind is
+     * not its own. One event per subject would carry one identity's ref and
+     * every other platform's effector would ignore it, so a two-platform
+     * subject crossing a gate emits one event per side.
+     *
+     * @param before what each identity ref satisfied prior to the change
+     * @param refs the identities to re-evaluate, as {@code kind:id}
+     */
+    private void emitGateTransitions(Map<String, Set<String>> before, Collection<String> refs) {
+        for (String ref : refs) {
+            int colon = ref.indexOf(':');
+            if (colon < 0) {
+                continue;
+            }
+            Set<String> was = before.getOrDefault(ref, Set.of());
+            Set<String> now = gates.satisfiedGates(
+                    ref.substring(0, colon), ref.substring(colon + 1));
+
+            var subject = identities.subjectOf(ref.substring(0, colon), ref.substring(colon + 1));
+            String subjectId = subject.map(s -> s.id()).orElse(null);
+
+            for (String gate : now) {
+                if (!was.contains(gate)) {
+                    events.emit(EventType.SUBJECT_REQUIREMENTS_MET, subjectId, ref, gate, Map.of());
+                }
+            }
+            for (String gate : was) {
+                if (!now.contains(gate)) {
+                    events.emit(
+                            EventType.SUBJECT_REQUIREMENTS_LOST, subjectId, ref, gate, Map.of());
+                }
+            }
+        }
+    }
+
+
+    /** Every identity ref on a subject, for fan-out to each platform's effector. */
+    private List<String> refsOf(String subjectId) {
+        if (subjectId == null) {
+            return List.of();
+        }
+        return identities.identitiesOf(subjectId).stream().map(Identity::ref).toList();
+    }
+
+    /** What each of these refs satisfies right now, for diffing afterwards. */
+    private Map<String, Set<String>> gatesSatisfiedBy(Collection<String> refs) {
+        Map<String, Set<String>> before = new LinkedHashMap<>();
+        for (String ref : refs) {
+            int colon = ref.indexOf(':');
+            if (colon >= 0) {
+                before.put(ref, gates.satisfiedGates(
+                        ref.substring(0, colon), ref.substring(colon + 1)));
+            }
+        }
+        return before;
     }
 
     /**
@@ -184,6 +263,13 @@ public final class LinkingService {
                     Refusal.SAME_ACCOUNT, "that code was issued for this same account");
         }
 
+        // Snapshotted BEFORE the claim, because everything after it changes the
+        // answer. Both sides: linking can complete requirements for the account
+        // that issued the code as readily as for the one redeeming it.
+        Map<String, Set<String>> gatesBefore = gatesSatisfiedBy(List.of(
+                record.issuedForKind() + ":" + record.issuedForId(),
+                platformKind + ":" + platformId));
+
         // THE decision. Everything above is a better error message; this is the
         // line that makes a code single-use, and it is atomic.
         if (!codes.claim(code, redeemingConnectorId, clock.instant())) {
@@ -251,6 +337,12 @@ public final class LinkingService {
                 null,
                 Map.of("issuedFor", issuedIdentity.ref(), "proofMethod", "link-code"));
 
+        // AFTER identity.linked, deliberately. An effector reading the stream
+        // in order sees the link before it sees what the link made true, which
+        // is the order the two facts actually happened in.
+        emitGateTransitions(
+                gatesBefore, List.of(issuedIdentity.ref(), redeemedIdentity.ref()));
+
         return new Result.Linked(subject, issuedIdentity, redeemedIdentity);
     }
 
@@ -276,6 +368,15 @@ public final class LinkingService {
             String proofMethod) {
 
         kinds.seen(platformKind, attestingConnectorId);
+
+        // Before the attestation, and by REF rather than by subject: the
+        // account may not have one yet, and if it does the whole subject's
+        // outcomes can move.
+        Map<String, Set<String>> gatesBefore = gatesSatisfiedBy(
+                identities.subjectOf(platformKind, platformId)
+                        .map(o -> refsOf(o.id()))
+                        .orElse(List.of(platformKind + ":" + platformId)));
+
         String method = proofMethod == null || proofMethod.isBlank()
                 ? "connector-attested"
                 : proofMethod;
@@ -309,6 +410,13 @@ public final class LinkingService {
                 null,
                 Map.of("proofMethod", method));
 
+        // Verification changes gate outcomes on its own: a rule asking for a
+        // VERIFIED kind is unmet by an identity that is merely linked, so
+        // proving one can open a gate without any link happening. Emitting for
+        // every identity on the subject, because the newly-proved kind may be
+        // what another platform's effector was waiting for.
+        emitGateTransitions(gatesBefore, refsOf(identity.subjectId()));
+
         return identity;
     }
 
@@ -321,6 +429,16 @@ public final class LinkingService {
      */
     public boolean unlink(String actorConnectorId, String platformKind, String platformId) {
         Optional<Subject> owner = identities.subjectOf(platformKind, platformId);
+
+        // Every ref on the subject, captured before the row goes: removing one
+        // identity can drop the whole subject below a rule's required kinds, so
+        // the SIBLINGS lose gates too, and their effectors have to hear about
+        // it. The removed identity is in the list as well -- it is losing every
+        // gate it had, which is what tells its own effector to take the role
+        // back.
+        List<String> affected = owner.map(o -> refsOf(o.id())).orElse(List.of());
+        Map<String, Set<String>> gatesBefore = gatesSatisfiedBy(affected);
+
         boolean removed = identities.unlink(platformKind, platformId);
 
         if (removed) {
@@ -333,6 +451,8 @@ public final class LinkingService {
                     platformKind + ":" + platformId,
                     null,
                     Map.of()));
+
+            emitGateTransitions(gatesBefore, affected);
 
             events.emit(
                     EventType.IDENTITY_UNLINKED,

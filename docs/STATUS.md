@@ -17,7 +17,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 3 | Policy engine and decisions | **Complete** — gate passed |
 | 4 | Events and effectors | **Complete** — gate passed: a connector down for 100 mutations receives all 100, in order, applied once by the effector's own reckoning |
 | 5 | connector-velocity | **Complete** — gate passed: a real client is refused by the join gate, admitted by an override, runs /link, and the link completes, verified by reading the graph back |
-| 6 | connector-discord | **In progress** — seam, scripted surface, connector, role effector and the client-library implementation landed; scripted-surface link flow green in the stack. The manual smoke against a real server is outstanding and is named as evidence, not a tier |
+| 6 | connector-discord | **Complete — gate passed.** The manual smoke ran against a real bot and a real server: `/link` typed by a person, the code redeemed on another platform, core confirming the link, and `/whoami` reading it back. It found three defects — a documented capability grant missing `link-state-reader`, commands registering globally when a named guild was not visible, and `subject.requirements-met` being emitted by nothing at all, which meant the effector half could not fire in any deployment. All three fixed; the role grant and revoke were then proven live |
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | **Complete — gate passed.** `reaper test` green on both backends in one session (run 13), and Plan renders link data for a player linked through the real flow. Battery covers: the latin1 axis asserted rather than assumed, astral-plane text round-tripped and compared, T7 fuzz against a populated deployment, T8 concurrency re-run in-session on both backends, T11 transcripts for `first-time-player` and `forum-first-user`, and the T5 browser suite with the 5xx watchdog armed on every non-injection pass. `bedrock-player` declined on the plan's own conditional — departure 10 |
 | 9 | Simulated users | **Trimmed tier complete; gate met and now meaningful.** Run 12 green on both backends: three seeds × 400 actions, each reporting real work (6–8 links made, ~100 correctly refused), identical counts on both axes. Four-byte UTF-8 survives a round trip through a latin1 server. Shrinker and two nemesis classes deferred (departure 9). **One open lead:** `decisions-follow-the-rules` excluded pending diagnosis — DECISIONS 9.10 |
@@ -184,7 +184,13 @@ Phase 1" ended when Phase 1 shipped them with fixtures.
     Removing it would re-download a toolchain each run to prove nothing.
     Narrowing: the gate proves a clean install of *soulbind* onto a machine
     whose prerequisites may already be satisfied (DECISIONS 10.15, 10.16).
-14. **`t10`'s five-hundred-error watchdog covers its own requests only** — it
+14. **`rule.changed` does not re-evaluate gates.** Linking, unlinking and
+    attesting emit `subject.requirements-met`/`-lost`; editing a *rule* does
+    not. A rule change can flip every subject at once, and doing it well needs
+    a bounded sweep rather than a synchronous fan-out inside the request that
+    changed the rule. So a rule edit does not retroactively grant or revoke
+    roles until each subject next changes (DECISIONS 10.18).
+15. **`t10`'s five-hundred-error watchdog covers its own requests only** — it
     cannot observe 5xxs served to other clients between stages. Scope: the
     stage's own traffic; the forum tier's watchdog covers the browser suite
     the same way.
