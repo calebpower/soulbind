@@ -683,13 +683,20 @@ Where the chain stands:
 | soulbind sees it across the plugin classloader boundary | yes, run 22 (`@Dependency`) |
 | the resolver builds a real effector | yes — `group sync active` requires it |
 | the drain is scheduled | yes |
-| core emits `subject.requirements-met` for the linked player | **no, and correctly so** |
-| the group reaches LuckPerms | pending run 24 |
+| core emits `subject.requirements-met` | yes, run 24, from `override.set` |
+| the drain applies it | yes, run 24 |
+| the group reaches LuckPerms | **yes, run 24** |
+| the stage can read that it did | fixed after run 24, pending run 25 |
 
 The stage's smoke admits the player with an operator override so they can run
 `/link`. That identity therefore already satisfied the gate before the link, so
 the link produced no transition — and `override.set` emitted nothing at all, so
 nothing had told the effector when the override was set either. DECISIONS 10.26.
+
+Run 24 closed that: the group is in LuckPerms' storage. The stage still reported
+red, because it matched `group.<name>` — a form LuckPerms' JSON storage never
+writes. It now parses the file through `holds-group.sh`, which has a real
+recorded LuckPerms file as its control and seven mutants of it. DECISIONS 10.27.
 
 Overrides now emit gate transitions on both set and remove; `override.remove`
 exists at all for the first time; and an override that *expires* is deliberately

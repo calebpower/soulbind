@@ -1,7 +1,7 @@
 # `fixtures/`
 
-Real responses, recorded from a running Plan, kept so the assertions in
-`plan-check.sh` can be tested without a session.
+Real responses, recorded from running third-party software, kept so the
+assertions that read them can be tested without a session.
 
 ## Why they exist
 
@@ -34,3 +34,22 @@ Plan's `SERVER_PERIODICAL` fires. That is exactly why the check asserts they are
 counts rather than asserting they are positive, and why `linked_aggregate` — which
 Plan computes itself across its whole player table — is the server-side value
 carrying the weight. DECISIONS 8.19.
+
+## `luckperms-user.json`
+
+**The same mistake, made again, eight decisions later.** `group-check.sh` looked
+for `group.soulbind-linked` — the permission-node form, which is how an
+inherited group appears in a permissions listing. LuckPerms' JSON storage does
+not write that; it writes a `parents` array of `{"group": "<name>"}`. So the
+check could not match a real file, and the `groups` stage ran red through a
+session in which the connector had worked perfectly and the group was sitting in
+the file the stage was reading. `docs/DECISIONS.md` 10.27.
+
+This is LuckPerms 5.5.77's actual output for the player the `up` smoke links,
+copied unedited out of run 24's `out/fullstack/sqlite/evidence/`. It is the
+**control** for `mutation/group-selftest.sh`: a check that cannot pass against
+it asserts nothing, however many mutants it kills. The old pattern fails this
+file in a second, on a workstation.
+
+Recorded, never hand-edited — for the reason above. Re-record from a session's
+evidence directory if LuckPerms changes its storage format; do not patch.

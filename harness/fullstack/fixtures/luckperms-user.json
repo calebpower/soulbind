@@ -1,0 +1,13 @@
+{
+  "uuid": "d96d427c-e2d6-3a31-8231-cf626a854942",
+  "name": "Linker",
+  "primaryGroup": "default",
+  "parents": [
+    {
+      "group": "default"
+    },
+    {
+      "group": "soulbind-linked"
+    }
+  ]
+}

@@ -6854,3 +6854,77 @@ killed. Re-run with every file restored each time, the storage-layer guard
 **survived** — the handler refuses first, so nothing from the wire reaches it.
 That is what the repository-level assertion above exists for. A mutation run
 whose mutants contaminate each other measures nothing.
+
+### 10.27 — Run 24: it worked, and the check could not say so
+
+The chain closed. Run 24's proxy log:
+
+```
+[14:12:23] group sync active: 'soulbind-linked' on gate 'game.join'
+[14:12:28] granted group 'soulbind-linked' to d96d427c-e2d6-3a31-8231-cf626a854942
+```
+
+and LuckPerms' own storage for that player:
+
+```json
+"parents": [ { "group": "default" }, { "group": "soulbind-linked" } ]
+```
+
+`override.set` emitted `subject.requirements-met` at sequence 2, the drain picked
+it up five seconds later, and the group is in the file. Every link from 10.23,
+10.24, 10.25 and 10.26 is now proven on a real proxy against a real permissions
+plugin.
+
+**And the stage failed anyway.** It matched `group.soulbind-linked` — the
+permission-node form, which is how an inherited group appears in a permissions
+listing. LuckPerms' JSON storage does not write that; it writes a `parents`
+array of `{"group": "<name>"}` objects. So the check could not pass against any
+real file, and it ran red through a whole session in which the product worked
+and the answer was sitting in the file it was reading.
+
+A check that cannot pass is not a strict check. It is a broken one, and it costs
+exactly as much as a check that cannot fail — this one burned a
+twenty-five-minute session to say nothing.
+
+#### This is 8.19 again
+
+`plan-check.sh`'s JSON walker was written against an **imagined** response shape
+and shipped unable to match a real one. The fixture written to test it had been
+imagined from the same picture, so the two agreed and neither was right. The
+answer then was to record a real response and keep it as a control.
+
+The same answer applies here, and I did not apply it when writing this stage:
+
+* `holds-group.sh` — one implementation of "holds the group", used by the stage
+  and by its self-test, so the two cannot drift. It **parses** rather than
+  greps; a regex over serialised JSON is a bet on whitespace and key order that
+  there is no reason to make when a parser is already a dependency of five other
+  stages here.
+* `fixtures/luckperms-user.json` — the actual file LuckPerms wrote in run 24,
+  copied out of the evidence directory unedited.
+* `mutation/group-selftest.sh` — that control plus seven mutations of the
+  observation: parents emptied, the group removed, the group misspelled, the
+  `parents` key dropped, the `group` key renamed, an empty object, and no file
+  at all. All must read as not holding; the control must read as holding.
+
+The control is the part that matters. The old pattern fails it in under a
+second, on a workstation, with no session involved.
+
+#### Also confirmed by this run
+
+The 10.25 diagnostics are correct now:
+
+```
+ignoring subject.requirements-met: 'harness:harness-account-1' is on another
+    platform; this connector is 'game'
+ignoring subject.requirements-met: 'game:journey-player-595529' names this
+    platform, but its id is not a UUID, so no player here can hold it
+```
+
+Both cases distinguished, which is what 10.26 fixed.
+
+One honest wart visible in the same output: the `requirements-met` emitted by
+`override.set` carries `"subjectId": null`, because the override was set for an
+account core had never seen — there is no subject to name yet. That is accurate
+rather than broken, and effectors route on `identityRef`, but it is worth
+knowing before somebody builds something that joins events to subjects.

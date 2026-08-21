@@ -256,6 +256,15 @@ cp -r connector-flarum/build/infection/. out/infection/
 echo "run: shell mutation battery"
 sh harness/fullstack/mutation/run.sh
 
+# The same discipline for the group check, and it earns its place here by having
+# a CONTROL: a real LuckPerms user file, taken from a run, that must read as
+# holding the group. The `groups` stage previously matched a pattern LuckPerms
+# never writes, so it could not pass -- and it spent a whole session red while
+# the connector worked and the group sat in the file it was reading. A control
+# catches that in a second.
+echo "run: group-check control and mutants"
+sh harness/fullstack/mutation/group-selftest.sh
+
 # ---------------------------------------------------------------------------
 # The operator tools, against a real core on SQLite.
 #

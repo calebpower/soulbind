@@ -30,12 +30,20 @@
 # Reads LuckPerms' own JSON storage rather than asking the proxy console: the
 # file is the authority, and a console reply could be produced by a plugin that
 # had not persisted anything.
+#
+# THROUGH holds-group.sh, which parses that file rather than grepping it. This
+# used to match `group.<name>` -- the permission-node form, which LuckPerms'
+# JSON storage never writes -- so the check could not pass against a real file,
+# and it ran red through a whole session in which the connector had worked and
+# the group was sitting in the file being read. mutation/group-selftest.sh keeps
+# a real LuckPerms file as its control for exactly that reason. DECISIONS 10.27.
 set -eu
 
 RUN=$1
 EVIDENCE=$2
 CORE=$3
 ADMIN=$4
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 GROUP=soulbind-linked
 GATE=game.join
@@ -65,7 +73,7 @@ USER_FILE="$RUN/proxy/plugins/luckperms/json-storage/users/$PLAYER.json"
 # half is missing.
 i=0
 while [ "$i" -lt 40 ]; do
-    if [ -f "$USER_FILE" ] && grep -q "group\.$GROUP" "$USER_FILE" 2>/dev/null; then
+    if [ -f "$USER_FILE" ] && sh "$HERE/holds-group.sh" "$USER_FILE" "$GROUP"; then
         cp "$USER_FILE" "$EVIDENCE/luckperms-user.json"
         log "OK LuckPerms holds group.$GROUP for $PLAYER"
         exit 0
