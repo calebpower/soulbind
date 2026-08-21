@@ -42,6 +42,17 @@ public interface ConnectorRepository {
 
     List<ConnectorRecord> list();
 
+    /**
+     * Replaces a connector's credential hash, returning false when it is gone.
+     *
+     * <p><b>Replaces, never adds.</b> The old hash stops working the moment this
+     * returns, and there is no overlap window — see
+     * {@code docs/DECISIONS.md} 10.4. Rotation exists mainly because a
+     * credential leaked, and a grace period during which the leaked one still
+     * works is precisely what is not wanted then.
+     */
+    boolean rotateCredential(String connectorId, String newCredentialHash);
+
     /** Records liveness. Separate from registration so a heartbeat is not a write to identity. */
     void touchLastSeen(String connectorId, Instant at);
 }

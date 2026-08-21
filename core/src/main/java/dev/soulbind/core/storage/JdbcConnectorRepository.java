@@ -111,6 +111,18 @@ final class JdbcConnectorRepository implements ConnectorRepository {
     }
 
     @Override
+    public boolean rotateCredential(String connectorId, String newCredentialHash) {
+        return jdbc.write("connector.rotateCredential", c -> {
+            try (PreparedStatement ps = c.prepareStatement(
+                    "UPDATE connector SET credential_hash = ? WHERE id = ?")) {
+                ps.setString(1, newCredentialHash);
+                ps.setString(2, connectorId);
+                return ps.executeUpdate() == 1;
+            }
+        });
+    }
+
+    @Override
     public void touchLastSeen(String connectorId, Instant at) {
         jdbc.write("connector.touchLastSeen", c -> {
             try (PreparedStatement ps =

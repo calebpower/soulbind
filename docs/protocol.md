@@ -109,6 +109,7 @@ copy of the rule.
 | `config.get` | `config-management` |
 | `config.set` | `config-management` |
 | `connector.list` | `config-management` |
+| `connector.rotate` | `config-management` |
 | `subject.inspect` | `config-management` |
 | `identity.unlink` | `config-management` |
 | `audit.query` | `config-management` |

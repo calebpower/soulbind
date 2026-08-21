@@ -80,6 +80,16 @@ public final class Authorizer {
         CONFIG_GET(Capability.CONFIG_MANAGEMENT),
         CONFIG_SET(Capability.CONFIG_MANAGEMENT),
         CONNECTOR_LIST(Capability.CONFIG_MANAGEMENT),
+
+        /**
+         * Replace a connector's credential.
+         *
+         * <p>Administrative, and it has to be: a connector that could rotate
+         * its own credential could also rotate somebody else's out from under
+         * them, and the case rotation exists for is a credential in the wrong
+         * hands — which is to say, in the hands of whoever would be calling.
+         */
+        CONNECTOR_ROTATE(Capability.CONFIG_MANAGEMENT),
         SUBJECT_INSPECT(Capability.CONFIG_MANAGEMENT),
         IDENTITY_UNLINK(Capability.CONFIG_MANAGEMENT),
         AUDIT_QUERY(Capability.CONFIG_MANAGEMENT);

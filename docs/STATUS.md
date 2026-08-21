@@ -21,7 +21,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | **Complete — gate passed.** `reaper test` green on both backends in one session (run 13), and Plan renders link data for a player linked through the real flow. Battery covers: the latin1 axis asserted rather than assumed, astral-plane text round-tripped and compared, T7 fuzz against a populated deployment, T8 concurrency re-run in-session on both backends, T11 transcripts for `first-time-player` and `forum-first-user`, and the T5 browser suite with the 5xx watchdog armed on every non-injection pass. `bedrock-player` declined on the plan's own conditional — departure 10 |
 | 9 | Simulated users | **Trimmed tier complete; gate met and now meaningful.** Run 12 green on both backends: three seeds × 400 actions, each reporting real work (6–8 links made, ~100 correctly refused), identical counts on both axes. Four-byte UTF-8 survives a round trip through a latin1 server. Shrinker and two nemesis classes deferred (departure 9). **One open lead:** `decisions-follow-the-rules` excluded pending diagnosis — DECISIONS 9.10 |
-| 10 | Hardening and release | Not started |
+| 10 | Hardening and release | **In progress** — credential rotation landed: `connector.rotate` retires a leaked credential immediately, with no overlap window, audited before the plaintext leaves. Audit export, packaging, licence inventory, install docs and the clean-install gate outstanding |
 
 ## Mutation coverage
 
@@ -428,6 +428,41 @@ several times:
   Three adversarial rounds hardened guards; the first execution found a JVM
   mismatch, an inverted condition and a misattributed verdict, none of them
   visible to any amount of reading.
+
+## Phase 10 — in progress
+
+### Credential rotation — landed
+
+Until this, the only way to retire a leaked connector credential was to register
+the connector again under a new name, which left the leaked one working. That is
+the opposite of what an operator wants in the minute they discover a leak.
+
+`connector.rotate` takes a connector name, mints a replacement, and **replaces**
+the stored hash. Deliberately:
+
+- **No overlap window.** The old credential stops authenticating on the next
+  request. A grace period is exactly what is not wanted when the reason for
+  rotating is that somebody else holds the credential. The schema makes this
+  structural rather than a matter of care — `connector` holds one
+  `credential_hash` column, so there is nowhere for a second live credential to
+  live.
+- **Audited before the plaintext is returned.** A rotation that reached the
+  caller and never reached the log is a credential change nobody can account for
+  afterwards, and this is the operation most likely to be run during an incident
+  review — which is when the log is read.
+- **`config-management`**, like the other `connector.*` operations. A connector
+  that could rotate its own credential could rotate somebody else's, and the
+  case rotation exists for is a credential in the hands of whoever is calling.
+- **No CLI verb.** `soulbind` keeps its three verbs; rotation is an operation
+  under the same authorization table, per the reason already recorded in
+  `Main`'s javadoc. An admin can rotate *its own* credential — the request
+  authenticates before the handler runs — and is cut off the instant the
+  response is written, so a lost response means re-registering rather than
+  rotating again. That is asserted, not assumed.
+
+Five tests, each mutation-checked against the real tree: a rotation that reports
+success and changes nothing fails two of them by name; an audit row without the
+connector name fails a third; a nameless "not found" fails a fourth.
 
 ## Guards in force
 

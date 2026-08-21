@@ -17,6 +17,7 @@
 package dev.soulbind.core.transport;
 
 import dev.soulbind.core.registry.Authorizer.Operation;
+import dev.soulbind.core.registry.Credentials;
 import dev.soulbind.core.audit.AuditEntry;
 import dev.soulbind.core.audit.AuditQuery;
 import dev.soulbind.core.events.EventRecord;
@@ -130,6 +131,52 @@ public final class CoreHandlers {
             connectors.touchLastSeen(connector.id(), clock.instant());
             return WireResponse.ok(new HeartbeatResponse(
                     clock.instant().getEpochSecond(), signatureWindowSeconds));
+        });
+
+        handlers.put(Operation.CONNECTOR_ROTATE, (connector, payload) -> {
+            var request = codec.bind(payload, ConnectorRotateRequest.class);
+            if (request.isEmpty()) {
+                return unreadable(Operation.CONNECTOR_ROTATE, ConnectorRotateRequest.class);
+            }
+            String name = request.get().name();
+            if (name == null || name.isBlank()) {
+                return WireResponse.error(
+                        ErrorCode.MALFORMED, "which connector to rotate must be named");
+            }
+
+            var target = connectors.findByName(name);
+            if (target.isEmpty()) {
+                // Named rather than "not found": an operator rotating a
+                // credential in a hurry has usually mistyped, and the useful
+                // answer says which name did not exist.
+                return WireResponse.error(
+                        ErrorCode.INVALID_REQUEST, "no connector is registered as '" + name + "'");
+            }
+
+            Credentials.Minted minted = Credentials.mint();
+            if (!connectors.rotateCredential(target.get().id(), minted.hash())) {
+                return WireResponse.error(
+                        ErrorCode.INTERNAL, "the connector vanished while rotating it");
+            }
+
+            // Audited BEFORE the plaintext goes out. A rotation that reached the
+            // caller and never reached the log is a credential change nobody can
+            // account for afterwards -- and this is the operation most likely to
+            // be performed during an incident, which is exactly when the log is
+            // read.
+            audit.append(new AuditEntry(
+                    0L, clock.instant(),
+                    "connector:" + connector.id(),
+                    "connector.rotated",
+                    null, null, null,
+                    Map.of("connector", name, "connectorId", target.get().id())));
+
+            // The plaintext is returned ONCE and stored nowhere, exactly as at
+            // registration. Core keeps the hash; if this response is lost, the
+            // remedy is another rotation.
+            return WireResponse.ok(Map.of(
+                    "connector", name,
+                    "credential", minted.plaintext()));
         });
 
         handlers.put(Operation.CONNECTOR_LIST, (connector, payload) ->
@@ -674,6 +721,9 @@ public final class CoreHandlers {
 
     private record ConfigSetRequest(String key, String value) {}
 
+    /** Which connector to rotate. By NAME: an operator knows the name, not the uuid. */
+    private record ConnectorRotateRequest(String name) {}
+
     /**
      * The payload could not be read as the shape this operation expects.
      *
@@ -736,6 +786,7 @@ public final class CoreHandlers {
                 Operation.HELLO,
                 Operation.HEARTBEAT,
                 Operation.CONNECTOR_LIST,
+                Operation.CONNECTOR_ROTATE,
                 Operation.AUDIT_PUSH,
                 Operation.AUDIT_QUERY,
                 Operation.CODE_ISSUE,

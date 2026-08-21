@@ -85,6 +85,11 @@ class AuthorizationMatrixTest {
                 put(Operation.CONFIG_GET, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.CONFIG_SET, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.CONNECTOR_LIST, Optional.of(Capability.CONFIG_MANAGEMENT));
+                // Administrative, and it has to be: a connector that could
+                // rotate its own credential could rotate somebody else's, and
+                // the case rotation exists for is a credential in the hands of
+                // whoever would be calling.
+                put(Operation.CONNECTOR_ROTATE, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.SUBJECT_INSPECT, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.IDENTITY_UNLINK, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.AUDIT_QUERY, Optional.of(Capability.CONFIG_MANAGEMENT));

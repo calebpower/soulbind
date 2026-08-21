@@ -132,6 +132,11 @@ final class TestCore implements AutoCloseable {
         return minted.plaintext();
     }
 
+    /** The name this core registered ITSELF under, for operations that name it. */
+    String connectorName() {
+        return connector.name();
+    }
+
     /** Posts a signed request as some other connector's credential. */
     HttpResponse<String> postSignedAs(String token, String body, Instant now) throws Exception {
         return postSigned(body, now, token, UUID.randomUUID().toString());
