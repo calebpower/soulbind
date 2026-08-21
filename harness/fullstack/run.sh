@@ -350,10 +350,24 @@ stage_sim() {
     # of the module's dependencies, and the two disagree the first time one
     # changes.
     sim_home="$REPO/harness/sim/build/install/soulbind-sim"
-    if [ ! -x "$sim_home/bin/soulbind-sim" ]; then
-        log "building the simulated-user tier"
-        ( cd "$REPO" && JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon --quiet :sim:installDist )
-    fi
+    # ALWAYS, never "if the binary is missing".
+    #
+    # The guest's work directory survives between `reaper test` invocations in
+    # one session, so a start script built by an earlier run is still sitting
+    # there. The first version of this skipped the build when it found one --
+    # and a run therefore executed the PREVIOUS run's tier against the current
+    # run's source. It reported green, on both backends, for code it had not
+    # built.
+    #
+    # Caught because the output was missing a line the current source prints.
+    # Nothing else would have said so: the stage passed, the seeds passed, and
+    # the only evidence was an absence.
+    #
+    # Gradle's own up-to-date checking makes the unconditional call nearly free
+    # when nothing changed, which is the correct place for that decision -- it
+    # knows what the inputs are and this script does not.
+    log "building the simulated-user tier"
+    ( cd "$REPO" && JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon --quiet :sim:installDist )
 
     if SOULBIND_SIM_CORE_URL="http://127.0.0.1:$CORE_PORT" \
         SOULBIND_SIM_CREDENTIALS="$creds" \

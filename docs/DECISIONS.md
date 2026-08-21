@@ -4983,3 +4983,55 @@ Then pointed at a dead port: two failures, exit 1.
 
 A fuzz stage that has only ever passed is indistinguishable from one that cannot
 fail, and this one was checked in both directions before being wired in.
+
+### 9.13 — A stage that ran the previous run's binary and reported green
+
+Run 10 came back green on both backends, three seeds each, no violations. It had
+tested nothing that changed since run 9.
+
+`stage_sim` built the simulated-user tier only when the start script was
+missing:
+
+```sh
+if [ ! -x "$sim_home/bin/soulbind-sim" ]; then ... gradlew :sim:installDist ; fi
+```
+
+The guest's work directory **survives between `reaper test` invocations in one
+session**. So run 9 built the tier, run 10 found the binary already there,
+skipped the build, and executed run 9's tier against run 10's source. The
+namespace fix, the code-consumption fix, the work reporting and the astral
+round-trip invariant were all in the tree and none of them ran.
+
+#### How it was caught, and how nearly it was not
+
+By an **absence**. The current source prints "N links made, M refused" in every
+seed summary, and the log did not have it. Everything else looked right: the
+stage passed, all three seeds passed, both axes agreed.
+
+Nothing would have reported this. The stage exits 0, the seeds report clean, and
+"clean" is exactly what a tier does when it is asked about a graph it did not
+build. If the work reporting of 9.11 had not landed a few hours earlier, the
+only symptom would have been a green run that stayed green no matter what the
+tier was changed to.
+
+That is the worst shape a harness defect can take: it does not fail, it does not
+warn, and it makes every subsequent result meaningless in a way that looks like
+success.
+
+#### The fix, and where the decision belongs
+
+Build unconditionally. Gradle's up-to-date checking makes the call nearly free
+when nothing changed, and that is the correct place for the decision — Gradle
+knows what the task's inputs are and a shell script does not.
+
+The general form is worth stating: **a conditional build keyed on the existence
+of an output is a cache with no invalidation.** It is correct exactly once, on a
+clean machine, and wrong every time afterwards on a machine that keeps state —
+which is precisely what a reused session is.
+
+#### What it costs the record
+
+Runs 9 and 10 both tested the tier as of run 9's build. Run 9's green stands for
+what it was: the state at `d6f1d69`, which still had the shared-namespace bug.
+Run 10's green establishes nothing beyond that, and the Phase 9 fixes remain
+unverified in a session until the next run.
