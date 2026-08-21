@@ -213,7 +213,19 @@ public final class Storage implements AutoCloseable {
      * because only {@code CONVERT} does that and {@code CONVERT} is what cannot
      * be made to work. No such database exists.
      */
-    private static void setDatabaseCharset(DataSource ds) {
+    /**
+     * Package-private, not private, and only so a test can be truthful.
+     *
+     * <p>{@code UpgradePathTest} builds a database "the way an older release
+     * would have" and then upgrades it. Its first version built that old
+     * database with raw Flyway, which skipped this step -- so on a latin1
+     * server it manufactured a half-latin1 schema that no release of soulbind
+     * has ever produced, and then reported core's correct refusal to serve one
+     * as a failure. Calling the real thing is what makes the setup's claim
+     * true; re-issuing the ALTER from the test would have been a second copy of
+     * an ordering decision that lives here.
+     */
+    static void setDatabaseCharset(DataSource ds) {
         try (java.sql.Connection c = ds.getConnection();
                 java.sql.Statement s = c.createStatement()) {
             s.execute("ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");

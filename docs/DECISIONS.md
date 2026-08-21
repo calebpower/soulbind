@@ -5761,3 +5761,58 @@ The gate has never executed end-to-end: the workstation is FreeBSD, with no
 systemd and no useradd, and the pieces were rehearsed individually against the
 real tarball in 10.8. Narrowings ledger item 11; the session run is the first
 full execution, and there it is a hard gate — no systemctl, no pass.
+
+### 10.14 — Run 14: the install gate passed, and a test blamed core for its own bug
+
+Run 14 was the first session execution of Tier 10, the clean-install gate, and
+`core-env.sh`'s container mode. It **failed**, at the MariaDB unit stage, before
+the full-stack tier ever started — so `t10` still has no session behind it.
+
+**What passed, and it is the headline:** the clean-install gate ran all ten
+steps green on a fresh guest. Unpack the real tarball, the shipped samples,
+`doctor`, the hardened systemd unit — which came up, first try, with
+`ProtectSystem=strict` and an empty capability set — three registered
+principals, and then step 8: *"core confirms one subject holding both game and
+forum identities"*. A real cross-platform link on a machine that had never seen
+soulbind, following only `docs/install.md`. The audit export contained the
+gate's own registrations and link, and the link survived a restart. That is
+§14 Phase 10's gate clause, met.
+
+Container mode worked too (narrowings ledger item 10, now discharged).
+
+**What failed:** `UpgradePathTest`, both tests, on MariaDB only — first MariaDB
+execution ever. It was committed at 21:11 and run 13 finished at 20:54, so the
+workstation had only ever run it on SQLite, where none of this applies.
+
+Core refused to boot: *"these tables cannot hold four-byte text: connector,
+audit_seq, audit, platform_kind, runtime_config, connector_capability"*.
+
+**The defect was in the test.** `migrateToOldVersion` claimed in its own first
+line to build a database "the way an older release would have", and did it with
+raw Flyway — skipping the `ALTER DATABASE` that `Storage.migrate` has run
+*before* Flyway since Phase 8. On the session's latin1-default server that
+produced a schema whose early tables were latin1 and whose later ones were not:
+a state no release of soulbind can produce, because none of them runs Flyway
+without that step. Core then refused to serve it, correctly and by design
+(8.24), and the refusal arrived as two red tests pointing at core.
+
+Fixed by calling the real code — `Storage.setDatabaseCharset` is now
+package-private for exactly this — rather than re-issuing the ALTER in the
+test. A second copy of an ordering decision is how the two come to disagree,
+and the method's claim about fidelity is now true by construction instead of by
+comment.
+
+**The accident found something worth keeping.** The state it manufactured is
+one an operator *can* reach without any help from a broken test: restore a dump
+taken from a latin1 deployment, or hand core a database somebody else built.
+Core handles it exactly right and nothing asserted that. Now something does —
+`aGenuinelyLatinSchemaIsRefused` forces the database to latin1 explicitly
+rather than relying on the server default, so it asserts the same property on
+any server, and it checks that the refusal names an offending table and points
+at the repair procedure. An operator told only "wrong charset" has to
+rediscover that the conversion needs foreign keys dropped and rebuilt around
+it.
+
+It restores the database to utf8mb4 afterwards. `freshSchema` would cover it,
+but a failure between the two would leave every later MariaDB test poisoned
+with a fault nobody would trace back here.

@@ -18,7 +18,9 @@ package dev.soulbind.core.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -113,8 +115,28 @@ class UpgradePathTest {
         return new HikariDataSource(cfg);
     }
 
-    /** Migrates only as far as {@code OLD_VERSION}, the way an older release would have. */
+    /**
+     * Migrates only as far as {@code OLD_VERSION}, the way an older release
+     * would have.
+     *
+     * <p>The charset step comes first, because that is what {@code
+     * Storage.migrate} does and has done since Phase 8 — so every table an
+     * older release created was created under a utf8mb4 database default.
+     *
+     * <p>Its absence here is what run 14 found. Without it, on a server
+     * defaulting to latin1, this built a schema whose early tables were latin1
+     * and whose later ones were not: a state no release of soulbind can
+     * produce, since none of them runs Flyway without this. Core then refused
+     * to serve it — correctly, and exactly as designed — and the refusal
+     * arrived as two red tests blaming core for a database the test had
+     * malformed. The real code is called rather than the ALTER re-issued here,
+     * so the claim in this method's first line is true by construction rather
+     * than by a comment.
+     */
     private static void migrateToOldVersion(Backend backend, HikariDataSource ds) {
+        if (backend == Backend.MARIADB) {
+            Storage.setDatabaseCharset(ds);
+        }
         Flyway.configure()
                 .dataSource(ds)
                 .locations("classpath:db/migration/common",
@@ -217,6 +239,81 @@ class UpgradePathTest {
                 ResultSet rs = s.executeQuery("SELECT COUNT(*) FROM flyway_schema_history")) {
             assertTrue(rs.next());
             return rs.getInt(1);
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("a schema that really was created latin1 is refused, and says how to repair it")
+    void aGenuinelyLatinSchemaIsRefused(Backend backend) throws Exception {
+        // Run 14 produced this state by accident -- migrateToOldVersion was
+        // skipping core's charset step -- and core refused to serve it exactly
+        // as it should. The setup bug is fixed above; the PROPERTY it stumbled
+        // into is real and worth keeping, because an operator can reach this
+        // state without any help from a broken test: restore a dump taken from
+        // a latin1 deployment, or hand core a database somebody else built.
+        //
+        // Refusing is the whole design (DECISIONS 8.24). The alternative is
+        // serving a schema that truncates the first four-byte character in
+        // somebody's display name, for some accounts and not others, months
+        // later, with no pattern to it.
+        assumeTrue(backend == Backend.MARIADB,
+                "charsets are a server concept; SQLite has no latin1 to be created under");
+
+        freshSchema(backend);
+
+        // Forced rather than inherited from the server default, so this asserts
+        // the same thing on a utf8mb4 server as on a latin1 one. The session's
+        // MariaDB runs --character-set-server=latin1, but a test that only
+        // works there is a test that stops working the day that changes.
+        try (HikariDataSource ds = dataSourceFor(backend, tempDir);
+                Connection c = ds.getConnection();
+                Statement st = c.createStatement()) {
+            st.execute("ALTER DATABASE `" + databaseName()
+                    + "` CHARACTER SET latin1 COLLATE latin1_swedish_ci");
+        }
+
+        // Flyway directly: this stands in for whatever built the schema, which
+        // by hypothesis was not this version of core.
+        try (HikariDataSource ds = dataSourceFor(backend, tempDir)) {
+            Flyway.configure()
+                    .dataSource(ds)
+                    .locations("classpath:db/migration/common",
+                            "classpath:db/migration/" + backend.configName())
+                    .baselineOnMigrate(true)
+                    .load()
+                    .migrate();
+        }
+
+        IllegalStateException refused = assertThrows(IllegalStateException.class,
+                () -> Storage.open(
+                        backend,
+                        StorageBackends.jdbcUrlFor(backend, tempDir),
+                        System.getenv("SOULBIND_TEST_MARIADB_USER"),
+                        System.getenv("SOULBIND_TEST_MARIADB_PASSWORD")).close(),
+                "core opened a schema whose tables cannot hold four-byte text. It would"
+                        + " then truncate the first emoji in somebody's display name,"
+                        + " silently, for some accounts and not others.");
+
+        String message = refused.getMessage();
+        assertTrue(message.contains("four-byte"),
+                "the refusal does not say what is wrong: " + message);
+        assertTrue(message.contains("connector"),
+                "the refusal does not name a single offending table, so an operator"
+                        + " cannot tell what to repair: " + message);
+        assertTrue(message.contains("8.24"),
+                "the refusal does not point at the repair procedure. Converting these"
+                        + " tables means dropping and rebuilding foreign keys around the"
+                        + " conversion, which nobody should have to rediscover: " + message);
+
+        // Left as found. freshSchema drops and recreates, but a database left
+        // latin1 by a failure between here and the next call would poison every
+        // MariaDB test after it with a fault nobody would trace back to here.
+        try (HikariDataSource ds = dataSourceFor(backend, tempDir);
+                Connection c = ds.getConnection();
+                Statement st = c.createStatement()) {
+            st.execute("ALTER DATABASE `" + databaseName()
+                    + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         }
     }
 }
