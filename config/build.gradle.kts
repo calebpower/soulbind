@@ -1,4 +1,7 @@
-plugins { id("soulbind.java-21") }
+plugins {
+    id("soulbind.java-21")
+    id("soulbind.licence-inventory")
+}
 
 // Release 21, not 25: this loader is shared by core (standalone, 25) and by
 // every connector that loads inside a server operator's JVM (21). The lower

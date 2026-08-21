@@ -25,7 +25,12 @@ below with their licences.
       operator can replace it, which is what satisfies the relink requirement
       in practice.
   ch.qos.logback:logback-classic ............. EPL-1.0 / LGPL-2.1 dual
-      Unmodified and unbundled, for the same reason.
+      EPL-1.0 elected. Unmodified and unbundled, for the same reason.
+  net.sf.trove4j:core ........................ LGPL-2.1
+      A transitive dependency of JDA, which uses it for its entity cache.
+      Unmodified and unbundled in lib/, for the same reason. It is not in
+      gradle/libs.versions.toml because nothing here declares it directly --
+      the generated inventory is what finds it.
 
   com.velocitypowered:velocity-api ........... MIT
       compileOnly. Not distributed: the proxy supplies it at runtime. The proxy
@@ -34,11 +39,23 @@ below with their licences.
       compileOnly. Not distributed: the analytics plugin is the host and
       supplies it at runtime.
 
-The authoritative machine-readable source for this list is
-gradle/libs.versions.toml, where every entry carries its licence, and a guard
-asserts that nothing there is missing from this file.
+The list above is the DECLARED set. The complete inventory -- around forty
+artifacts per distribution once transitive dependencies are counted -- is
+generated at build time by the `licenceInventory` Gradle task and ships as
+THIRD-PARTY.txt in every distributed artifact, beside this file and LICENSE.
 
-There is no build-time licence-inventory generator yet; §16 makes one a Phase 10
-deliverable. Until it exists, the list above is what ships, and a guard keeps it
-in step with the catalogue. docs/DECISIONS.md 10.1 records what this file
-claimed before, and for how long.
+That inventory is generated from the RESOLVED runtime classpath, and each
+licence is read from the artifact's own POM rather than from a list somebody
+maintains by hand. Three things fail the build rather than being guessed at: an
+artifact whose POM chain names no licence, a licence name that is not
+allowlisted, and a copyleft artifact that is not marked as shipping unbundled.
+Dual-licensed artifacts fail until this project records which licence it takes
+them under, because taking whichever the POM lists first is a decision about
+these obligations made by the ordering of somebody else's XML.
+
+The allowlist, the aliases and the elections are in gradle/licences.conf, each
+with its reason. gradle/libs.versions.toml remains the place a dependency is
+declared, and a guard asserts nothing there is missing from this file.
+
+docs/DECISIONS.md 10.1 records what this file claimed before a generator
+existed, and for how long.

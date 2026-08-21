@@ -21,7 +21,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | **Complete — gate passed.** `reaper test` green on both backends in one session (run 13), and Plan renders link data for a player linked through the real flow. Battery covers: the latin1 axis asserted rather than assumed, astral-plane text round-tripped and compared, T7 fuzz against a populated deployment, T8 concurrency re-run in-session on both backends, T11 transcripts for `first-time-player` and `forum-first-user`, and the T5 browser suite with the 5xx watchdog armed on every non-injection pass. `bedrock-player` declined on the plan's own conditional — departure 10 |
 | 9 | Simulated users | **Trimmed tier complete; gate met and now meaningful.** Run 12 green on both backends: three seeds × 400 actions, each reporting real work (6–8 links made, ~100 correctly refused), identical counts on both axes. Four-byte UTF-8 survives a round trip through a latin1 server. Shrinker and two nemesis classes deferred (departure 9). **One open lead:** `decisions-follow-the-rules` excluded pending diagnosis — DECISIONS 9.10 |
-| 10 | Hardening and release | **In progress** — credential rotation and audit export landed. Packaging, licence inventory, install docs, threat-model pass and the clean-install gate outstanding |
+| 10 | Hardening and release | **In progress** — credential rotation, audit export and the licence inventory landed. Packaging, install docs, threat-model pass and the clean-install gate outstanding |
 
 ## Mutation coverage
 
@@ -521,6 +521,36 @@ full duplicate with no recorded reason, and now calls it.
 malformed bodies that `rpc.sh` refuses before they reach the wire** — that is
 the whole narrowing and it covers exactly the one script.
 
+### The licence inventory — landed
+
+§16's generated third-party inventory, which `NOTICE` claimed from Phase 0 until
+Phase 8 without existing (DECISIONS 10.1). The `licenceInventory` task runs in
+`check` for every distributed module and ships `THIRD-PARTY.txt` beside
+`LICENSE` and `NOTICE` in every distribution.
+
+It inventories the **resolved runtime graph**, not the catalogue: the catalogue
+declares about a dozen libraries and core's graph is forty-two artifacts. Each
+licence is read from the artifact's own POM, walking the parent chain. Three
+things fail the build rather than being guessed — an artifact with no licence
+anywhere, a licence not allowlisted, and a copyleft artifact not marked as
+shipping unbundled.
+
+A dual-licensed artifact fails until the project records which licence it takes
+it under. The first version took whichever the POM listed first, which elected
+EPL-2.0 for Jetty when §16 says Apache-2.0 in as many words.
+
+**It found two things on its first real run, neither visible from the
+catalogue:**
+
+- **JNA 4.4.0 (LGPL-2.1)** in the Discord connector, via JDA's *voice* support.
+  The connector sends messages and applies roles and never touches a voice
+  channel, so the audio dependency is excluded rather than shipped in `lib/`
+  with a relink obligation attached.
+- **trove4j (LGPL-2.1)**, also via JDA, which uses it for its entity cache. It
+  cannot be excluded, so it ships as its own jar in `lib/`. It is not in
+  `libs.versions.toml` because nothing here declares it — exactly the transitive
+  copyleft artifact a hand-maintained `NOTICE` never mentions.
+
 ## Guards in force
 
 | Guard | Holds |
@@ -539,6 +569,7 @@ the whole narrowing and it covers exactly the one script.
 | Harness pins | Every `harness/*/pins.env` escapes the `*.env` rule, so a clone can still reproduce a stack run |
 | Copyleft packaging | No LGPL artifact the specification pins to a non-bundling scope is declared in a configuration that would bundle it |
 | Non-vacuous tiers | A tag-selected task whose module declares that tag must execute at least one test, so a tier cannot silently become zero coverage |
+| Licence inventory | Every distributed module generates one; every allowlisted licence states its packaging handling; NOTICE names the generated file |
 | Full-stack stages | The stage list, the implementations and the README table name one set; the runner still fails a stage that emits no result; no stage can report a skip |
 
 Every one is paired with a deliberately-broken fixture and has been

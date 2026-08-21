@@ -1,4 +1,7 @@
-plugins { id("soulbind.java-21") }
+plugins {
+    id("soulbind.java-21")
+    id("soulbind.licence-inventory")
+}
 
 dependencies {
     implementation(project(":connector-sdk"))

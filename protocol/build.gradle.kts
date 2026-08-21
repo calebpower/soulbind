@@ -1,4 +1,7 @@
-plugins { id("soulbind.java-21") }
+plugins {
+    id("soulbind.java-21")
+    id("soulbind.licence-inventory")
+}
 
 // protocol is deliberately dependency-light. It carries DTOs, the link-code
 // alphabet and its normalisation, HMAC request signing and schema version

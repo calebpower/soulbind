@@ -5419,3 +5419,79 @@ second one.
 **Container mode is unverified until a session run.** This workstation is
 FreeBSD and has no podman, so only the host path has executed. Stated rather
 than discovered.
+
+### 10.6 — The licence inventory, and the two things it found on its first run
+
+§16 asks for "a generated `NOTICE` + third-party licence inventory in every
+distributed artifact". 10.1 records that `NOTICE` claimed one from Phase 0 until
+Phase 8 and none existed. This is the generator.
+
+#### It inventories the resolved graph, not the catalogue
+
+Those are different lists and the difference is the entire point. The catalogue
+declares about a dozen libraries; core's runtime graph is **forty-two**
+artifacts, and the Discord connector's is its own set again. A redistributor's
+legal review needs the second list, and hand-maintaining it is precisely how it
+goes stale — which is what 10.1 is about.
+
+Each licence is read from the artifact's **own POM**, walking the parent chain,
+because most multi-module projects (Jetty, Jackson, Kotlin) declare the licence
+once on the parent. Nothing is guessed: an artifact whose chain names no licence
+fails the build until `gradle/licences.conf` records one with a reason.
+
+#### Three things fail the build
+
+An unknown licence name, an artifact with no licence anywhere, and a copyleft
+artifact not marked as shipping unbundled. §16's "new licences entering the
+graph fail the build until allowlisted with a stated reason", mechanically.
+
+The handling — `shadeable`, `unbundled`, `not-distributed` — is a **stated
+field** on each allowlisted licence rather than inferred from its name. "May
+this be shaded?" is the question §16 turns on, and inferring it from a string
+means a new licence silently gets whatever the matching decides.
+
+#### The first version let somebody else's XML decide our obligations
+
+It took whichever licence the POM listed first. For Jetty that elected
+**EPL-2.0**, when §16 says in as many words: "Jetty | EPL-2.0 / Apache-2.0 dual
+| Taken under Apache-2.0". A decision about this project's own licensing
+obligations was being made by the ordering of an XML file we do not control.
+
+A dual-licensed artifact now fails until `[dual]` records which licence this
+project takes it under, with the reason. Jetty and JNA are elected Apache-2.0;
+logback EPL-1.0.
+
+#### What it found, which is why it exists
+
+**JNA 4.4.0, LGPL-2.1, in the Discord connector.** It arrives via
+`club.minnced:opus-java` — JDA's *voice* support. JNA has been dual
+LGPL/Apache-2.0 since 4.0, but 4.4.0's POM predates that and declares LGPL and
+nothing else, so it could not be elected away.
+
+The workaround would have been to add it to `lib/` and take on the relink
+obligation. The real fix was smaller: this connector sends messages and applies
+roles and never touches a voice channel, so JDA's audio support is excluded.
+An LGPL dependency nobody chose, for a feature nobody uses, is now out of the
+graph entirely.
+
+**trove4j, LGPL-2.1, also in the Discord connector.** JDA uses it for its entity
+cache, so it cannot be excluded — it ships as its own jar in `lib/`, unmodified
+and replaceable. It is not in `gradle/libs.versions.toml`, because nothing here
+declares it: it is exactly the transitive copyleft artifact that a
+hand-maintained `NOTICE` never mentions.
+
+Neither was visible from the catalogue. Both were found on the generator's first
+real run, which is the argument for having one.
+
+#### The guard, because the generator is only as good as its coverage
+
+`LicenceInventoryGuardTest` derives from `settings.gradle.kts` that every
+distributed module applies the plugin. A module created later and never wired up
+would be outside the inventory entirely with every other check green — the same
+shape as the `NOTICE` claim it replaces. `guards` and `sim` are excluded and
+only those: neither ships.
+
+It also asserts `NOTICE` still names `THIRD-PARTY.txt`. `NoticeGuardTest` stops
+`NOTICE` claiming a generator that does not exist; this stops the inverse — the
+inline declared list quietly being presented as complete again while the graph
+grows past it.

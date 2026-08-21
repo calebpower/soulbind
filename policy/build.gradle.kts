@@ -1,4 +1,7 @@
-plugins { id("soulbind.java-21") }
+plugins {
+    id("soulbind.java-21")
+    id("soulbind.licence-inventory")
+}
 
 // NO DEPENDENCIES, and that is the design.
 //

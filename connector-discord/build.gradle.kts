@@ -1,4 +1,5 @@
 plugins {
+    id("soulbind.licence-inventory")
     id("soulbind.java-25")
     application
 }
@@ -48,7 +49,22 @@ dependencies {
     // implementation names it; the connector's logic must not, and a guard
     // would catch it if it did. Keeping it off the api surface is what stops a
     // future consumer compiling against a chat library by accident.
-    implementation(libs.jda)
+    // JDA's voice support is excluded, and it is a LICENSING decision as much
+    // as a size one.
+    //
+    // club.minnced:opus-java pulls net.java.dev.jna:jna 4.4.0, whose POM
+    // declares LGPL-2.1 and nothing else -- JNA only became dual-licensed with
+    // Apache-2.0 in later releases, and 4.4.0's metadata predates that. §16
+    // forbids an LGPL artifact inside a fat jar, so keeping it would mean
+    // shipping a separate jar in lib/ and taking on the relink obligation for
+    // a library this connector does not use: it sends messages and applies
+    // roles, and never touches a voice channel.
+    //
+    // Found by the licence inventory generator rather than by reading the
+    // dependency tree, which is the point of having one.
+    implementation(libs.jda) {
+        exclude(group = "club.minnced", module = "opus-java")
+    }
 
     runtimeOnly(libs.logback.classic)
 }
