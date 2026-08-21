@@ -1,0 +1,47 @@
+# soulbind Discord connector configuration.
+#
+# Copyright (c) 2026 Caleb L. Power. Apache-2.0; see LICENSE.
+#
+# Install to /etc/soulbind/discord.toml, mode 0640, owned root:soulbind.
+# An unknown key is a load error rather than something silently ignored.
+
+[core]
+# Where this connector reaches core. Loopback if they share a host, which is
+# the usual arrangement -- the connector transport is not TLS-terminated and
+# should not cross a network without something in front of it.
+url = "http://127.0.0.1:7180"
+
+# credential: NOT here. Read from SOULBIND_CORE_CREDENTIAL, which the systemd
+# unit loads from /etc/soulbind/discord.env (mode 0600). Core printed it once
+# at registration and kept only the hash.
+
+[platform]
+# token: NOT here either. SOULBIND_PLATFORM_TOKEN.
+
+# The server whose commands are registered. Unset registers them globally,
+# which propagates slowly and to every server the bot is in -- during setup,
+# name the one server.
+guild = "000000000000000000"
+
+# The platform kind this connector speaks for, as core knows it.
+kind = "discord"
+
+[effector]
+# The role granted when a subject satisfies the gate below, and the gate whose
+# events drive it. Both unset means the connector displays and accepts codes
+# but changes nothing -- a reasonable first deployment.
+role = ""
+gate = ""
+
+[gate]
+# What to do when core is unreachable: "closed" (default) refuses, "open"
+# admits.
+#
+# Closed is the default because this is an enforcement point and an
+# enforcement point that fails open is not one. Choose "open" deliberately,
+# knowing that a core outage then means unrestricted access for its duration.
+failmode = "closed"
+
+[events]
+# How often to ask core for events, in seconds.
+pollseconds = 5

@@ -1,0 +1,88 @@
+# soulbind core, as a systemd service.
+#
+# Copyright (c) 2026 Caleb L. Power. Apache-2.0; see LICENSE.
+#
+# Install:
+#   /opt/soulbind/core/            the unpacked distribution
+#   /etc/soulbind/soulbind.toml    configuration, mode 0640, root:soulbind
+#   /var/lib/soulbind/             state, owned by the service user
+#
+# See docs/install.md. Reload with `systemctl daemon-reload` after editing.
+
+[Unit]
+Description=soulbind core
+Documentation=https://github.com/axonibyte/soulbind
+After=network-online.target
+Wants=network-online.target
+# MariaDB deployments should add the database here; SQLite ones must not, and
+# an After= naming a unit that does not exist is silently ignored rather than
+# an error, so it would look installed and do nothing.
+# After=mariadb.service
+
+[Service]
+Type=simple
+User=soulbind
+Group=soulbind
+
+# The start script builds the classpath from lib/, where every dependency is
+# its own jar. That is what keeps the LGPL ones -- the MariaDB driver, logback
+# -- replaceable by the operator, which is what satisfies the relink
+# requirement in practice. Replacing one is dropping a jar into lib/ and
+# restarting; nothing has to be rebuilt.
+ExecStart=/opt/soulbind/core/bin/core serve --config /etc/soulbind/soulbind.toml
+
+# The storage password comes from here, not from the config file, so it is not
+# in a file that gets copied into a bug report. The loader reads
+# SOULBIND_STORAGE_PASSWORD from the environment and prefers it over the file.
+#   EnvironmentFile=-/etc/soulbind/core.env    (mode 0600, root:soulbind)
+EnvironmentFile=-/etc/soulbind/core.env
+
+Restart=on-failure
+RestartSec=5s
+
+# --- Hardening ------------------------------------------------------------
+# This process holds every connector credential hash and the whole identity
+# graph. The list below is not boilerplate: each line is something core does
+# not need, and the ones it DOES need are called out rather than left implicit.
+
+# It writes to exactly one place.
+StateDirectory=soulbind
+ReadWritePaths=/var/lib/soulbind
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+# ^ NOT yes: the JVM writes executable pages for JIT-compiled code, and
+#   enabling this makes it fail to start rather than making it safer.
+
+# It listens on TCP and connects to a database. It has no use for anything else.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+# If core must bind below 1024, add CAP_NET_BIND_SERVICE to BOTH lines above.
+# Putting it behind a reverse proxy is the better answer -- it is an HTTP
+# service and terminating TLS is not its job.
+
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

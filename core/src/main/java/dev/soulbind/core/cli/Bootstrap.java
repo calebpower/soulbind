@@ -24,6 +24,9 @@ import dev.soulbind.core.storage.Backend;
 import dev.soulbind.core.storage.Storage;
 import dev.soulbind.protocol.Capability;
 import java.io.PrintStream;
+import dev.soulbind.core.audit.AuditEntry;
+import java.time.Clock;
+import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -58,6 +61,12 @@ public final class Bootstrap {
      */
     public static Registered register(
             Storage storage, String name, List<String> capabilityNames) {
+        return register(storage, name, capabilityNames, Clock.systemUTC());
+    }
+
+    /** Registers a connector against an explicit clock, for tests. */
+    public static Registered register(
+            Storage storage, String name, List<String> capabilityNames, Clock clock) {
 
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("a connector needs a name");
@@ -90,6 +99,30 @@ public final class Bootstrap {
         ConnectorRecord connector =
                 storage.connectors().register(name, minted.hash(), capabilities);
 
+        // Minting a credential is audited, and it was not until Phase 10 --
+        // while `connector.rotate` was, which made the log say a credential had
+        // been REPLACED with no record of it ever having been created. The
+        // javadoc below had promised this row since Phase 1: a claim about the
+        // system in a comment nothing read, which is the shape of failure this
+        // project keeps finding in its own documentation.
+        //
+        // The actor is "cli" rather than "connector:<id>". No connector is
+        // involved: this runs on the machine, against the database, as whoever
+        // has a shell there -- and recording a connector id would attribute an
+        // operator's action to something that did not take it, which is the one
+        // property audit attribution exists to protect.
+        storage.audit().append(new AuditEntry(
+                0L, clock.instant(),
+                "cli",
+                "connector.registered",
+                null, null, null,
+                Map.of(
+                        "connector", name,
+                        "connectorId", connector.id(),
+                        "capabilities", capabilities.stream()
+                                .map(Capability::wireName)
+                                .collect(java.util.stream.Collectors.joining(",")))));
+
         return new Registered(connector, minted.plaintext());
     }
 
@@ -104,10 +137,12 @@ public final class Bootstrap {
     /**
      * Prints a registration.
      *
-     * <p>The credential goes to the stream once and is not logged: an operator
-     * who loses it registers a new connector, which is a deliberate act with an
-     * audit row, rather than recovering a secret the system promised not to
-     * keep.
+     * <p>The credential goes to the stream once and is not logged. An operator
+     * who loses it rotates the connector -- {@code connector.rotate}, which
+     * replaces the credential immediately and audits doing so -- rather than
+     * recovering a secret the system promised not to keep. Before rotation
+     * existed the only recourse was registering a second connector, and this
+     * paragraph said so.
      */
     public static void report(Registered registered, PrintStream out) {
         out.println("registered " + registered.connector().name());

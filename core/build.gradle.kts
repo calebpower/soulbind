@@ -1,6 +1,7 @@
 plugins {
     id("soulbind.java-25")
     id("soulbind.licence-inventory")
+    id("soulbind.service-dist")
     application
 }
 

@@ -1,0 +1,63 @@
+# soulbind core configuration.
+#
+# Copyright (c) 2026 Caleb L. Power. Apache-2.0; see LICENSE.
+#
+# Install to /etc/soulbind/soulbind.toml, mode 0640, owned root:soulbind.
+# `soulbind doctor --config /etc/soulbind/soulbind.toml` judges an installation
+# and says what is wrong; `serve` runs the same checks before it starts, so a
+# configuration that would fail doctor does not silently come up.
+#
+# Every setting below is a real key. There are no others: an unknown key is a
+# load error rather than something silently ignored, because a typo'd setting
+# that appears to be present and does nothing is the worst of both.
+
+[server]
+# Defaults to loopback when unset, deliberately -- a default that opens a
+# socket to the whole network is not one anybody should get by omission.
+# Set this only if connectors run on other hosts, and put it behind a reverse
+# proxy if they do: this is an HTTP service and terminating TLS is not its job.
+host = "127.0.0.1"
+port = 7180
+
+[storage]
+# "sqlite" or "mariadb".
+#
+# SQLite is the default answer and is fine for a single core on one host: the
+# state is a file, backups are a file copy, and there is no second service to
+# keep running. Choose MariaDB when something else already needs the data, or
+# when the deployment has a database team and no appetite for a new kind of
+# backup.
+backend = "sqlite"
+url = "jdbc:sqlite:/var/lib/soulbind/soulbind.db"
+
+# MariaDB instead:
+#   backend = "mariadb"
+#   url = "jdbc:mariadb://127.0.0.1:3306/soulbind"
+#   user = "soulbind"
+#
+# The database must exist before first start; core creates its own tables but
+# not its own database. Core states utf8mb4 for itself and REFUSES TO BOOT if
+# the schema is not four-byte capable, because a server defaulting to latin1
+# would otherwise mangle names it cannot represent and only some accounts would
+# be affected.
+
+# NEVER put the password here.
+#
+# It is read from SOULBIND_STORAGE_PASSWORD in the environment, which the
+# systemd unit loads from /etc/soulbind/core.env (mode 0600). A password in
+# this file is a password in every copy of this file, including the one pasted
+# into a bug report.
+
+[protocol]
+# How long a signed request stays acceptable, in seconds. Bounded at both ends
+# at load: zero refuses every request including correct ones, and an unbounded
+# window makes replay protection depend entirely on the nonce store never
+# losing an entry. Raise it only if clock skew between hosts is real and
+# unfixable; the better fix is NTP.
+signaturewindowseconds = 300
+
+[linking]
+# How long a link code stays redeemable, in seconds. Too short and a person
+# cannot get from one platform to the other in time; too long and a code
+# overheard in a voice call is still good tomorrow.
+codettlseconds = 600

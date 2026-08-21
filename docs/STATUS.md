@@ -21,7 +21,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | **Complete — gate passed.** `reaper test` green on both backends in one session (run 13), and Plan renders link data for a player linked through the real flow. Battery covers: the latin1 axis asserted rather than assumed, astral-plane text round-tripped and compared, T7 fuzz against a populated deployment, T8 concurrency re-run in-session on both backends, T11 transcripts for `first-time-player` and `forum-first-user`, and the T5 browser suite with the 5xx watchdog armed on every non-injection pass. `bedrock-player` declined on the plan's own conditional — departure 10 |
 | 9 | Simulated users | **Trimmed tier complete; gate met and now meaningful.** Run 12 green on both backends: three seeds × 400 actions, each reporting real work (6–8 links made, ~100 correctly refused), identical counts on both axes. Four-byte UTF-8 survives a round trip through a latin1 server. Shrinker and two nemesis classes deferred (departure 9). **One open lead:** `decisions-follow-the-rules` excluded pending diagnosis — DECISIONS 9.10 |
-| 10 | Hardening and release | **In progress** — credential rotation, audit export and the licence inventory landed. Packaging, install docs, threat-model pass and the clean-install gate outstanding |
+| 10 | Hardening and release | **In progress** — credential rotation, audit export, licence inventory, packaging and install docs landed. `doctor` final checks, threat-model pass, T10 and the clean-install gate outstanding |
 
 ## Mutation coverage
 
@@ -551,6 +551,42 @@ catalogue:**
   `libs.versions.toml` because nothing here declares it — exactly the transitive
   copyleft artifact a hand-maintained `NOTICE` never mentions.
 
+### Packaging — landed
+
+Core and connector-discord ship as **distributions**, `bin/` plus `lib/`, not
+fat jars — departure 11. §16's rule against bundling a copyleft artifact then
+holds by construction rather than by an exclusion list, and the licence
+inventory had just demonstrated that the graph contains copyleft nobody knew
+about. `ServiceDistGuardTest` asserts the property against the built tree.
+
+connector-velocity and connector-plan are single shaded jars as §14 says,
+because a host loads one file out of `plugins/`. Their dependencies are
+**relocated** into `dev.soulbind.shaded`, so the host's own copies cannot
+collide with ours. `PluginJarGuardTest` reads the zip and asserts relocation
+happened — in both directions, since a jar bundling nothing also contains no
+unrelocated Jackson — and that the service files were renamed to match, which is
+the failure mode with no symptom.
+
+The composer package now carries its own `LICENSE`, byte-identical to the
+project's, because composer installs a package by copying its directory and a
+recipient never sees the repository root.
+
+systemd units, sample configs and sample secret files ship inside each
+distribution, scoped per module.
+
+### `docs/install.md` — landed, and it found two defects by being followed
+
+Its commands were run against the real archive rather than trusted. Two were
+wrong: `subject.inspect` takes `platformKind`/`platformId`, not `subjectId`, and
+`distTar` produced an uncompressed `.tar` while the document's first command
+said `tar -xzf`. The second was fixed on the build side.
+
+**A third defect fell out of it.** Following the document registered two
+connectors and exported the audit log, which came back empty: registering a
+connector was never audited, while rotating one was — so the log could say a
+credential had been replaced with no record of it being created.
+`Bootstrap.register`'s javadoc had promised that row since Phase 1.
+
 ## Guards in force
 
 | Guard | Holds |
@@ -569,6 +605,9 @@ catalogue:**
 | Harness pins | Every `harness/*/pins.env` escapes the `*.env` rule, so a clone can still reproduce a stack run |
 | Copyleft packaging | No LGPL artifact the specification pins to a non-bundling scope is declared in a configuration that would bundle it |
 | Non-vacuous tiers | A tag-selected task whose module declares that tag must execute at least one test, so a tier cannot silently become zero coverage |
+| Plugin jar | Dependencies relocated (both directions), service files renamed to match, no host API or copyleft classes bundled, licence files inside, no stale signatures |
+| Service distribution | Every artifact the inventory calls unbundled is its own jar in `lib/`; the classpath is explicit; the unit and samples ship, scoped to the module |
+| Composer package | Carries a byte-identical `LICENSE` and a `NOTICE`; requires no third-party PHP; excludes tests and vendor from the archive |
 | Licence inventory | Every distributed module generates one; every allowlisted licence states its packaging handling; NOTICE names the generated file |
 | Full-stack stages | The stage list, the implementations and the README table name one set; the runner still fails a stage that emits no result; no stage can report a skip |
 

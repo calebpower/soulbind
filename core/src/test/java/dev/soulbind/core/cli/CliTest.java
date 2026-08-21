@@ -198,6 +198,43 @@ class CliTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("registering a connector leaves an audit row naming it and its grant")
+    void registrationIsAudited(Backend backend) {
+        // Minting a credential was not audited until Phase 10, while rotating
+        // one was -- so the log could say a credential had been REPLACED with
+        // no record of it ever having been created. An incident review reading
+        // that log asks "when was this connector added, and with what?" first.
+        //
+        // The javadoc on Bootstrap.register had promised this row since Phase
+        // 1. It was a claim about the system living in a comment nothing read.
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            Bootstrap.register(storage, "newcomer", List.of("code-display", "effector"));
+
+            var rows = storage.audit().query(
+                    dev.soulbind.core.audit.AuditQuery.recent(10)).stream()
+                    .filter(e -> "connector.registered".equals(e.action()))
+                    .toList();
+
+            assertEquals(1, rows.size(),
+                    "registering a connector wrote " + rows.size() + " audit rows");
+
+            var row = rows.get(0);
+            assertEquals("cli", row.actor(),
+                    "the actor is not 'cli'. No connector took this action -- it ran on"
+                            + " the machine against the database -- and attributing it to"
+                            + " a connector id would credit something that did not do it,"
+                            + " which is the one property audit attribution protects.");
+            assertEquals("newcomer", row.detail().get("connector"));
+            assertTrue(String.valueOf(row.detail().get("capabilities")).contains("code-display"),
+                    "the audit row does not record what the credential was granted, which"
+                            + " is half of what makes it worth reading: " + row.detail());
+            assertTrue(String.valueOf(row.detail().get("capabilities")).contains("effector"),
+                    "only some of the granted capabilities were recorded: " + row.detail());
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
     @DisplayName("registering mints a credential that authenticates, and prints it once")
     void registerMintsWorkingCredential(Backend backend) {
         try (Storage storage = StorageBackends.open(backend, tempDir)) {

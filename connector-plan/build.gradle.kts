@@ -1,6 +1,7 @@
 plugins {
     id("soulbind.java-21")
     id("soulbind.licence-inventory")
+    id("soulbind.plugin-jar")
 }
 
 dependencies {

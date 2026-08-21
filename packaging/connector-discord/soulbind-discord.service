@@ -1,0 +1,72 @@
+# The soulbind Discord connector, as a systemd service.
+#
+# Copyright (c) 2026 Caleb L. Power. Apache-2.0; see LICENSE.
+#
+# Install:
+#   /opt/soulbind/connector-discord/   the unpacked distribution
+#   /etc/soulbind/discord.toml         configuration, mode 0640, root:soulbind
+#
+# See docs/install.md.
+
+[Unit]
+Description=soulbind Discord connector
+Documentation=https://github.com/axonibyte/soulbind
+After=network-online.target soulbind-core.service
+Wants=network-online.target
+# NOT Requires=: the connector is designed to survive core being down and to
+# reconnect. Making it Requires= would take the connector down with core and
+# turn a brief core restart into a chat integration that stopped responding.
+
+[Service]
+Type=simple
+User=soulbind
+Group=soulbind
+
+# The config path is POSITIONAL, not a --config flag: this connector's entry
+# point takes argv[0] and defaults to soulbind-discord.toml in the working
+# directory, which under systemd is not where the file is.
+ExecStart=/opt/soulbind/connector-discord/bin/connector-discord /etc/soulbind/discord.toml
+
+# The bot token and the core credential both live here rather than in the
+# config file. A bot token in a file somebody pastes into an issue is a bot
+# somebody else controls.
+EnvironmentFile=-/etc/soulbind/discord.env
+
+Restart=on-failure
+RestartSec=5s
+
+# --- Hardening ------------------------------------------------------------
+# It holds a bot token and a core credential, and it talks to two networks.
+# It has no state of its own: nothing here needs to be writable.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+# ^ NOT yes: the JVM JIT writes executable pages.
+
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

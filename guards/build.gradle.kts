@@ -27,8 +27,26 @@ val inspectedModules = listOf(
     ":connector-discord", ":connector-velocity", ":connector-plan",
 )
 
+// Modules whose SHADED ARTIFACT a guard inspects.
+//
+// PluginJarGuardTest reads the built jar -- relocation, host APIs, copyleft
+// classes -- and none of that exists before shadowJar has run. The same failure
+// mode as the release-level guard above: without this the guard would inspect
+// whatever an earlier build left on disk, or nothing.
+val shadedModules = listOf(":connector-velocity", ":connector-plan")
+
+// Modules whose INSTALLED DISTRIBUTION a guard inspects.
+//
+// ServiceDistGuardTest reads lib/ to assert the copyleft artifacts arrived as
+// their own replaceable jars -- the property §16's unbundling rule exists for
+// -- and that the unit file and licence files shipped. None of that exists
+// before installDist.
+val distributedModules = listOf(":core", ":connector-discord")
+
 tasks.withType<Test>().configureEach {
     dependsOn(inspectedModules.map { "$it:classes" })
+    dependsOn(shadedModules.map { "$it:shadowJar" })
+    dependsOn(distributedModules.map { "$it:installDist" })
 
     // The repository root, because a guard's subject is the whole tree.
     systemProperty("soulbind.repoRoot", rootProject.projectDir.absolutePath)

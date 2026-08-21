@@ -5495,3 +5495,121 @@ It also asserts `NOTICE` still names `THIRD-PARTY.txt`. `NoticeGuardTest` stops
 `NOTICE` claiming a generator that does not exist; this stops the inverse — the
 inline declared list quietly being presented as complete again while the graph
 grows past it.
+
+### 10.7 — Packaging, and why the services are not fat jars
+
+§14 Phase 10 says "fat JARs". Core and connector-discord ship as
+distributions — `bin/` plus `lib/` — instead. Departure 11, and the reasons in
+order of weight:
+
+**§16's rule holds by construction rather than by a list.** No LGPL artifact may
+sit inside a shaded artifact. In this layout every dependency is already its own
+file, so there is nothing to exclude and nothing to get wrong. In a fat jar the
+rule would hold by an exclusion list — a thing that can be silently wrong in the
+direction of a licence violation. 10.6 is the argument: the inventory found two
+copyleft artifacts in the graph that nobody knew were there, and packaging that
+depends on knowing is packaging that depends on the thing that just failed.
+
+**`META-INF/services` merging is a silent failure.** Javalin, Jetty, Flyway and
+the JDBC drivers all register through it. Getting the merge wrong drops a
+services file rather than failing the build, and the symptom is "no suitable
+driver" on an operator's machine.
+
+**There is no operator benefit on the other side.** A systemd unit runs a start
+script either way, and this is already the layout the full-stack and forum tiers
+have run core from since Phase 7 — so it is the exercised path, not a second
+artifact that only the release gate touches.
+
+`ServiceDistGuardTest` asserts the property the departure is justified by, and
+asserts it against the built tree: every artifact the generated inventory calls
+unbundled really is its own jar in `lib/`, and the start script really does
+build its classpath from there.
+
+Its first version guessed jar names from artifact ids and got trove4j wrong —
+its Maven artifact is literally named `core`, so the file is `core-3.1.0.jar`.
+It now derives the expectation from the module's own `THIRD-PARTY.txt`, which is
+better than the guess it replaced: it ties the claim in the legal document
+directly to the bytes on disk.
+
+#### The plugins are shaded, and relocated
+
+A host loads one jar out of `plugins/` and there is no `lib/` to unbundle into,
+so connector-velocity and connector-plan are single files as §14 says. Both
+graphs are seven artifacts and entirely permissive, so §16's rule costs nothing
+there.
+
+They are **relocated**, not shaded flat. The jar loads into a JVM that has its
+own libraries — and connector-plan loads into Plan, which loads into a proxy —
+so a flat shade leaves it to the host's classloading to decide which copy our
+code binds to. That decides differently on different host builds and surfaces as
+a `LinkageError` on somebody else's machine.
+
+What is claimed is narrow: relocation makes the collision impossible, not that
+the plugin works against every host build. `PluginJarGuardTest` asserts
+relocation actually happened by reading the zip — both that nothing sits at an
+original path *and* that something sits under `dev/soulbind/shaded/`, because a
+jar bundling nothing at all also contains no unrelocated Jackson. It also
+asserts the service files were renamed to match, which is the failure mode with
+no symptom: a `ServiceLoader` lookup that finds nothing and says nothing.
+
+`§16`'s "artifact-content check asserts no LGPL classes appear inside shaded
+outputs" is in there too. It could not be written until there were shaded
+outputs.
+
+#### The composer package needed the same treatment for a different reason
+
+Composer installs a package by copying its directory, so somebody receiving the
+Flarum connector gets `connector-flarum/` and nothing above it. The repository
+root's `LICENSE` is not something they have. It now carries its own, and
+`ComposerPackageGuardTest` asserts it is byte-identical — a copy that drifts
+from the licence it claims to be is worse than a reference, because it looks
+authoritative.
+
+Its `NOTICE` says the package bundles no third-party code, which is why it has
+no generated inventory: its dependency graph is empty by construction. That is
+the kind of statement that quietly stops being true, so the guard fails if
+`require` grows anything beyond `php`, `ext-*` and `flarum/core`.
+
+### 10.8 — Two defects the install document found by being followed
+
+The gate is a clean install on a fresh machine following only `docs/install.md`.
+Rather than wait for the VM, its commands were run against the real archive on
+the workstation. Two were wrong:
+
+**`subject.inspect` takes a platform identity, not a subject id.** The document
+said `{"subjectId": …}`; the operation's payload is `platformKind` and
+`platformId`. A connector asking usually knows only the account in front of it,
+and requiring a lookup first would make every caller do two round trips to
+answer one question — so the document was wrong about the shape of the thing it
+was recommending as the verification step.
+
+**`distTar` produces an uncompressed `.tar`.** The document opened with
+`tar -xzf core-*.tar.gz`, which is the first real command an operator runs, and
+it would have failed. Fixed on the build side rather than the document side: the
+distributions are gzipped now and the extension says so.
+
+### 10.9 — Registering a connector was not audited, and a comment said it was
+
+Running the install document end to end registered two connectors and then
+exported the audit log. It came back **empty**.
+
+`Bootstrap.register` mints a credential and writes no audit row. Meanwhile
+`connector.rotate`, landed earlier this phase, does — so the log could record
+that a credential had been *replaced* with no record of it ever having been
+created. "When was this connector added, and with what capabilities?" is the
+first question an incident review asks.
+
+The javadoc on `Bootstrap.register` had said, since Phase 1, that losing a
+credential means registering a new connector — "a deliberate act **with an audit
+row**". There was no audit row. A claim about the system living in a comment
+that nothing read, which is the third time this phase has found that exact
+shape: `NOTICE`'s generator (10.1), the plugin relocation that was going to be a
+comment (10.7), and this.
+
+The actor is `cli`, not `connector:<id>`. No connector takes this action — it
+runs on the machine, against the database, as whoever has a shell there — and
+recording a connector id would attribute an operator's action to something that
+did not take it, which is the one property audit attribution exists to protect.
+
+That javadoc is also updated: rotation exists now, so losing a credential no
+longer means registering a second connector.

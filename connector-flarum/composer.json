@@ -43,5 +43,21 @@
         "allow-plugins": {
             "flarum/extension-manager-composer-plugin": false
         }
+    },
+    "homepage": "https://github.com/axonibyte/soulbind",
+    "authors": [
+        {
+            "name": "Caleb L. Power"
+        }
+    ],
+    "archive": {
+        "exclude": [
+            "/tests",
+            "/build",
+            "/vendor",
+            "/infection.json5",
+            "/phpunit.xml",
+            "/phpunit-hostile.xml"
+        ]
     }
 }

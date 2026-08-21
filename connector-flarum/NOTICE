@@ -1,0 +1,31 @@
+soulbind — Flarum connector
+Copyright (c) 2026 Caleb L. Power
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+THIRD-PARTY COMPONENTS
+
+This package bundles no third-party code. Everything it needs at runtime is
+supplied by the host:
+
+  flarum/core .......... MIT
+      The host application. Declared in composer.json as a requirement, never
+      vendored here, and supplied by the forum this extension installs into.
+
+  ext-mbstring, ext-hash, ext-json, ext-curl
+      PHP extensions, part of the PHP distribution and licensed under the PHP
+      License. Required rather than bundled.
+
+The development requirements -- PHPUnit, and the pinned Infection PHAR the
+mutation battery fetches -- are not distributed with this package and do not
+appear in an installed extension.
+
+This is why there is no generated THIRD-PARTY.txt beside this file, unlike the
+Java artifacts: the generator inventories a resolved dependency graph, and this
+package's is empty by construction. If a PHP dependency is ever added, that
+stops being true and this file stops being accurate -- ComposerPackageGuardTest
+fails if composer.json's `require` grows anything beyond php, ext-*, and
+flarum/core.
+
+LICENSE here is byte-identical to the repository's, and a guard asserts it. A
+copy that drifts from the licence it claims to be is worse than a reference.
