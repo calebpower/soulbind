@@ -1,0 +1,37 @@
+# Every principal the harnesses register, and what it must be able to do.
+#
+#     <name> | <capabilities> | <operations it must be permitted>
+#
+# ONE PLACE, because the alternative cost two session runs. Moving
+# `identity.describe` from `code-display` to `link-state-reader` (8.27) broke
+# four callers; two were found by review, the third by run 5 and the fourth by
+# run 6 -- roughly an hour of battery time to learn what one repository-wide
+# grep would have said in a second. DECISIONS 9.8 and 10.3.
+#
+# `credential-smoke.sh` reads this, registers each principal against a real core
+# on SQLite, and attempts each listed operation -- failing on a
+# `missing-capability` refusal and on nothing else. It takes about thirty
+# seconds and needs no container, no proxy and no forum.
+#
+# A guard asserts every `--capabilities` list in the harness scripts appears
+# here, so a grant that drifts out of this table is caught by `./gradlew build`
+# rather than by a session.
+#
+# WHAT IT DOES NOT ASSERT: that a principal holds no MORE than it needs. That is
+# a real property and a different test -- attempting every operation a principal
+# should be refused would need the whole matrix, which AuthorizationMatrixTest
+# already covers at the unit level.
+
+# --- the forum tier ---------------------------------------------------------
+forum        | code-display,code-entry,enforcement-point,link-state-reader          | code.issue identity.describe decide
+harness      | code-display,code-entry,config-management,enforcement-point,link-state-reader | code.issue identity.describe decide rule.set audit.query
+
+# --- the full-stack tier ----------------------------------------------------
+proxy        | code-display,code-entry,enforcement-point                            | code.issue decide
+fs-harness   | code-entry,config-management,enforcement-point                       | decide rule.set audit.query
+chat         | code-display,code-entry,link-state-reader                            | code.issue identity.describe
+plan         | link-state-reader                                                    | identity.describe
+
+# --- the simulated-user tier ------------------------------------------------
+sim-actor    | code-display,code-entry,enforcement-point,link-state-reader          | code.issue identity.describe decide
+sim-admin    | config-management,link-state-reader,code-entry,enforcement-point     | identity.describe decide rule.set config.set audit.query

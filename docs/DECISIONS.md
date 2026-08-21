@@ -5225,3 +5225,58 @@ The MariaDB half only runs where MariaDB does, so on a workstation this is a
 SQLite-only assertion. That is the same narrowing every storage test carries and
 it is the reason the battery exists — but it is worth saying plainly, because
 the defect this test was written for was specifically a MariaDB one.
+
+### 10.3 — One place for a grant, and thirty seconds to check it
+
+Moving `identity.describe` from `code-display` to `link-state-reader` broke four
+callers. Two were found by review, the third by a session run and the fourth by
+the session run after that — roughly an hour of battery time to learn what one
+repository-wide search would have answered immediately (9.8).
+
+Three things now close that, and they close different halves of it.
+
+**`harness/principals.txt`** is the one place a grant is written down: every
+principal the harnesses register, the capabilities it holds, and the operations
+it must be permitted.
+
+**`harness/credential-smoke.sh`** registers each of them against a real core on
+SQLite and attempts each listed operation. Twenty-four checks across eight
+principals, about thirty seconds, no container and no proxy. Mutation-checked by
+removing `link-state-reader` from `chat` — precisely the 8.27 regression — which
+it reports as *"FAIL chat may not identity.describe -- it holds
+code-display,code-entry"*.
+
+**`PrincipalDriftGuardTest`** asserts every `--capabilities` list in the harness
+scripts appears in the table, so a grant changed in a shell script and nowhere
+else fails `./gradlew build` rather than a session.
+
+#### The only failure the smoke reports is `missing-capability`
+
+Every other refusal is expected. The payloads it sends are deliberately minimal
+and often wrong for the operation, and core is entitled to reject them on their
+contents — a `MALFORMED` refusal means the request reached the dispatcher, which
+means the capability was accepted, which is the whole question.
+
+Asserting "the operation succeeded" would need valid arguments for every
+operation: a second implementation of the protocol, in shell, that would drift
+from the first. "Was not refused for lack of a capability" needs none of that
+and is exactly the property that broke.
+
+#### What it deliberately does not assert
+
+That a principal holds no **more** than it needs. That is a real property and a
+different test — it would mean attempting every operation each principal should
+be refused, which is the whole matrix, and `AuthorizationMatrixTest` already
+covers that at the unit level against the authorizer itself.
+
+#### The check that was checking nothing
+
+Two attempts to mutation-check the guard reported it passing, and I nearly
+recorded it as broken. The replacement string in my check did not match the
+file — a trailing backslash — so the mutation was a silent no-op and the guard
+was correctly reporting no drift, because there was none.
+
+Caught by adding `assert old in s` to the mutation itself. The lesson is the
+one this session keeps producing from a new angle: **a mutation check needs its
+own assertion that the mutation applied**, or a green result means "the tool
+found nothing" and "the tool was handed nothing" indistinguishably.
