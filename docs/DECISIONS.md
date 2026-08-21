@@ -5081,3 +5081,40 @@ accumulated state at the same time, which is the whole reason the stage exists.
 
 Two things pulling the same way is usually the sign that the ordering is the
 real answer and the machinery was the workaround.
+
+### 8.30 — The battery has a live dependency on GitHub
+
+Run 11 failed at the forum tier with:
+
+```
+The "https://api.github.com/repos/symfony/css-selector/zipball/..." file
+could not be downloaded (HTTP/2 504)
+```
+
+Not a defect. GitHub returned a gateway error while composer was installing
+Flarum's dependency tree, and a re-run succeeded. Recorded because the
+*classification* took a moment and the fragility is real.
+
+**Everything about the versions is pinned.** `harness/flarum/site-composer.lock`
+fixes exactly which packages install, and the container images and jars are
+digest- and checksum-pinned. What is not pinned is **availability**: the install
+still fetches from packagist and GitHub at run time, so the battery cannot
+complete while either is having a bad minute.
+
+That is a different property from reproducibility, and the repository is strong
+on the first and silent on the second. A run that fails this way is
+indistinguishable, at a glance, from a run that found something — which is the
+part worth having written down, because the reflex on a red battery should be to
+read the failure rather than to re-run it, and this is one of the few cases
+where re-running is the correct response.
+
+**Not fixed here.** The honest options are a composer cache on the never-rolled-
+back dataset — which the Gradle cache already does for the Java side, and which
+would make this a first-run-only exposure — or vendoring Flarum's tree, which is
+several hundred packages this project does not own. The first is worth doing and
+is not a five-minute job, so it is written down rather than half-done.
+
+Worth noting the asymmetry it exposes: the Java side fetches through
+`$REAPER_CACHE_GRADLE`, which survives resets, so a second run needs no network
+for dependencies. The PHP side has no equivalent, and that is why this failure
+mode is specific to the forum tier.
