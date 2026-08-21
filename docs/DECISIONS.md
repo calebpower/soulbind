@@ -7027,3 +7027,88 @@ a live core through it. A `clearReplies()` that stopped clearing, or a
 `registerCommands` that appended instead of replacing, would leave a full-stack
 stage asserting against a previous scenario's state — and passing. Its six
 survivors are now dead.
+
+### 10.29 — The JdaSurface seam: 62 untestable mutants down to 36
+
+`JdaSurface` opens by saying of itself:
+
+> **This is the only file in the connector that names a library type.**
+> Everything with a decision in it lives above the seam and is tested against
+> the scripted surface; what is here is translation, and translation is the part
+> a fake cannot check anyway.
+>
+> Kept deliberately mechanical for that reason. If a behaviour worth asserting
+> appears in this file, it belongs in `ChatConnector`.
+
+That was true of its translation and **false of its role handling**. `withRole`
+carried four distinct failure paths — no server, no such role, no such member,
+the platform threw — each returning false with its own operator-facing message,
+and reaching any of them meant faking JDA's `RestAction` chain. Sixty-two
+mutants in the file, executed by nothing.
+
+**This is the shape the Velocity group effector had when it shipped inert.**
+`GroupEffector` was fixed by taking its platform work as lambdas so every
+behaviour except the lookup is testable without the plugin on the classpath.
+Same fix, applied to the connector with the harder platform to fake.
+
+#### What moved
+
+`GuildRoles` holds every decision — the four guards and their messages, the
+"already held is still true" contract on both grant and revoke, and the
+holders path's "empty on failure, never partial". It talks to a `Platform`
+interface of four methods over strings and booleans. `JdaSurface.JdaPlatform`
+implements that in JDA and now contains no decision at all, which is what the
+file always claimed.
+
+**One resolution per operation, deliberately.** `Platform.resolve` answers all
+four questions in one call. Asking them separately would turn one member
+retrieval into four, against a rate-limited API, on every event — a real cost
+for an interface that reads slightly better.
+
+**And one cost paid rather than hidden:** the mutating path now retrieves the
+member twice, because the handles cannot cross the seam without putting library
+types back on the other side of it. JDA answers `retrieveMemberById` from its
+member cache when `GUILD_MEMBERS` is on, and a role changes once per link rather
+than once per message. Stated in the source at the method.
+
+A second extraction followed the same reasoning `awaitGuild` had already been
+given and should have had at the same time: `requireGuildVisible` is the refusal
+to register globally when a named server never appears, and its message — which
+names the id typed, the time waited, what would otherwise have happened, and
+both ways out — was reachable only with a live gateway.
+
+Finally a package-private constructor taking a `Platform`, so the four
+one-line `ChatSurface` role methods can be shown to route to the operation of
+the same name. Four lines a reader checks by eye and gets wrong: a grant wired
+to `revoke` would take the role off everybody who earned it.
+
+#### Result
+
+| | Start of 10.28 | After 10.28 | After the seam |
+|---|---|---|---|
+| Killed | 131 (48%) | 176 (64%) | **228 (76%)** |
+| Executed by nothing | 114 | 96 | **70** |
+| Survived | 28 | 1 | **1** |
+| Test strength | 82% | 99% | **99%** |
+
+The one survivor is the equivalent mutant recorded in 10.28.
+
+Four survivors appeared mid-way and were then killed, and they are worth naming
+because they were **not** new weaknesses: they were mutants that had been
+sitting in the no-coverage column, which the new tests promoted to "executed and
+not noticed" before the assertions caught up. A number that gets worse on the
+way to getting better is the number being honest.
+
+#### Still uncovered, and the distinction still matters
+
+* **`JdaSurface` 22 and `JdaPlatform` 14.** Command building, the reply
+  success path, `adopt`, and the lookups. This is translation now, in fact and
+  not only in the javadoc.
+* **`ScriptedDriver` 15.** The full-stack tier runs it out of process; PIT
+  cannot see that.
+* **`Main` 19.** Constructs JDA and blocks.
+
+`adopt` is the one worth revisiting: it decides administrator status from the
+platform's own permission rather than from a role name, and that decision is
+still untested. It needs a `SlashCommandInteractionEvent`, which is the single
+hardest JDA type to stand up, so it is named here rather than left as a number.

@@ -60,10 +60,32 @@ public final class JdaSurface implements ChatSurface {
     private final Map<Invocation, net.dv8tion.jda.api.interactions.callbacks.IReplyCallback>
             pending = new ConcurrentHashMap<>();
 
+    /** The decisions, over a platform this class supplies. */
+    private final GuildRoles roles;
+
     public JdaSurface(JDA jda, String guildId, BiConsumer<String, Throwable> log) {
         this.jda = jda;
         this.guildId = guildId;
         this.log = log;
+        this.roles = new GuildRoles(new JdaPlatform(), log);
+    }
+
+    /**
+     * With a platform supplied, so the routing itself can be tested.
+     *
+     * <p>The four {@code ChatSurface} role methods are one line each and every
+     * one of them delegates. That is exactly the kind of code a reader checks by
+     * eye and gets wrong: a grant wired to {@code revoke} would take the role
+     * off everybody who earned it, and nothing but a live Discord would have
+     * said so.
+     */
+    JdaSurface(
+            JDA jda, String guildId, GuildRoles.Platform platform,
+            BiConsumer<String, Throwable> log) {
+        this.jda = jda;
+        this.guildId = guildId;
+        this.log = log;
+        this.roles = new GuildRoles(platform, log);
     }
 
     /** Remembers where to send a reply, and returns the invocation to hand upward. */
@@ -107,62 +129,108 @@ public final class JdaSurface implements ChatSurface {
 
     @Override
     public boolean grantRole(String platformId, String role) {
-        return withRole(platformId, role, (guild, member, resolved) -> {
-            if (member.getRoles().contains(resolved)) {
-                // Held already. TRUE, because the contract is whether the role
-                // is held afterwards -- not whether this call changed anything.
-                return true;
-            }
-            guild.addRoleToMember(member, resolved).complete();
-            return true;
-        });
+        return roles.grant(platformId, role);
     }
 
     @Override
     public boolean revokeRole(String platformId, String role) {
-        return withRole(platformId, role, (guild, member, resolved) -> {
-            if (!member.getRoles().contains(resolved)) {
-                return true;
-            }
-            guild.removeRoleFromMember(member, resolved).complete();
-            return true;
-        });
+        return roles.revoke(platformId, role);
     }
 
     @Override
     public boolean hasRole(String platformId, String role) {
-        return withRole(platformId, role,
-                (guild, member, resolved) -> member.getRoles().contains(resolved));
+        return roles.has(platformId, role);
     }
 
     @Override
     public List<String> membersWithRole(String role) {
-        if (role == null || role.isBlank()) {
-            return List.of();
+        return roles.holders(role);
+    }
+
+    /**
+     * The library half of the role mechanics: lookups and calls, no decisions.
+     *
+     * <p>Everything that was a decision moved to {@link GuildRoles}, which is
+     * testable without a Discord. What is left here is the part a fake could
+     * not check anyway — which is what this file always claimed to be, and was
+     * not.
+     */
+    private final class JdaPlatform implements GuildRoles.Platform {
+
+        /**
+         * One lookup answering every question the decisions ask.
+         *
+         * <p>A null {@code platformId} means "about the role, not about anybody"
+         * — the holders path — and skips the member retrieval rather than
+         * retrieving nothing.
+         */
+        @Override
+        public GuildRoles.Pair resolve(String platformId, String role) {
+            Guild guild = guild().orElse(null);
+            if (guild == null) {
+                return new GuildRoles.Pair(false, false, false, false);
+            }
+            List<Role> found = guild.getRolesByName(role, true);
+            if (found.isEmpty()) {
+                return new GuildRoles.Pair(true, false, false, false);
+            }
+            if (platformId == null) {
+                return new GuildRoles.Pair(true, true, false, false);
+            }
+            Member member = guild.retrieveMemberById(platformId)
+                    .timeout(10, TimeUnit.SECONDS).complete();
+            if (member == null) {
+                return new GuildRoles.Pair(true, true, false, false);
+            }
+            return new GuildRoles.Pair(
+                    true, true, true, member.getRoles().contains(found.get(0)));
         }
-        Guild guild = guild().orElse(null);
-        if (guild == null) {
-            return List.of();
+
+        /**
+         * Resolves again before mutating, and that is a real cost stated rather
+         * than hidden: on the path that actually changes something, the member
+         * is retrieved twice.
+         *
+         * <p>The connector requests {@code GUILD_MEMBERS} and JDA answers
+         * {@code retrieveMemberById} from its member cache when it can, so the
+         * second lookup is usually not a round trip — and a role changes once
+         * per link, not once per message. Threading the handles out of
+         * {@code resolve} instead would put library types back across the seam,
+         * which is the whole thing being paid for here.
+         */
+        @Override
+        public void addRole(String platformId, String role) {
+            each(platformId, role, (guild, member, resolved) ->
+                    guild.addRoleToMember(member, resolved).complete());
         }
-        List<Role> roles = guild.getRolesByName(role, true);
-        if (roles.isEmpty()) {
-            // A role that does not exist and a role nobody holds are the same
-            // answer for reconciliation, and distinguishing them here would
-            // make every caller handle a case with no different action.
-            return List.of();
+
+        @Override
+        public void removeRole(String platformId, String role) {
+            each(platformId, role, (guild, member, resolved) ->
+                    guild.removeRoleFromMember(member, resolved).complete());
         }
-        try {
+
+        @Override
+        public List<String> holders(String role) {
+            Guild guild = guild().orElseThrow();
+            List<Role> found = guild.getRolesByName(role, true);
             // loadMembers rather than the cache: GUILD_MEMBERS is requested but
             // the cache is populated lazily, and reconciling against a partial
             // view would revoke nothing from the members it had not seen --
             // silently, and differently on each restart.
-            return guild.findMembers(member -> member.getRoles().contains(roles.get(0)))
+            return guild.findMembers(member -> member.getRoles().contains(found.get(0)))
                     .get().stream()
                     .map(member -> member.getUser().getId())
                     .toList();
-        } catch (RuntimeException e) {
-            log.accept("could not list holders of role '" + role + "'", e);
-            return List.of();
+        }
+
+        /** Re-resolves the three handles and hands them to the caller. */
+        private void each(String platformId, String role, RoleWork work) {
+            Guild guild = guild().orElseThrow();
+            Role resolved = guild.getRolesByName(role, true).get(0);
+            Member member = guild.retrieveMemberById(platformId)
+                    .timeout(10, TimeUnit.SECONDS).complete();
+            work.apply(guild, member, resolved);
         }
     }
 
@@ -213,17 +281,10 @@ public final class JdaSurface implements ChatSurface {
         // misconfiguration hidden from them by the very mechanism meant to be
         // helpful. Global registration remains available -- by LEAVING
         // platform.guild unset, which is a choice rather than an accident.
-        if (wantsGuild && !awaitGuild(
-                () -> guild().isPresent(), GUILD_WAIT_ATTEMPTS, JdaSurface::pause)) {
-            throw new IllegalStateException(
-                    "platform.guild names '" + guildId + "' and this bot cannot see that"
-                            + " server after " + (GUILD_WAIT_ATTEMPTS * GUILD_WAIT_MILLIS / 1000)
-                            + "s. Registering the commands globally instead would put them in"
-                            + " every server this bot is in, for up to an hour, and leave them"
-                            + " there -- so this refuses rather than quietly doing something"
-                            + " other than what the configuration asks. Check that the bot has"
-                            + " been invited to that server and that the id is correct; or"
-                            + " unset platform.guild to register globally on purpose.");
+        if (wantsGuild) {
+            requireGuildVisible(
+                    guildId, () -> guild().isPresent(), GUILD_WAIT_ATTEMPTS,
+                    GUILD_WAIT_MILLIS, JdaSurface::pause);
         }
 
         Guild guild = wantsGuild ? guild().orElseThrow() : null;
@@ -264,6 +325,43 @@ public final class JdaSurface implements ChatSurface {
         }
     }
 
+    /**
+     * Refuses to continue if the named server never becomes visible.
+     *
+     * <p>Extracted for the same reason {@link #awaitGuild} was, and it should
+     * have gone at the same time: the decision is the refusal, and the refusal
+     * was reachable only with a live gateway. The message is long because it is
+     * the whole of what an operator gets — it names the id they typed, the time
+     * spent, what would otherwise have happened, and both ways out.
+     *
+     * @param guildId the configured server, for the message
+     * @param visible whether it can be seen right now
+     * @param attempts how many times to look
+     * @param waitMillis how long each look waits, for the message only
+     * @param pause what to do between looks
+     * @throws IllegalStateException if it never appeared
+     */
+    static void requireGuildVisible(
+            String guildId,
+            BooleanSupplier visible,
+            int attempts,
+            long waitMillis,
+            Runnable pause) {
+
+        if (awaitGuild(visible, attempts, pause)) {
+            return;
+        }
+        throw new IllegalStateException(
+                "platform.guild names '" + guildId + "' and this bot cannot see that"
+                        + " server after " + (attempts * waitMillis / 1000)
+                        + "s. Registering the commands globally instead would put them in"
+                        + " every server this bot is in, for up to an hour, and leave them"
+                        + " there -- so this refuses rather than quietly doing something"
+                        + " other than what the configuration asks. Check that the bot has"
+                        + " been invited to that server and that the id is correct; or"
+                        + " unset platform.guild to register globally on purpose.");
+    }
+
     /** Sleeps between looks, restoring the interrupt rather than swallowing it. */
     private static void pause() {
         try {
@@ -273,46 +371,14 @@ public final class JdaSurface implements ChatSurface {
         }
     }
 
+    /**
+     * What {@link JdaPlatform#each} hands its caller once the three handles are
+     * resolved. Void: whether it worked is the absence of an exception, and the
+     * decision about what that means lives in {@link GuildRoles}.
+     */
     @FunctionalInterface
     private interface RoleWork {
-        boolean apply(Guild guild, Member member, Role role);
-    }
-
-    /**
-     * Resolves the server, member and role, or reports why not.
-     *
-     * <p>Every failure returns false rather than throwing, and says which of the
-     * three was missing. "Could not grant role" is a message an operator cannot
-     * act on; "no role named X on this server" is one they can.
-     */
-    private boolean withRole(String platformId, String role, RoleWork work) {
-        Optional<Guild> guild = guild();
-        if (guild.isEmpty()) {
-            log.accept("no server configured, so roles cannot be applied", null);
-            return false;
-        }
-
-        List<Role> roles = guild.get().getRolesByName(role, true);
-        if (roles.isEmpty()) {
-            log.accept("no role named '" + role + "' on this server", null);
-            return false;
-        }
-
-        try {
-            Member member = guild.get().retrieveMemberById(platformId)
-                    .timeout(10, TimeUnit.SECONDS).complete();
-            if (member == null) {
-                log.accept("no member " + platformId + " on this server", null);
-                return false;
-            }
-            return work.apply(guild.get(), member, roles.get(0));
-        } catch (RuntimeException e) {
-            // The member left, the bot lost its permission, the gateway
-            // hiccupped. Reported and false -- the effector then does not
-            // acknowledge, and the event comes back.
-            log.accept("could not apply role '" + role + "' to " + platformId, e);
-            return false;
-        }
+        void apply(Guild guild, Member member, Role role);
     }
 
     private Optional<Guild> guild() {

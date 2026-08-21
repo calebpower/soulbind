@@ -39,13 +39,13 @@ performs exhaustively.
 executed by a test that did not notice.** After the first round of fixes: 1,632
 / 1,039 / 411 / 182, test strength 85%.
 
-**`connector-discord` swept in Phase 10: 48% to 64%, and test strength 82% to
+**`connector-discord` swept in Phase 10: 48% to 76%, and test strength 82% to
 99%** — 28 survivors to one equivalent mutant, reasoned about at the line so a
-later sweep skips it. The percentage moves less than the strength because 96
-mutants sit in code no unit test executes: `JdaSurface` (the live-platform
-adapter, 62), `Main` (19), and `ScriptedDriver` (15, which the full-stack tier
-does exercise, out of process, where PIT cannot see it). DECISIONS 10.28 names
-each and recommends the `GroupEffector`-shaped seam for `JdaSurface`.
+later sweep skips it. The role decisions came out of the live-platform adapter
+behind a `GroupEffector`-shaped seam (`GuildRoles`), which took the untestable
+count from 114 to 70. What remains uncovered is command building, the JDA
+lookups, `Main`, and `ScriptedDriver` — which the full-stack tier does exercise,
+out of process, where PIT cannot see it. DECISIONS 10.28 and 10.29.
 
 The consequential finds were an assertion pair where one string contained the
 other — so `/whoami` could mark every identity unverified and satisfy both — and
