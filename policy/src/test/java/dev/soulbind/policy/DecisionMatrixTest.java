@@ -17,6 +17,7 @@
 package dev.soulbind.policy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -160,6 +161,40 @@ class DecisionMatrixTest {
                     () -> "an operator saying 'not this person' was overridden by policy: "
                             + decision);
             assertEquals(Decision.Reason.OVERRIDE, decision.reason());
+        }
+    }
+
+    @ParameterizedTest(name = "{0} / {1}")
+    @MethodSource("matrix")
+    @DisplayName("an override for somebody else changes nothing")
+    void overrideTargetingSomebodyElseIsIgnored(SubjectSnapshot snapshot, Rule rule) {
+        // The gap mutation found: every override in this file targeted the
+        // subject under test, so `PolicyOverride.matches` returning TRUE
+        // unconditionally killed no test. That mutant is an allow-override
+        // written for one person applying to everybody in the deployment --
+        // which is the single worst thing an override can do, since operators
+        // reach for them precisely to make exceptions.
+        //
+        // Both targeting forms, because they are separate branches: an override
+        // may name a subject or an identity ref.
+        PolicyOverride otherSubject = new PolicyOverride(
+                GATE, "somebody-else", null, Effect.ALLOW, "vouched for", null);
+        PolicyOverride otherRef = new PolicyOverride(
+                GATE, null, "kind-a:someone-else", Effect.ALLOW, "vouched for", null);
+
+        Decision unaffected = PolicyEngine.decide(snapshot, rule, List.of(), NOW);
+
+        for (PolicyOverride foreign : List.of(otherSubject, otherRef)) {
+            Decision decision = PolicyEngine.decide(snapshot, rule, List.of(foreign), NOW);
+
+            assertNotEquals(
+                    Decision.Reason.OVERRIDE, decision.reason(),
+                    () -> "an override naming somebody else was applied to this subject: "
+                            + decision);
+            assertEquals(
+                    unaffected.effect(), decision.effect(),
+                    () -> "an override naming somebody else changed the outcome from "
+                            + unaffected.effect() + " to " + decision.effect());
         }
     }
 

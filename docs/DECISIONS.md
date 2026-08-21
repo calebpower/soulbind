@@ -6215,3 +6215,59 @@ real core whether a code is still redeemable. Attempting the redeem *is* the
 check, and against a broken core it would link a phantom identity and corrupt
 the graph the rest of the run asserts about. Single use is proven under real
 concurrency by the Phase 2 gate, which is the stronger test (9.4).
+
+### 10.19 — The survivor tail, chased on one module
+
+The mutation tail was recorded as known-and-unfixed: 182 mutants executed by a
+test that did not notice. This is a pass over `policy`, the module where a
+surviving mutant has the most direct consequence for a person at a gate.
+
+**80% → 98%. Seventeen survivors down to two, and both of those are
+equivalent.**
+
+#### What it found, in descending order of consequence
+
+**An override for one person applied to everybody.**
+`PolicyOverride.matches` returning `true` unconditionally killed no test —
+every override in the suite targeted the subject under test, so nothing
+asserted that an override naming somebody else is ignored. That mutant is an
+allow-override written as a one-person exception admitting the entire
+deployment, which is the worst thing an override can do, and operators reach
+for overrides precisely to make exceptions. The new assertion fails 48 ways.
+
+**The refusal wording.** The matrix asserts effects; nothing asserted `detail`.
+So the branches choosing between "you are not linked", "you are not linked and
+are missing X", and "you are missing X" all survived — swap them and a linked
+person is told to link, or an unlinked person is told about a missing platform
+and comes back still refused. This project has already shipped one message that
+sent somebody in a circle; the cost of a wrong instruction is paid by whoever
+receives it.
+
+**`Effect.fromConfigName` had no coverage at all.** It reads a rule's
+`defaultEffect` out of configuration — what happens to somebody whose
+requirements are unmet. A typo'd value silently becoming ALLOW is a gate that
+admits everybody it was written to refuse.
+
+**The factories, and why they survived is the interesting part.**
+`Rule.open` and `Rule.requiring` feed `DecisionMatrixTest`'s parameter source,
+so a factory returning `null` produced a matrix of null rules — and a null rule
+is "no rule governs this gate", which the matrix's own oracle computes
+identically. Both sides moved together and every assertion held. Not a gap in
+the matrix, which asserts decisions and does it well; the absence of anybody
+asserting that `Rule.open` returns an open rule.
+
+#### The two that remain are equivalent, and saying so is the point
+
+- `graceTtl`: `remaining <= 0` → `remaining < 0`. At exactly zero the original
+  returns 0 and the mutant returns `min(ttlSeconds, 0)`, which is 0. No input
+  distinguishes them.
+- `SubjectSnapshot`: `identityCount < 0` → `<= 0`, which rejects a snapshot of
+  zero identities. Nothing constructs one and arguably nothing should, so the
+  mutant is a slightly stricter implementation rather than a wrong one.
+
+Recorded because an unexplained survivor is a standing invitation to write a
+test that cannot fail. Both of these have been reasoned about and neither is
+worth an assertion; a future sweep should skip them rather than rediscover them.
+
+Twelve mutants killed by four new test classes, none of which was written to
+raise a number — each names the person the defect would have reached.

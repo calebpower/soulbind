@@ -39,6 +39,13 @@ performs exhaustively.
 executed by a test that did not notice.** After the first round of fixes: 1,632
 / 1,039 / 411 / 182, test strength 85%.
 
+**`policy` swept again in Phase 10 and taken from 80% to 98%** — seventeen
+survivors to two, both of which are equivalent mutants and are reasoned about in
+DECISIONS 10.19 so a later sweep skips rather than rediscovers them. The
+consequential find was `PolicyOverride.matches` returning true unconditionally:
+an allow-override written as a one-person exception, applying to the whole
+deployment, with no test noticing.
+
 The 182 are the number that matters — a test ran the line, its behaviour
 changed, nothing failed. What has been fixed and what has not is in
 DECISIONS 8.20; the short version is that the security- and correctness-relevant
