@@ -5118,3 +5118,56 @@ Worth noting the asymmetry it exposes: the Java side fetches through
 `$REAPER_CACHE_GRADLE`, which survives resets, so a second run needs no network
 for dependencies. The PHP side has no equivalent, and that is why this failure
 mode is specific to the forum tier.
+
+### 8.31 — Finishing Phase 8: a watchdog, a journey, and a stretch goal declined
+
+Three items remained. Each resolved differently, and the differences are the
+point.
+
+#### The browser tier already ran against the real stack
+
+§14 asks the `browser` tier to run "the T5 suite against the real stack (no
+injection here — the 5xx watchdog is on)". The forum tier has run five Playwright
+passes against a **real** core and a real Flarum since Phase 7, so "against the
+real stack" was already true. What was missing was the watchdog.
+
+It is worth having, and what it catches is narrow: **a page can render exactly
+the right words while the request behind it five-hundreds** and the UI falls
+back to a default or a cached value. Every assertion in those specs is about
+what the page says, so none of them can see it.
+
+Armed on the three non-injection passes and **deliberately off** for `@outage`
+and `@recovery`, where a server error is the fixture doing its job. §11 Tier 10
+gives the reason the two travel together: "Watchdog fails any test observing a
+5xx — which is why fault injection lives on Tier 5 and never here."
+
+A watchdog clever enough to tell an injected 500 from a real one would be a
+second implementation of the fault injector, and would disagree with it. Two
+passes, one flag, no cleverness.
+
+#### `forum-first-user` moved to where the forum is
+
+The full-stack tier has no forum — departure 6 split it into its own tier in
+Phase 7 — so this journey could not be walked from the `journeys` stage without
+composing the two stacks. It is emitted by the forum tier instead, and lands in
+that tier's evidence directory.
+
+The transcript helpers moved to `harness/transcript.sh` so both tiers use one
+definition. A second copy would be two definitions of what a transcript **is**,
+in a tier whose entire deliverable is the transcript.
+
+It also carries the tier's own rule: a journey that records fewer than four
+steps fails, because a transcript with no steps is not evidence, it is a file.
+
+#### `bedrock-player` is declined, on the plan's own terms
+
+§11 Tier 6 calls a Bedrock client through Geyser "a stretch stage, added only if
+Geyser is in the composed stack". Geyser is not in the stack, and the same
+sentence says where the property is covered instead: "Floodgate identity
+handling is covered by Tiers 1/4 regardless."
+
+So this is not a gap being waved through — it is a conditional the plan wrote,
+whose condition is false, with the alternative coverage named by the same
+author. Recorded as departure 10 rather than left as an unexplained absence in
+the coverage document, because "named by the plan and not covered" and "declined
+for a stated reason" read very differently to somebody auditing the tier.

@@ -13,6 +13,11 @@
 // limitations under the License.
 
 const { test, expect } = require('@playwright/test');
+const { armWatchdog } = require('./watchdog');
+
+// Armed only when the caller asks -- the injection passes run with it off,
+// because a 500 during @outage is the fixture working. See watchdog.js.
+armWatchdog(test);
 
 /*
  * T5 — the browser tier.

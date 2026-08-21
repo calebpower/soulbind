@@ -68,71 +68,13 @@ except Exception:
 TRANSCRIPT=
 step_n=0
 
-transcript_open() {
-    TRANSCRIPT="$EVIDENCE/$1/transcript.md"
-    mkdir -p "$EVIDENCE/$1"
-    step_n=0
-    cat > "$TRANSCRIPT" <<MD
-# Journey: $1
-
-Backend: \`$DB\` · core: \`$CORE_URL\` · gate: \`$GATE\`
-
-Every step below records what the person doing this would have seen. Read it
-cold: the question this evidence answers is whether a newcomer could follow the
-flow, and that judgement is not automated anywhere.
-
-MD
-}
-
-# step <what the person did> <what they saw>
-step() {
-    step_n=$((step_n + 1))
-    {
-        echo "## Step $step_n — $1"
-        echo
-        # A FOUR-backtick fence, and the payload passed through a filter that
-        # neutralises any fence it contains.
-        #
-        # Command output is untrusted text as far as this document is concerned.
-        # With a three-backtick fence, output containing one closes the block and
-        # the remainder renders as prose -- a refusal string was used to forge a
-        # convincing "the player was admitted" step into a transcript. Since the
-        # transcript IS this tier's deliverable, an artifact that can be made to
-        # misreport what happened is the whole failure.
-        echo '````'
-        fenced "$2"
-        echo '````'
-        echo
-    } >> "$TRANSCRIPT"
-    log "  step $step_n: $1"
-}
-
-# Untrusted text, made safe to put inside a fence.
-#
-# Two things, both found by attacking the transcript rather than reading it:
-#
-#   * a closing fence may be indented by up to three spaces per CommonMark, so
-#     anchoring the filter at ^ let an indented ```` close the block and render
-#     the rest as prose -- the same forgery the four-backtick fence was added to
-#     stop, one space over;
-#   * printf, never echo. The guest shell is dash, whose echo expands backslash
-#     escapes, so a \n in connector output became a real newline and the payload
-#     became markdown.
-fenced() {
-    printf '%s\n' "$1" | sed 's/^ \{0,3\}````*/'"'"'&/'
-}
-
-note() {
-    # Every line prefixed, and newlines cannot escape the quote block.
-    #
-    # This is author text -- but it INTERPOLATES core's output ("Refused, with
-    # reason `$reason`"), and a newline in that value left the second line
-    # unprefixed and rendering as document prose. fail_journey was fenced last
-    # round for exactly this reason and its sibling was missed, which is the same
-    # defect one function over.
-    printf '%s\n' "$1" | sed 's/^/> /' >> "$TRANSCRIPT"
-    printf '\n' >> "$TRANSCRIPT"
-}
+# The transcript helpers live in harness/transcript.sh because the forum tier
+# emits journeys too, against a stack this one does not have. See that file.
+TRANSCRIPT_EVIDENCE="$EVIDENCE"
+TRANSCRIPT_DB="$DB"
+TRANSCRIPT_CORE_URL="$CORE_URL"
+TRANSCRIPT_GATE="$GATE"
+. "$HERE/../transcript.sh"
 
 fail_journey() {
     log "$1"
@@ -245,16 +187,19 @@ $OUTCOMES
 
 ## Named by the plan and NOT yet covered
 
-- \`forum-first-user\` — needs the browser tier driving the forum in the same
-  session as the game stack. The forum tier is green on its own; joining the two
-  into one journey is outstanding.
-- \`bedrock-player\` — needs a Bedrock client through Geyser/Floodgate. The
-  identity translation it would exercise is unit-tested in
-  \`connector-velocity\`, but that is a fixture, not a client.
+- \`forum-first-user\` — **covered, in the forum tier.** It is emitted by
+  \`harness/flarum/stack.sh\` and lands in \`out/browser-evidence/<backend>/\`,
+  not here, because this tier has no forum: departure 6 split the forum out as
+  its own tier in Phase 7, and a journey can only be walked where the forum is.
+- \`bedrock-player\` — **not implemented, and the plan says when it would be.**
+  §11 Tier 6 calls a Bedrock client through Geyser "a stretch stage, added only
+  if Geyser is in the composed stack", and it is not. The same sentence records
+  that "Floodgate identity handling is covered by Tiers 1/4 regardless", which
+  is where it is covered. Departure 10.
 
-No screenshots: the journeys covered so far are chat and protocol flows with no
-page to photograph. The forum-first journey is the one that will carry them,
-which is part of why it is named separately here rather than folded in.
+No screenshots from THIS tier: the journeys it walks are chat and protocol flows
+with no page to photograph. The forum-first journey is the one with a page, and
+it is emitted by the tier that has one.
 MD
 }
 

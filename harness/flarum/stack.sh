@@ -1194,6 +1194,7 @@ browser() {
         -e FORUM_URL="$FORUM_URL" \
         -e RUN_TAG="$RUN_TAG" \
         -e LINK_CODE="${LINK_CODE:-}" \
+        -e SOULBIND_5XX_WATCHDOG="${SOULBIND_5XX_WATCHDOG:-0}" \
         -e CI=1 \
         -e PLAYWRIGHT_JSON_OUTPUT_NAME="/suite/results.json" \
         "$FLARUM_BROWSER_IMAGE" "$@"
@@ -1223,17 +1224,30 @@ else
     browser npm ci --no-audit --no-fund
 fi
 
-log "pass 1 of 5: an unlinked account is refused, in core's own words"
+# The watchdog is ARMED for this pass and the two other non-injection ones, and
+# deliberately off for @outage and @recovery -- a 500 there is the fixture doing
+# its job. §14 Phase 8 asks for "the T5 suite against the real stack (no
+# injection here -- the 5xx watchdog is on)", and §11 Tier 10 gives the reason
+# the two travel together.
+#
+# What it catches is narrow and otherwise invisible: a page can render exactly
+# the right words while the request behind it five-hundreds and the UI falls
+# back to a default. Every assertion in these specs is about what the page says.
+log "pass 1 of 5: an unlinked account is refused, in core's own words (watchdog armed)"
 set_rule true deny
-browser npx playwright test --grep "@refused"
+SOULBIND_5XX_WATCHDOG=1 browser npx playwright test --grep "@refused"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-1.json" 2>/dev/null || true
 
-log "pass 2 of 5: the rule allows, and the account is admitted"
+log "pass 2 of 5: the rule allows, and the account is admitted (watchdog armed)"
 set_rule false allow
-browser npx playwright test --grep "@admitted"
+SOULBIND_5XX_WATCHDOG=1 browser npx playwright test --grep "@admitted"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-2.json" 2>/dev/null || true
 
-log "pass 3 of 5: core is stopped, and the gate must hold"
+# Watchdog OFF from here: core is about to be stopped on purpose, and a server
+# error is the fixture rather than a defect. A watchdog clever enough to tell
+# them apart would be a second implementation of the fault injector, and would
+# disagree with it.
+log "pass 3 of 5: core is stopped, and the gate must hold (watchdog off, by design)"
 set_rule true deny
 stop_core
 browser npx playwright test --grep "@outage"
@@ -1247,6 +1261,30 @@ cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-4.json" 2>/dev/n
 
 log "pass 5 of 5: a member links this forum account by entering a code"
 
+# --- Tier 11 evidence: the forum-first-user journey -------------------------
+#
+# §11 Tier 11 names three linking flows that must leave a per-step transcript,
+# and this is the second of them. It is emitted HERE rather than from
+# `harness/fullstack/journeys.sh` for the plain reason that the full-stack tier
+# has no forum -- departure 6 split the forum out as its own tier in Phase 7 --
+# so the journey can only be walked where the forum actually is.
+#
+# Forum-FIRST is the distinction that matters, and this flow has it: the person
+# exists as a forum member before any of this, and links a game account
+# afterwards. `first-time-player` is the mirror image, walked on the game side.
+TRANSCRIPT_EVIDENCE="$REPO/out/browser-evidence/${CORE_BACKEND:-sqlite}"
+TRANSCRIPT_DB="${CORE_BACKEND:-sqlite}"
+TRANSCRIPT_CORE_URL="http://127.0.0.1:$CORE_PORT"
+TRANSCRIPT_GATE="forum-register"
+mkdir -p "$TRANSCRIPT_EVIDENCE"
+. "$REPO/harness/transcript.sh"
+
+transcript_open forum-first-user
+step "the person is already a member of the forum" \
+    "They registered through the forum's own sign-up, which the passes above
+exercised. Nothing about soulbind was involved: at this point they are a forum
+account and nothing else, which is what makes this journey forum-FIRST."
+
 # The code is minted for a GAME identity, by the harness credential, against the
 # real core. That makes the redemption a genuine cross-platform link rather than
 # a forum handing itself a code it issued a moment earlier.
@@ -1259,8 +1297,15 @@ if [ -z "$LINK_CODE" ]; then
     exit 1
 fi
 log "  minted a code for game:harness-player-1"
+step "a code is issued for their game account, on the game side" \
+    "code.issue for game:harness-player-1 returned: $LINK_CODE
 
-LINK_CODE="$LINK_CODE" browser npx playwright test --grep "@link"
+The code is minted by the GAME side, not by the forum. A forum that issued
+itself a code and then redeemed it would prove the button works and nothing
+about cross-platform linking."
+
+LINK_CODE="$LINK_CODE" SOULBIND_5XX_WATCHDOG=1 \
+    browser npx playwright test --grep "@link"
 cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-5.json" 2>/dev/null || true
 
 # Core is the authority on whether the link happened. The panel says so, and the
@@ -1270,12 +1315,28 @@ LINKED=$("$REPO/harness/rpc.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("identities",[])))')
 
 log "  core reports the game identity is linked to $LINKED identities"
+step "they type the code into the forum, and core agrees they are linked" \
+    "The member entered $LINK_CODE in the forum's soulbind panel.
+
+Asked of core rather than of the page: identity.describe for
+game:harness-player-1 reports $LINKED identities on the subject. The panel is
+the thing under test, so the panel's own word for it would not be evidence."
 if [ "${LINKED:-0}" -lt 2 ]; then
     log "core does not show the forum account linked to the game account."
     log "The panel may have said it worked; core is the authority and it did not."
     exit 1
 fi
 log "the link is real, and core agrees"
+step "what the person ends up with" \
+    "One person, two accounts, one subject: a forum member who can now be
+recognised at a game gate, and a game account that can be recognised on the
+forum. Neither platform learned anything about the other beyond the link."
+if [ "${step_n:-0}" -lt 4 ]; then
+    log "the forum-first-user journey recorded ${step_n:-0} steps; a transcript"
+    log "with no steps is not evidence, it is a file."
+    exit 1
+fi
+log "forum-first-user transcript: $step_n steps in $TRANSCRIPT_EVIDENCE/forum-first-user"
 
 # --- did the allowed registrations actually create accounts? ----------------
 #
