@@ -346,7 +346,13 @@ val licenceInventory = tasks.register("licenceInventory") {
                     appendLine("      $handling -- $reason")
                 }
             }
-            rules.neverBundled.takeIf { it.isNotEmpty() }?.let { never ->
+            // Only the ones actually IN this module's graph. Printing the
+            // whole never-bundled list told connector-velocity's readers that
+            // trove4j and logback ship beside its jar, and neither is anywhere
+            // near it -- a false statement about packaging in the file whose
+            // job is to be accurate about packaging.
+            val bundledHere = rows.map { it.first.substringBeforeLast(':') }.toSet()
+            rules.neverBundled.filter { it in bundledHere }.takeIf { it.isNotEmpty() }?.let { never ->
                 appendLine()
                 appendLine("Never shaded or bundled, shipped unmodified beside the fat jar so")
                 appendLine("the operator can replace them -- which is what satisfies the LGPL")
