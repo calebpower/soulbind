@@ -5953,3 +5953,49 @@ in common is that each was a check being wrong about the world rather than the
 world being wrong — which is the failure mode a battery is *supposed* to
 surface before a deployment does, and the reason none of them was found by
 reading.
+
+### 10.17 — Run 17: green, and what the gate's evidence actually shows
+
+`reaper test` exit 0. Every stage, both backends, one session.
+
+**The clean-install gate passed on a machine it had made clean itself.** Its
+evidence directory is the gate's whole argument, and it holds:
+
+```
+1 cli                    connector.registered
+2 cli                    connector.registered
+3 cli                    connector.registered
+4 connector:7126ba47…    code.issued
+5 connector:f1226a98…    identity.linked
+```
+
+Five audit rows, exported through `tools/audit-export.sh`, describing exactly
+what the gate did and nothing else. The three `cli` rows are the registration
+audit added in 10.9 — which did not exist a few days ago, and whose absence is
+what made an earlier export come back empty. The link was issued by one
+connector and redeemed by a different one, each holding only the capability its
+half needs.
+
+And `subject-after-restart.json`: one subject holding `game:gate-player` and
+`forum:gate-account`, read back from core *after* `systemctl restart`. A real
+cross-platform link, on a machine that had never seen soulbind, following only
+the document.
+
+**Tier 10 ran for the first time, on both axes, with real depth.** 500 rows
+accumulated by journeys and the simulated users, topped to 1200 through real
+`audit.push` calls, read back over five pages with contiguity asserted; a
+greedy single query clamped at 1000 and admitted more remained; the filtered
+deep read returned exactly the 700 pushed rows. Identical numbers on SQLite and
+MariaDB, which is the same determinism the sim reports.
+
+**Every skip in the run is accounted for.** `PlanCheckWalkerGuardTest` × 6 and
+`DoctorFilesystemTest`'s writability case skip inside the build container —
+python3 is absent there and the container runs as root — and both properties
+are covered elsewhere: the shell mutation battery asserts the walker harder on
+the guest host (13 mutants, all killed), and the writability case runs on the
+workstation as a non-root user. `UpgradePathTest`'s latin1 case skips on
+SQLite, which has no charset to be created under, and ran on MariaDB.
+
+Four runs to get here, and the three failures were all checks being wrong about
+the world rather than the world being wrong. That is the outcome a battery is
+for; the alternative was finding each of them in a deployment.
