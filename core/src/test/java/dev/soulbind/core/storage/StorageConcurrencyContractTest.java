@@ -139,7 +139,7 @@ class StorageConcurrencyContractTest {
             assertEquals(expected, storage.audit().highestSequence());
 
             List<AuditEntry> all = storage.audit().query(
-                    new AuditQuery(null, null, null, null, "concurrent", AuditQuery.MAX_LIMIT));
+                    new AuditQuery(null, null, null, null, "concurrent", AuditQuery.MAX_LIMIT, null));
             assertEquals(expected, all.size(), "rows are missing");
             for (int i = 0; i < all.size(); i++) {
                 assertEquals(i + 1L, all.get(i).sequence(), "a gap at position " + i);

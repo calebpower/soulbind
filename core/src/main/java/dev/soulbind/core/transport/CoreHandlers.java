@@ -19,6 +19,7 @@ package dev.soulbind.core.transport;
 import dev.soulbind.core.registry.Authorizer.Operation;
 import dev.soulbind.core.registry.Credentials;
 import dev.soulbind.core.audit.AuditEntry;
+import dev.soulbind.core.audit.AuditPage;
 import dev.soulbind.core.audit.AuditQuery;
 import dev.soulbind.core.events.EventRecord;
 import dev.soulbind.core.identity.Identity;
@@ -241,7 +242,7 @@ public final class CoreHandlers {
             // bounding is deliberately NOT done in this handler: putting it in
             // the query type means every caller of the repository gets it,
             // including ones written later that forget to ask.
-            List<AuditEntry> entries = audit.query(new AuditQuery(
+            AuditPage page = audit.page(new AuditQuery(
                     q.fromEpochSeconds() == null
                             ? null : Instant.ofEpochSecond(q.fromEpochSeconds()),
                     q.toEpochSeconds() == null
@@ -249,11 +250,21 @@ public final class CoreHandlers {
                     q.actor(),
                     q.subjectId(),
                     q.action(),
-                    q.limit() == null ? AuditQuery.DEFAULT_LIMIT : q.limit()));
+                    q.limit() == null ? AuditQuery.DEFAULT_LIMIT : q.limit(),
+                    q.afterSequence()));
 
+            // "more" and "lastSequence" are on EVERY audit response, not only
+            // exports. Without them a caller cannot tell the whole log from the
+            // first page of it, and the limit is silently clamped at
+            // AuditQuery.MAX_LIMIT, so asking for everything and believing the
+            // answer was the easiest mistake this operation offered. Together
+            // they are the export: pass lastSequence back as afterSequence
+            // until more is false.
             return WireResponse.ok(Map.of(
                     "entries",
-                    entries.stream().map(CoreHandlers::toView).toList()));
+                    page.entries().stream().map(CoreHandlers::toView).toList(),
+                    "more", page.more(),
+                    "lastSequence", page.lastSequence()));
         });
 
         handlers.put(Operation.CODE_ISSUE, (connector, payload) -> {

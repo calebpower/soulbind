@@ -402,6 +402,38 @@ Query limits are bounded server-side whatever is asked for. An unbounded audit
 query against a long-lived deployment is a way to exhaust memory from an
 authenticated endpoint, and "the caller asked nicely" is not a defence.
 
+### Reading a log longer than one page
+
+Because the limit is not negotiable, every `audit.query` response says whether
+it stopped early:
+
+| Field | Meaning |
+|---|---|
+| `entries` | the matching rows, **oldest first** |
+| `more` | whether at least one further row matches beyond this page |
+| `lastSequence` | the highest sequence in this page, or the cursor that was passed in when the page is empty |
+
+and the request accepts `afterSequence`, which returns only rows above it.
+Together they are the export: pass `lastSequence` back as `afterSequence` until
+`more` is false.
+
+`more` is on **every** response, not only on exports. Without it a caller cannot
+tell the whole log from the first page of it — and since the limit is silently
+clamped at 1000, asking for everything and believing the answer was the easiest
+mistake this operation offered. An export built on that looks complete and is
+not, which is worse than having no export.
+
+The cursor is a **sequence**, not an offset, and that is what makes paging safe
+while the log is being written: `seq` is monotonic and rows are never mutated or
+deleted, so a page cannot shift under a reader the way an offset can. It also
+makes the export resumable across runs — keep the last sequence, and the next
+run reads only what happened since.
+
+`tools/audit-export.sh` is that loop, writing JSON Lines. It is a **protocol
+client**, not a management command: it holds an admin credential and is
+authorized by the same capability table as everything else, rather than reading
+the database behind core's back.
+
 ## Decisions
 
 `decide` asks whether an identity may pass a gate. The **identity**, not the

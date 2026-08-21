@@ -116,7 +116,7 @@ journey_first_time_player() {
     chat_id="journey-chat-$$"
 
     # --- refused --------------------------------------------------------
-    refusal=$("$HERE/../rpc.sh" "$CORE_URL" "$HARNESS_CRED" decide \
+    refusal=$("$HERE/../../tools/rpc.sh" "$CORE_URL" "$HARNESS_CRED" decide \
         "{\"gate\":\"$GATE\",\"platformKind\":\"game\",\"platformId\":\"$player\"}" 2>&1) || true
     step "tried to join before linking anything" "$refusal"
 
@@ -157,7 +157,7 @@ journey_first_time_player() {
     fi
 
     # --- admitted -------------------------------------------------------
-    admitted=$("$HERE/../rpc.sh" "$CORE_URL" "$HARNESS_CRED" decide \
+    admitted=$("$HERE/../../tools/rpc.sh" "$CORE_URL" "$HARNESS_CRED" decide \
         "{\"gate\":\"$GATE\",\"platformKind\":\"game\",\"platformId\":\"$player\"}" 2>&1) || true
     step "tried to join again" "$admitted"
 

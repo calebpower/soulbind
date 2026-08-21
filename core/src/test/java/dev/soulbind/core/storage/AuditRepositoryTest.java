@@ -141,13 +141,13 @@ class AuditRepositoryTest {
             audit.append(new AuditEntry(0L, Instant.now(), "a", "y", "s1", null, null, Map.of()));
 
             assertEquals(2, audit.query(
-                    new AuditQuery(null, null, "a", null, null, 100)).size());
+                    new AuditQuery(null, null, "a", null, null, 100, null)).size());
             assertEquals(2, audit.query(
-                    new AuditQuery(null, null, null, "s1", null, 100)).size());
+                    new AuditQuery(null, null, null, "s1", null, 100, null)).size());
             assertEquals(2, audit.query(
-                    new AuditQuery(null, null, null, null, "y", 100)).size());
+                    new AuditQuery(null, null, null, null, "y", 100, null)).size());
             assertEquals(1, audit.query(
-                    new AuditQuery(null, null, "a", "s1", "y", 100)).size());
+                    new AuditQuery(null, null, "a", "s1", "y", 100, null)).size());
         }
     }
 
@@ -163,7 +163,7 @@ class AuditRepositoryTest {
             // A caller asking for more than MAX_LIMIT gets MAX_LIMIT, not an
             // error and not everything. An unbounded audit query from an
             // authenticated endpoint is a way to exhaust memory.
-            AuditQuery huge = new AuditQuery(null, null, null, null, null, 999_999);
+            AuditQuery huge = new AuditQuery(null, null, null, null, null, 999_999, null);
             assertEquals(AuditQuery.MAX_LIMIT, huge.limit());
             assertEquals(20, storage.audit().query(huge).size());
 
@@ -224,7 +224,7 @@ class AuditRepositoryTest {
                     "two appends were given the same sequence number");
 
             List<AuditEntry> all = storage.audit().query(
-                    new AuditQuery(null, null, null, null, "concurrent", AuditQuery.MAX_LIMIT));
+                    new AuditQuery(null, null, null, null, "concurrent", AuditQuery.MAX_LIMIT, null));
             assertEquals(expected, all.size(), "rows are missing from storage");
             for (int i = 0; i < all.size(); i++) {
                 assertEquals(i + 1L, all.get(i).sequence(), "sequence has a gap at position " + i);

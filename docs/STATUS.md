@@ -21,7 +21,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | **Complete — gate passed.** `reaper test` green on both backends in one session (run 13), and Plan renders link data for a player linked through the real flow. Battery covers: the latin1 axis asserted rather than assumed, astral-plane text round-tripped and compared, T7 fuzz against a populated deployment, T8 concurrency re-run in-session on both backends, T11 transcripts for `first-time-player` and `forum-first-user`, and the T5 browser suite with the 5xx watchdog armed on every non-injection pass. `bedrock-player` declined on the plan's own conditional — departure 10 |
 | 9 | Simulated users | **Trimmed tier complete; gate met and now meaningful.** Run 12 green on both backends: three seeds × 400 actions, each reporting real work (6–8 links made, ~100 correctly refused), identical counts on both axes. Four-byte UTF-8 survives a round trip through a latin1 server. Shrinker and two nemesis classes deferred (departure 9). **One open lead:** `decisions-follow-the-rules` excluded pending diagnosis — DECISIONS 9.10 |
-| 10 | Hardening and release | **In progress** — credential rotation landed: `connector.rotate` retires a leaked credential immediately, with no overlap window, audited before the plaintext leaves. Audit export, packaging, licence inventory, install docs and the clean-install gate outstanding |
+| 10 | Hardening and release | **In progress** — credential rotation and audit export landed. Packaging, licence inventory, install docs, threat-model pass and the clean-install gate outstanding |
 
 ## Mutation coverage
 
@@ -463,6 +463,63 @@ the stored hash. Deliberately:
 Five tests, each mutation-checked against the real tree: a rotation that reports
 success and changes nothing fails two of them by name; an audit row without the
 connector name fails a third; a nameless "not found" fails a fourth.
+
+### Audit export — landed
+
+`audit.query` was bounded at 1000 rows and always should be: an unbounded read
+from an authenticated endpoint is a way to exhaust memory. But the bound was
+**silent**, so a caller asking for everything got the ceiling with no way to
+tell that answer apart from the whole log. The deliverable was therefore not
+"add an export" but "make a truncation distinguishable from an ending".
+
+Every `audit.query` response now carries `more` and `lastSequence`, and the
+request accepts `afterSequence`. Together they are the export: pass the cursor
+back until `more` is false. On **every** response rather than a dedicated export
+operation, because otherwise every other caller keeps the silent ceiling.
+
+The cursor is a sequence, not an offset — `seq` is monotonic and audit rows are
+never mutated or deleted, so a page cannot shift under a reader mid-export. It
+also makes the export resumable across runs, which is what makes it a nightly
+archive rather than a whole-log dump every night.
+
+`tools/audit-export.sh` is that loop, writing JSON Lines. It is a protocol
+client holding an admin credential, not a management command reading the
+database — `soulbind` keeps its three verbs.
+
+The ceiling was already costing something: `SdkCore.auditSince` in the
+simulated-user tier detected it and refused to conclude, which capped how long a
+Tier 9 run could be. It pages now.
+
+Tested by a control against a real core plus three mutants of a core that lies
+about its paging. One of the three, `truncate-silently`, is listed as
+**uncatchable** — a core claiming the log ends after one page is
+indistinguishable from a one-page log, and no client-side check separates them.
+What is asserted instead is that the tool reports how little it got. The
+`freeze-cursor` mutant found a real hole: the first version guarded only the
+empty-page case, so a full page with a frozen cursor looped forever, rewriting
+the same rows into the archive.
+
+### Two smokes that were never wired to anything
+
+`harness/credential-smoke.sh` had never run automatically anywhere, so it could
+rot between the sessions that invoked it by hand. It and the new export smoke
+are now a `reaper test` stage, together well under a minute.
+
+Wiring them in surfaced why they had not been: the reaper guest host has podman
+and **no JDK**. `harness/tools/core-env.sh` picks between a host JDK and the
+pinned toolchain container so the same script runs on both.
+
+**Container mode is unverified until a session run** — this workstation is
+FreeBSD and has no podman, so only the host path has executed here.
+
+### Three copies of the canonical signing string, now one
+
+`tools/rpc.sh` (moved there from `harness/`) says it is the single
+implementation of the signing. It was not: `harness/fullstack/redeem.sh` held a
+full duplicate with no recorded reason, and now calls it.
+`harness/fullstack/fuzz-live.sh` keeps its own **because it sends deliberately
+malformed bodies that `rpc.sh` refuses before they reach the wire** — that is
+the whole narrowing and it covers exactly the one script.
 
 ## Guards in force
 

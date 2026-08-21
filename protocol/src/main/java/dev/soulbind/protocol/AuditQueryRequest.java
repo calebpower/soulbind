@@ -34,4 +34,5 @@ public record AuditQueryRequest(
         String actor,
         String subjectId,
         String action,
-        Integer limit) {}
+        Integer limit,
+        Long afterSequence) {}

@@ -240,45 +240,59 @@ public final class SdkCore implements CoreDriver, CoreView {
 
     @Override
     public List<AuditRow> auditSince(long after) {
-        // `limit` and nothing else. audit.query takes fromEpochSeconds,
-        // toEpochSeconds, actor, subjectId, action and limit -- there is no
-        // sequence cursor, and core's codec fails on unknown properties, so the
-        // invented one produced a MALFORMED refusal.
+        // Paged, with the cursor core gained in Phase 10. The first version
+        // asked for `limit` and nothing else, because there was no sequence
+        // cursor and core's codec refuses unknown properties, so the invented
+        // one produced a MALFORMED refusal.
         //
-        // MAX_LIMIT is 1000 and anything above it is clamped, so this asks for
-        // the most core will give. A run that produces more audit rows than that
-        // would compare against a truncated log and report a shortfall that is
-        // this method's fault -- which is why the count is checked below.
-        SoulbindClient.Outcome outcome = admin.call("audit.query", Map.of("limit", 1000));
-        if (!(outcome instanceof SoulbindClient.Outcome.Ok ok)) {
-            // LOUDLY. Returning an empty list here was the first version, and it
-            // meant "I could not ask" was indistinguishable from "core has
-            // audited nothing" -- so a broken query in the harness reported
-            // itself as a missing-audit defect in core. Exactly backwards, and
-            // it is what the control caught.
-            String why = outcome instanceof SoulbindClient.Outcome.Refused refused
-                    ? refused.code() + ": " + refused.message()
-                    : ((SoulbindClient.Outcome.Unreachable) outcome).detail();
-            throw new IllegalStateException(
-                    "could not read the audit log (" + why + "). The run cannot conclude"
-                            + " anything about audit completeness without it, and reporting"
-                            + " an unreadable log as an empty one would blame core for a"
-                            + " fault in this harness.");
-        }
+        // That version had a ceiling: MAX_LIMIT is 1000, anything above is
+        // clamped, and a run producing more than 1000 audit rows compared its
+        // counts against a truncated log and reported a shortfall that was the
+        // harness's fault. It detected the ceiling and refused to conclude,
+        // which was right, but it also capped how long a run could be. This
+        // pages instead, so the length of a run is no longer limited by how
+        // much of the log the checker can read.
         List<AuditRow> rows = new ArrayList<>();
-        for (Payload item : ok.payload().items("entries")) {
-            rows.add(new AuditRow(
-                    item.number("sequence"), item.text("actor"),
-                    item.text("action"), item.has("subjectId") ? item.text("subjectId") : null));
+        long cursor = after;
+        while (true) {
+            SoulbindClient.Outcome outcome = admin.call("audit.query",
+                    Map.of("limit", 1000, "afterSequence", cursor));
+            if (!(outcome instanceof SoulbindClient.Outcome.Ok ok)) {
+                // LOUDLY. Returning an empty list here was the first version,
+                // and it meant "I could not ask" was indistinguishable from
+                // "core has audited nothing" -- so a broken query in the
+                // harness reported itself as a missing-audit defect in core.
+                // Exactly backwards, and it is what the control caught.
+                String why = outcome instanceof SoulbindClient.Outcome.Refused refused
+                        ? refused.code() + ": " + refused.message()
+                        : ((SoulbindClient.Outcome.Unreachable) outcome).detail();
+                throw new IllegalStateException(
+                        "could not read the audit log (" + why + "). The run cannot conclude"
+                                + " anything about audit completeness without it, and reporting"
+                                + " an unreadable log as an empty one would blame core for a"
+                                + " fault in this harness.");
+            }
+            for (Payload item : ok.payload().items("entries")) {
+                rows.add(new AuditRow(
+                        item.number("sequence"), item.text("actor"),
+                        item.text("action"),
+                        item.has("subjectId") ? item.text("subjectId") : null));
+            }
+            if (!ok.payload().flag("more")) {
+                break;
+            }
+            long next = ok.payload().number("lastSequence");
+            if (next <= cursor) {
+                // Core says there is more but has not advanced the cursor. That
+                // is an infinite loop, and the harness hanging is a worse
+                // failure report than the harness complaining.
+                throw new IllegalStateException(
+                        "audit.query reported more rows without advancing the cursor past "
+                                + cursor + ". Paging cannot make progress.");
+            }
+            cursor = next;
         }
-        if (rows.size() >= 1000) {
-            throw new IllegalStateException(
-                    "the audit log came back at core's maximum of 1000 rows, so it is"
-                            + " truncated. Every count this run compares against it would be"
-                            + " short, and the shortfall would be reported as core failing to"
-                            + " audit. Shorten the run or add a cursor to audit.query.");
-        }
-        return rows.stream().filter(r -> r.sequence() > after).toList();
+        return rows;
     }
 
     @Override

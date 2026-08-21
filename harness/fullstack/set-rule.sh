@@ -6,7 +6,7 @@
 # deployment does -- and if that path breaks, this breaks with it rather than
 # quietly working around it.
 #
-# The signing lives in harness/rpc.sh. It used to live here, and a second copy
+# The signing lives in tools/rpc.sh. It used to live here, and a second copy
 # was about to be written for issuing codes: three canonical forms is three
 # chances to drift from the one the golden vectors keep identical across two
 # languages.
@@ -28,7 +28,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # requireLinked, not a required kind: the harness links a game account to a
 # second platform, and "must be linked to something" is the rule that expresses
 # what the flow actually establishes.
-"$HERE/../rpc.sh" "$CORE" "$CREDENTIAL" rule.set "$(cat <<JSON
+"$HERE/../../tools/rpc.sh" "$CORE" "$CREDENTIAL" rule.set "$(cat <<JSON
 {
   "gate": "$GATE",
   "requireLinked": $REQUIRE_LINKED,

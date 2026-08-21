@@ -257,6 +257,29 @@ echo "run: shell mutation battery"
 sh harness/fullstack/mutation/run.sh
 
 # ---------------------------------------------------------------------------
+# The operator tools, against a real core on SQLite.
+#
+# Both of these were written as workstation one-offs and neither was wired into
+# anything, which meant they could rot silently between the sessions that
+# happened to run them by hand. They are here because they are cheap -- one
+# core, no database server, no browser, well under a minute together -- and
+# because what they cover is exactly what a workstation build cannot: a shipped
+# script speaking the real wire format to a real core.
+#
+# credential-smoke checks that every principal the harnesses register still
+# holds the capabilities its operations need. It exists because moving
+# `identity.describe` between capabilities broke four callers and they were
+# found one thirty-minute battery at a time.
+#
+# audit-export runs its own control and three mutants of a core that lies about
+# its paging, so the export tool's completeness checks are asserted rather than
+# assumed.
+# ---------------------------------------------------------------------------
+echo "run: operator tools"
+sh harness/credential-smoke.sh
+sh harness/tools/audit-export-smoke.sh
+
+# ---------------------------------------------------------------------------
 # BOTH engines, because the gate asks for the T5 suite green cross-engine.
 #
 # The connector cannot tell which backend core uses -- that is what the storage

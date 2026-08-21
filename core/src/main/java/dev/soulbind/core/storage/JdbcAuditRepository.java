@@ -19,6 +19,7 @@ package dev.soulbind.core.storage;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.soulbind.core.audit.AuditEntry;
+import dev.soulbind.core.audit.AuditPage;
 import dev.soulbind.core.audit.AuditQuery;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -115,7 +116,7 @@ final class JdbcAuditRepository implements AuditRepository {
     }
 
     @Override
-    public List<AuditEntry> query(AuditQuery q) {
+    public AuditPage page(AuditQuery q) {
         StringBuilder sql = new StringBuilder("SELECT * FROM audit WHERE 1=1");
         List<Object> args = new ArrayList<>();
         if (q.from() != null) {
@@ -138,14 +139,23 @@ final class JdbcAuditRepository implements AuditRepository {
             sql.append(" AND action = ?");
             args.add(q.action());
         }
+        if (q.afterSequence() != null) {
+            sql.append(" AND seq > ?");
+            args.add(q.afterSequence());
+        }
         // Oldest first: audit is read as a narrative, and a narrative told
         // backwards is harder to follow. The limit is always present -- an
         // unbounded query from an authenticated endpoint is a way to exhaust
         // memory.
+        //
+        // One MORE than the limit is fetched, and the extra row is dropped. It
+        // is the only way to answer "is that all?" without a second COUNT that
+        // could disagree with the page it describes, and answering it wrongly
+        // is what turns a truncated read into an export that looks complete.
         sql.append(" ORDER BY seq ASC LIMIT ?");
-        args.add(q.limit());
+        args.add(q.limit() + 1);
 
-        return jdbc.read("audit.query", c -> {
+        List<AuditEntry> fetched = jdbc.read("audit.query", c -> {
             try (PreparedStatement ps = c.prepareStatement(sql.toString())) {
                 for (int i = 0; i < args.size(); i++) {
                     ps.setObject(i + 1, args.get(i));
@@ -153,6 +163,13 @@ final class JdbcAuditRepository implements AuditRepository {
                 return Jdbc.mapAll(ps, JdbcAuditRepository::mapRow);
             }
         });
+
+        boolean more = fetched.size() > q.limit();
+        List<AuditEntry> entries = more ? fetched.subList(0, q.limit()) : fetched;
+        long lastSequence = entries.isEmpty()
+                ? (q.afterSequence() == null ? 0L : q.afterSequence())
+                : entries.get(entries.size() - 1).sequence();
+        return new AuditPage(entries, more, lastSequence);
     }
 
     @Override

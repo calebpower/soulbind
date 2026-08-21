@@ -26,51 +26,23 @@ REPO=$(cd "$HERE/.." && pwd)
 WORK=${TMPDIR:-/tmp}/soulbind-credential-smoke.$$
 PORT=${CREDENTIAL_SMOKE_PORT:-7190}
 
+# Sourced before the trap, so cleanup can always call core_stop. It picks
+# between a host JDK and the pinned toolchain container, because the
+# workstation has the first and the reaper guest has only the second -- and
+# this script running gradle on the guest host was the failure that kept it off
+# the session run.
+# shellcheck disable=SC1090
+. "$HERE/tools/core-env.sh"
+
 log() { echo "[credentials] $*"; }
-core_pid=""
-cleanup() { [ -n "$core_pid" ] && kill "$core_pid" 2>/dev/null; rm -rf "$WORK"; }
+cleanup() { core_stop; rm -rf "$WORK"; return 0; }
 trap cleanup EXIT INT TERM
 
 mkdir -p "$WORK"
-: "${JAVA:=java}"
-JAVA_HOME=$(dirname "$(dirname "$JAVA")")
-export JAVA_HOME
 
 log "building core"
-(cd "$REPO" && ./gradlew --no-daemon --quiet :core:installDist)
-
-cat > "$WORK/soulbind.toml" <<TOML
-[server]
-host = "127.0.0.1"
-port = $PORT
-
-[storage]
-backend = "sqlite"
-url = "jdbc:sqlite:$WORK/soulbind.db"
-
-[linking]
-codettlseconds = 600
-TOML
-
-CLI="$REPO/core/build/install/core/bin/core"
-"$CLI" serve --config "$WORK/soulbind.toml" > "$WORK/core.log" 2>&1 &
-core_pid=$!
-
-i=0
-while [ "$i" -lt 60 ]; do
-    if python3 -c "
-import socket, sys
-s = socket.socket(); s.settimeout(1)
-sys.exit(0 if s.connect_ex(('127.0.0.1', $PORT)) == 0 else 1)" 2>/dev/null; then
-        break
-    fi
-    i=$((i + 1)); sleep 1
-done
-if [ "$i" -ge 60 ]; then
-    log "core never listened on $PORT"
-    tail -20 "$WORK/core.log" | sed 's/^/  /'
-    exit 1
-fi
+core_env_init "$WORK" "$PORT" "$REPO"
+core_serve || exit 1
 
 failures=0
 checked=0
@@ -81,8 +53,7 @@ while IFS='|' read -r name caps ops || [ -n "$name" ]; do
     caps=$(echo "$caps" | tr -d ' ')
     [ -n "$caps" ] || continue
 
-    cred=$("$CLI" register --name "$name" --quiet --capabilities "$caps" \
-        --config "$WORK/soulbind.toml" 2>/dev/null)
+    cred=$(core_cli register --name "$name" --quiet --capabilities "$caps" 2>/dev/null)
     if [ -z "$cred" ]; then
         log "FAIL $name: core would not register it with $caps"
         failures=$((failures + 1))
@@ -94,7 +65,7 @@ while IFS='|' read -r name caps ops || [ -n "$name" ]; do
         # A minimal payload. It is often wrong for the operation, and that is
         # fine: a MALFORMED refusal means the request reached the dispatcher,
         # which means the capability was accepted.
-        out=$(sh "$REPO/harness/rpc.sh" "http://127.0.0.1:$PORT" "$cred" "$op" \
+        out=$(sh "$REPO/tools/rpc.sh" "$(core_url)" "$cred" "$op" \
             '{"platformKind":"game","platformId":"smoke","gate":"smoke.gate","limit":1}' 2>&1 || true)
         case "$out" in
             *missing-capability*)

@@ -1288,7 +1288,7 @@ account and nothing else, which is what makes this journey forum-FIRST."
 # The code is minted for a GAME identity, by the harness credential, against the
 # real core. That makes the redemption a genuine cross-platform link rather than
 # a forum handing itself a code it issued a moment earlier.
-LINK_CODE=$("$REPO/harness/rpc.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
+LINK_CODE=$("$REPO/tools/rpc.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
     code.issue '{"platformKind":"game","platformId":"harness-player-1","display":"Harness Player"}' \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("code",""))')
 
@@ -1310,7 +1310,7 @@ cp "$REPO/harness/flarum/browser/results.json" "$RUN/playwright-5.json" 2>/dev/n
 
 # Core is the authority on whether the link happened. The panel says so, and the
 # panel is the thing under test -- so this asks core directly.
-LINKED=$("$REPO/harness/rpc.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
+LINKED=$("$REPO/tools/rpc.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
     identity.describe '{"platformKind":"game","platformId":"harness-player-1"}' \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("identities",[])))')
 

@@ -218,6 +218,52 @@ class AuditWireTest {
     }
 
     @Test
+    @DisplayName("a truncated query says so, and can be continued")
+    void truncationIsVisibleAndContinuable() throws Exception {
+        // The reason this is asserted at the wire and not only at the
+        // repository: the ceiling above is silent. A caller asking for
+        // everything gets the ceiling and, without these two fields, no way to
+        // tell that answer apart from the whole log. An export built on that
+        // looks complete and is not, which is worse than having no export.
+        Clock clock = TestCore.fixedClock();
+        try (TestCore core = new TestCore(StorageBackends.any(), tempDir, SOURCE_AND_READER, clock)) {
+            for (int i = 0; i < 5; i++) {
+                core.postSigned(
+                        core.request("audit.push", "{\"action\":\"a." + i + "\"}"),
+                        clock.instant());
+            }
+
+            JsonNode first = payloadOf(
+                    core, clock, core.request("audit.query", "{\"limit\":2}"));
+            assertTrue(first.get("more").asBoolean(),
+                    "a page that stopped at the limit did not say more remained");
+            assertEquals(2, first.get("lastSequence").asLong(),
+                    "the response carries no cursor to continue from");
+
+            // Continue, exactly as an export tool would.
+            long cursor = first.get("lastSequence").asLong();
+            int seen = first.get("entries").size();
+            for (int guard = 0; guard < 10; guard++) {
+                JsonNode next = payloadOf(core, clock, core.request(
+                        "audit.query", "{\"limit\":2,\"afterSequence\":" + cursor + "}"));
+                seen += next.get("entries").size();
+                cursor = next.get("lastSequence").asLong();
+                if (!next.get("more").asBoolean()) {
+                    break;
+                }
+            }
+            assertEquals(5, seen,
+                    "paging over the wire did not arrive at every row exactly once");
+            assertEquals(5, cursor, "the final cursor is not the last row");
+
+            JsonNode whole = payloadOf(
+                    core, clock, core.request("audit.query", "{\"limit\":100}"));
+            assertFalse(whole.get("more").asBoolean(),
+                    "a page containing the whole log claimed there was more");
+        }
+    }
+
+    @Test
     @DisplayName("filters narrow the result rather than being ignored")
     void filtersApply() throws Exception {
         Clock clock = TestCore.fixedClock();

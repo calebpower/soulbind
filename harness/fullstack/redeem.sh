@@ -1,9 +1,32 @@
 #!/bin/sh
 # Redeems a code as some platform, through the real protocol.
 #
-# Stands in for a connector this stack does not run. It signs and speaks the
-# real wire format -- what it is not is a backdoor: there is no path here that
-# writes state without going through core's own redeem.
+# Copyright (c) 2026 Caleb L. Power
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Stands in for a connector this stack does not run. It speaks the real wire
+# format -- what it is not is a backdoor: there is no path here that writes
+# state without going through core's own redeem.
+#
+# The signing lives in tools/rpc.sh. It used to live here too, a full copy of
+# the canonical string down to the newlines, which made three copies in the
+# harness of the one thing the golden vectors exist to keep identical -- and a
+# copy that drifts is a harness that passes against a wire format core does not
+# speak. Only fuzz-live.sh still signs for itself, and it has to: it sends
+# deliberately malformed bodies that rpc.sh refuses before they reach the wire.
+#
+#   redeem.sh <core-url> <credential> <code> <kind> <platform-id>
 set -eu
 
 CORE=$1
@@ -12,62 +35,25 @@ CODE=$3
 KIND=$4
 PLATFORM_ID=$5
 
-python3 - "$CORE" "$CREDENTIAL" "$CODE" "$KIND" "$PLATFORM_ID" <<'PYEOF'
-import hashlib
-import hmac
-import json
-import sys
-import time
-import urllib.error
-import urllib.request
-import uuid
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-core, credential, code, kind, platform_id = sys.argv[1:6]
+PAYLOAD=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "code": sys.argv[1],
+    "platformKind": sys.argv[2],
+    "platformId": sys.argv[3],
+    "display": sys.argv[3],
+}, separators=(",", ":")))
+' "$CODE" "$KIND" "$PLATFORM_ID")
 
-body = json.dumps({
-    "schema": 1,
-    "op": "code.redeem",
-    "id": str(uuid.uuid4()),
-    "payload": {
-        "code": code,
-        "platformKind": kind,
-        "platformId": platform_id,
-        "display": platform_id,
-    },
-}, separators=(",", ":"))
+RESULT=$("$HERE/../../tools/rpc.sh" "$CORE" "$CREDENTIAL" code.redeem "$PAYLOAD")
 
-timestamp = int(time.time())
-nonce = str(uuid.uuid4())
-signature = hmac.new(
-    credential.encode("utf-8"),
-    f"{timestamp}\n{nonce}\n{body}".encode("utf-8"),
-    hashlib.sha256,
-).hexdigest()
+# The count is read back from the response rather than assumed, because the
+# stack scripts print this line as evidence that the redeem did something.
+COUNT=$(printf '%s' "$RESULT" | python3 -c '
+import json, sys
+print(len(json.load(sys.stdin)["identities"]))
+')
 
-request = urllib.request.Request(
-    f"{core}/v1/rpc",
-    data=body.encode("utf-8"),
-    headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {credential}",
-        "X-Soulbind-Timestamp": str(timestamp),
-        "X-Soulbind-Nonce": nonce,
-        "X-Soulbind-Signature": signature,
-    },
-    method="POST",
-)
-
-try:
-    with urllib.request.urlopen(request, timeout=15) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-except urllib.error.URLError as e:
-    print(f"could not reach core: {e}", file=sys.stderr)
-    sys.exit(1)
-
-if not payload.get("ok"):
-    print(f"redeem refused: {json.dumps(payload.get('error'))}", file=sys.stderr)
-    sys.exit(1)
-
-print(f"redeemed as {kind}:{platform_id}, "
-      f"{len(payload['payload']['identities'])} identities")
-PYEOF
+echo "redeemed as $KIND:$PLATFORM_ID, $COUNT identities"

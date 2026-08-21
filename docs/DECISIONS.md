@@ -5280,3 +5280,142 @@ Caught by adding `assert old in s` to the mutation itself. The lesson is the
 one this session keeps producing from a new angle: **a mutation check needs its
 own assertion that the mutation applied**, or a green result means "the tool
 found nothing" and "the tool was handed nothing" indistinguishably.
+
+### 10.4 — Retiring a leaked credential, and why there is no overlap window
+
+Until this, a connector credential that had leaked could not be retired. The
+only move available was `register` under a new name, which minted a second
+credential and left the first one working — the opposite of what the situation
+calls for.
+
+`connector.rotate` mints a replacement and **replaces** the stored hash.
+
+#### No overlap window, and the schema enforces it
+
+The usual shape for credential rotation is two live secrets and a grace period,
+so callers can migrate without downtime. That shape is wrong here, because the
+case rotation exists for is *somebody else has this credential*, and a grace
+period is precisely the thing you do not want then.
+
+It is structural rather than careful: `connector` holds one `credential_hash`
+column, so there is nowhere for a second live credential to sit. A future
+change wanting an overlap would have to alter the schema, which is a visible
+decision rather than a quiet one.
+
+The cost is real and accepted: a connector is briefly unable to authenticate
+between the rotation and its reconfiguration. An operator rotating because of a
+leak wants exactly that; an operator rotating on a schedule can register a
+second connector, cut over, and retire the first.
+
+#### Audited before the plaintext is returned
+
+The ordering is the point. A rotation that reached the caller and never reached
+the log is a credential change nobody can account for afterwards — and this is
+the operation most likely to be run *during* an incident review, which is when
+the log is read.
+
+#### `config-management`, and no CLI verb
+
+A connector able to rotate its own credential would be able to rotate anybody
+else's, since the operation takes a name. Administrative, therefore.
+
+And it stays an operation: `soulbind` has three verbs and keeps three, per the
+reason already in `Main`'s javadoc — everything else an operator can do goes
+through an admin credential under the same capability table, rather than a
+second management surface whose rules drift from the first.
+
+The sharp case is an admin rotating **its own** credential, which is the
+likeliest real rotation of all: the admin credential leaked, and the only
+credential able to authorize the rotation is the one being rotated. It works,
+because the request authenticates before the handler runs — and the caller is
+cut off the instant the response is written, so a lost response means
+re-registering rather than rotating again. Asserted, because moving
+authentication after dispatch would break it and the symptom would be an
+operator locked out of their own core mid-incident.
+
+### 10.5 — An export is a loop, and a loop needs core to admit it stopped early
+
+`audit.query` is bounded server-side at 1000 rows and always was, for a good
+reason: an unbounded read from an authenticated endpoint is a way to exhaust
+memory. But the bound was **silent** — a caller asking for everything got the
+ceiling with no way to tell that answer apart from the whole log.
+
+So the export deliverable was not really "add an export". It was: make a
+truncation distinguishable from an ending.
+
+#### `more` and `lastSequence` on every response, not just exports
+
+Every `audit.query` response now carries whether more rows match and where to
+resume. Putting them only on a dedicated export operation would have left every
+other caller with the same silent ceiling, and an export built on a silent
+ceiling looks complete and is not — which is worse than having no export.
+
+The cursor is a **sequence**, not an offset. `seq` is monotonic and audit rows
+are never mutated or deleted, so a page cannot shift under a reader mid-export
+the way an offset can. It also makes the export resumable across runs.
+
+`more` is computed by fetching one row more than the limit and dropping it. A
+`COUNT` would be a second query that could disagree with the page it describes.
+
+#### The ceiling was already costing something
+
+`SdkCore.auditSince` in the simulated-user tier carried this comment:
+
+> the audit log came back at core's maximum of 1000 rows, so it is truncated.
+> [...] Shorten the run or add a cursor to `audit.query`.
+
+It detected the ceiling and refused to conclude, which was right, but it also
+capped how long a Tier 9 run could be. It pages now, so run length is no longer
+limited by how much of the log the checker can read.
+
+#### What the tool cannot do, stated rather than implied
+
+`tools/audit-export.sh` cannot detect a core that lies about `more`. A core
+claiming the log ends after one page is indistinguishable from a log that is
+one page long, and no client-side check can separate them. What it can do is
+report what it actually got, so the figure is there to compare against what the
+operator expects — and that is what the `truncate-silently` mutant asserts.
+
+What it *can* catch is a core that says more remain without advancing the
+cursor. A tool that trusts that loops forever, rewriting the same page into the
+archive: a file of repeated rows that looks like an export. The first version
+guarded only the empty-page case, and the `freeze-cursor` mutant — a full page
+with a frozen cursor — went straight through it and hung. Two mutants because
+they are two bugs.
+
+#### Three copies of the canonical signing string
+
+`tools/rpc.sh` opens by saying it is the one implementation of the signing,
+deliberately, because three copies of an HMAC canonical form are three chances
+to drift from what the golden vectors exist to keep identical.
+
+There were three copies. `harness/fullstack/redeem.sh` had a full duplicate,
+down to the newlines, with no reason recorded — it now calls `rpc.sh`.
+`harness/fullstack/fuzz-live.sh` keeps its own and has to: it sends
+deliberately malformed bodies that `rpc.sh` refuses before they reach the wire.
+That is the whole narrowing, and it covers exactly the one script.
+
+`rpc.sh` moved from `harness/` to `tools/` in the process. It is not a harness
+detail any more — it is how an operator makes a signed call, and the export
+tool is its first shipped caller.
+
+#### Two smokes that were never wired to anything
+
+`credential-smoke.sh` was written as a workstation one-off and never ran
+anywhere automatically, so it could rot silently between the sessions that
+happened to invoke it by hand. Both it and the new export smoke are now a
+`reaper test` stage — cheap, well under a minute together, and covering the one
+thing a workstation build cannot: a shipped script speaking the real wire
+format to a real core.
+
+Wiring them in surfaced the reason they had not been: the reaper guest host has
+podman and **no JDK**, so a smoke running gradle there fails with "JAVA_HOME is
+not set". `harness/tools/core-env.sh` picks between a host JDK and the pinned
+toolchain container, so the same script runs on both. Its repo root is a
+parameter rather than derived from `$0` — deriving it worked for the caller it
+was written against and pointed one directory above the repository for the
+second one.
+
+**Container mode is unverified until a session run.** This workstation is
+FreeBSD and has no podman, so only the host path has executed. Stated rather
+than discovered.

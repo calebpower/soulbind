@@ -17,6 +17,7 @@
 package dev.soulbind.core.storage;
 
 import dev.soulbind.core.audit.AuditEntry;
+import dev.soulbind.core.audit.AuditPage;
 import dev.soulbind.core.audit.AuditQuery;
 import java.util.List;
 
@@ -44,8 +45,25 @@ public interface AuditRepository {
      */
     AuditEntry append(AuditEntry entry);
 
-    /** Reads entries matching a query, oldest first. */
-    List<AuditEntry> query(AuditQuery query);
+    /**
+     * Reads entries matching a query, oldest first.
+     *
+     * <p>Convenience over {@link #page(AuditQuery)} for callers that genuinely
+     * want the bounded answer -- an internal check, a test. Anything reading on
+     * behalf of somebody who might want the whole log wants the page, because
+     * only the page can say it stopped early.
+     */
+    default List<AuditEntry> query(AuditQuery query) {
+        return page(query).entries();
+    }
+
+    /**
+     * Reads one page matching a query, oldest first, saying whether more remain.
+     *
+     * <p>The single implementation, so the bounded read and the paged read
+     * cannot come to disagree about what matches.
+     */
+    AuditPage page(AuditQuery query);
 
     /** The highest sequence number assigned so far, or 0 if the log is empty. */
     long highestSequence();
