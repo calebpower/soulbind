@@ -6502,3 +6502,79 @@ whose expected answer needs a model belongs to an invariant rather than here.
 
 Departure 9 shrinks by one: of the two deferred nemesis classes, double redeem
 is implemented. The shrinker remains deferred.
+
+### 10.23 — The proxy's group effector was never connected to anything
+
+Found while extending `rule.changed` handling to the second effector, and it
+turned out there was no second effector to extend. `connector-velocity`'s
+`GroupEffector` was inert **twice over**:
+
+1. **Nothing in production ever called `grant` or `revoke`.** Only tests did.
+   The proxy connector never subscribed to core's event stream at all — no
+   `event.subscribe`, no scheduler, no drain.
+2. **It was constructed so it could never be available.** The plugin called
+   `GroupEffector.discover("net.luckperms.api.LuckPermsProvider",
+   java.util.Optional::empty, log)`. That second argument is the resolver, so
+   even with LuckPerms installed `discover` fell straight through to
+   `absent()`. A placeholder nobody replaced — and the LuckPerms API was not
+   even a declared dependency, so there was nothing it *could* have resolved to.
+
+So an operator setting `effector.group` got nothing, ever. `VelocityConfig`
+validates *"effector.group is set but gate.join is not, so nothing will ever
+grant it"*, which reads as though the author believed the gate drove the grant.
+Nothing did.
+
+**Why nothing caught it.** Phase 5's gate is the join gate — refused, admitted
+by override, `/link`, link completes — which is `decide`, a different path.
+Phase 4's event gate was proven with the chat connector. And LuckPerms is not
+in the composed stack, so no tier could have exercised it even in principle.
+Three tiers, none of them looking here.
+
+I also described this wrongly at first, and the correction matters: I said this
+effector "consumed events core does not emit", which would have made it the
+same defect as 10.18. It is worse than that — it consumed nothing, because it
+was never wired.
+
+#### What was built
+
+`LuckPermsGroups` is the real resolver, isolated in its own class so
+`GroupEffector` stays testable without LuckPerms on the classpath. The API is
+`compileOnly` (MIT), like the proxy API and Plan: the operator's own
+installation supplies it, and the plugin jar bundles none of it — asserted by
+`PluginJarGuardTest`, which reads the built zip.
+
+`GroupSync` is the drain that did not exist, deliberately the same shape as the
+chat connector's: acknowledge only after applying, dedupe on the event's
+idempotency key, and stop at the first failure rather than acknowledging past a
+gap.
+
+#### Reconciliation is scoped differently here, and that is the point
+
+The chat connector re-checks *every* holder of the role, because it can
+enumerate them from a guild list already in memory. Answering "who is in this
+group" from LuckPerms means sweeping user storage — every account that has ever
+joined — to reach players who are not connected and therefore cannot use the
+group anyway.
+
+So on `rule.changed` the proxy re-checks **online players**, and an offline
+player is re-checked when they next join: the moment it starts mattering. Same
+guarantee where it counts, without a sweep that grows with the server's whole
+history.
+
+Blocking on LuckPerms' future is also deliberate. The effector reports whether
+the change was applied and the caller acknowledges only after — so returning
+before LuckPerms had written would let the connector acknowledge work it had
+not finished, and the event would never come back.
+
+#### A fourth guard caught this work
+
+`NoticeGuardTest` failed the build: `luckperms-api` entered
+`gradle/libs.versions.toml` and was not disclosed in `NOTICE`. That is the
+guard's first assertion doing exactly its job — the catalogue is where a
+dependency is added, so it is the side that moves, and an addition that never
+reaches `NOTICE` is an undisclosed third party.
+
+**Still unproven in situ.** LuckPerms is not in the full-stack tier, so all of
+the above is unit-tested and none of it has run against a real proxy with a real
+permissions plugin — which is precisely the condition that let the original bug
+live. Adding it to the tier is the next piece.

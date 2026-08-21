@@ -13,6 +13,11 @@ dependencies {
     // keeps this module distributable under Apache-2.0 (§16).
     compileOnly(libs.velocity.api)
 
+    // compileOnly for the same reason: the proxy's LuckPerms supplies this at
+    // runtime. MIT, and nothing here ships it -- an operator without LuckPerms
+    // still gets linking and the join gate, just no group.
+    compileOnly(libs.luckperms.api)
+
     // Available to tests, because a component test constructs the API's own
     // types. Still never shipped.
     testCompileOnly(libs.velocity.api)

@@ -71,6 +71,8 @@ public final class SoulbindVelocityPlugin {
     private JoinGate joinGate;
     private LinkCommandLogic linkCommand;
     private GroupEffector effector;
+    private GroupSync groupSync;
+    private java.util.concurrent.ScheduledExecutorService drains;
     private ExecutorService pool;
 
     @Inject
@@ -138,7 +140,17 @@ public final class SoulbindVelocityPlugin {
 
         effector = GroupEffector.discover(
                 "net.luckperms.api.LuckPermsProvider",
-                java.util.Optional::empty,
+                // The real resolver. This was `Optional::empty` -- a
+                // placeholder that made the effector fall through to absent()
+                // even with LuckPerms installed, so every group grant was a
+                // no-op. DECISIONS 10.23.
+                () -> LuckPermsGroups.resolve((message, cause) -> {
+                    if (cause == null) {
+                        logger.info(message);
+                    } else {
+                        logger.warn(message, cause);
+                    }
+                }),
                 (message, cause) -> {
                     if (cause == null) {
                         logger.info(message);
@@ -146,6 +158,49 @@ public final class SoulbindVelocityPlugin {
                         logger.warn(message, cause);
                     }
                 });
+
+        // The event drain, which did not exist: nothing here ever called the
+        // effector, so effector.group achieved nothing however it was
+        // configured. DECISIONS 10.23.
+        groupSync = new GroupSync(
+                client,
+                effector,
+                new dev.soulbind.sdk.IdempotentApplier(),
+                config.findString(VelocityConfig.JOIN_GATE).orElse(null),
+                config.findString(VelocityConfig.EFFECTOR_GROUP).orElse(null),
+                VelocityConfig.platformKind(config),
+                () -> proxy.getAllPlayers().stream().map(Player::getUniqueId).toList(),
+                (message, cause) -> {
+                    if (cause == null) {
+                        logger.info(message);
+                    } else {
+                        logger.warn(message, cause);
+                    }
+                });
+
+        if (groupSync.isConfigured()) {
+            // On the connector's own pool, never a proxy event thread, and at a
+            // fixed delay rather than a fixed rate: a slow core must not queue
+            // drains behind each other until the pool is full of them.
+            drains = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "soulbind-groups");
+                t.setDaemon(true);
+                return t;
+            });
+            drains.scheduleWithFixedDelay(() -> {
+                try {
+                    groupSync.drain();
+                } catch (RuntimeException e) {
+                    // Never propagate: an exception out of a scheduled task
+                    // cancels all future runs silently, and the group effector
+                    // would simply stop with nothing said.
+                    logger.warn("group sync failed; it will be retried", e);
+                }
+            }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
+            logger.info("group sync active: '{}' on gate '{}'",
+                    config.findString(VelocityConfig.EFFECTOR_GROUP).orElse(""),
+                    config.findString(VelocityConfig.JOIN_GATE).orElse(""));
+        }
 
         CommandManager commands = proxy.getCommandManager();
         commands.register(
@@ -160,6 +215,9 @@ public final class SoulbindVelocityPlugin {
 
     @Subscribe
     public void onShutdown(ProxyShutdownEvent event) {
+        if (drains != null) {
+            drains.shutdownNow();
+        }
         if (pool != null) {
             pool.shutdownNow();
         }

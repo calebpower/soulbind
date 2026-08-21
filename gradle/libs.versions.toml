@@ -23,6 +23,7 @@ junit = "5.11.4"
 toml = "1.1.1"
 velocity = "3.5.1"
 jda = "5.6.1"
+luckperms = "5.5"
 
 [libraries]
 # --- HTTP + WebSocket (Apache-2.0; Jetty beneath it is EPL-2.0/Apache-2.0
@@ -46,6 +47,16 @@ sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
 mariadb-jdbc = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb" }
 
 # --- Proxy API ---
+# LuckPerms API: MIT, and compileOnly for the same reason as velocity-api -- the
+# proxy supplies the implementation at runtime, so nothing here is distributed
+# and the licence inventory (which walks resolved RUNTIME graphs) never sees it.
+#
+# Added in Phase 10 because the group effector had no way to reach a permissions
+# plugin at all: the plugin passed `Optional::empty` as the resolver, so even
+# with LuckPerms installed the effector fell through to absent(). See
+# DECISIONS 10.23.
+luckperms-api = { module = "net.luckperms:api", version.ref = "luckperms" }
+
 # velocity-api is MIT. The PROXY itself is GPLv3 and is never distributed by us;
 # plugins compile against this api module only, which is why §16 permits it in
 # an Apache-2.0 project. compileOnly everywhere: the proxy supplies it at

@@ -38,6 +38,10 @@ below with their licences.
   com.djrapitops:Plan ........................ LGPL-3.0
       compileOnly. Not distributed: the analytics plugin is the host and
       supplies it at runtime.
+  net.luckperms:api .......................... MIT
+      compileOnly. Not distributed: the permissions plugin on the operator's
+      proxy supplies it at runtime. A proxy without LuckPerms still links
+      accounts and enforces the join gate; it simply applies no group.
 
 The list above is the DECLARED set. The complete inventory -- around forty
 artifacts per distribution once transitive dependencies are counted -- is
