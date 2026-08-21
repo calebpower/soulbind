@@ -5613,3 +5613,37 @@ did not take it, which is the one property audit attribution exists to protect.
 
 That javadoc is also updated: rotation exists now, so losing a credential no
 longer means registering a second connector.
+
+### 10.10 — The doctor could not see the machine
+
+Every check the doctor had read the configuration and reasoned about it. That
+is the wrong half of the problem. An operator's failures are about the machine:
+a config file anybody can read, a database directory the service user cannot
+write, a path that means one thing in the shell it was tested in and another
+under systemd.
+
+Four checks added, all of which need the filesystem:
+
+- **Config permissions.** The install document says mode 0640 and nothing
+  enforced it. A world-readable config may hold the storage password, and there
+  was no other place in the system that would ever mention it.
+- **Database directory writable.** The most valuable of the four. *"It runs by
+  hand and fails under systemd"* is nearly always a hardened unit with
+  `ProtectSystem=strict` and a database path outside `ReadWritePaths=`, and it
+  arrives as a JDBC error about a file, several layers from the cause. The
+  finding names `ReadWritePaths=` so the reader does not have to go and find it.
+- **Relative database path.** Resolves against the working directory, which
+  under systemd is not the one it was tested in — so core comes up against an
+  empty database with no error at all.
+- **Settings that do nothing.** `storage.user` with `backend = "sqlite"` works
+  fine and is almost always somebody who meant to switch to MariaDB and changed
+  one line of two.
+
+Each has a control asserting it does *not* fire on a correct installation. A
+doctor that warns about everything gets ignored, which is a worse failure than
+not having one, because it is the state people believe they have checked.
+
+Run against the shipped sample config on a machine where `/var/lib/soulbind`
+does not exist, it now fails with that as the reason — which is the install
+document's step 2, and confirms the document's ordering puts directory creation
+before the check that depends on it.

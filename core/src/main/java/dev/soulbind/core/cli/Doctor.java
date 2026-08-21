@@ -21,6 +21,9 @@ import dev.soulbind.config.ConfigException;
 import dev.soulbind.core.CoreConfig;
 import dev.soulbind.core.storage.Backend;
 import java.io.PrintStream;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -120,7 +123,128 @@ public final class Doctor {
         findings.addAll(examineBackend(config));
         findings.addAll(examineBinding(config));
         findings.addAll(examineSecrets(config));
+        findings.addAll(examinePermissions(configFile));
+        findings.addAll(examineStorageLocation(config));
+        findings.addAll(examineUnusedSettings(config));
 
+        return findings;
+    }
+
+    /**
+     * Can anybody read the file the password might be in?
+     *
+     * <p>Static analysis of the configuration cannot see this, and it is the
+     * one thing about the config file that a person can get wrong without any
+     * symptom at all. The install document says mode 0640; nothing enforced it.
+     */
+    private static List<Finding> examinePermissions(Path configFile) {
+        Set<PosixFilePermission> permissions;
+        try {
+            permissions = Files.getPosixFilePermissions(configFile);
+        } catch (UnsupportedOperationException | IOException e) {
+            // A filesystem without POSIX permissions. Saying nothing is right:
+            // a warning nobody can act on trains people to ignore warnings.
+            return List.of();
+        }
+
+        if (permissions.contains(PosixFilePermission.OTHERS_READ)
+                || permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+            return List.of(new Finding(
+                    Level.WARN, "permissions",
+                    configFile + " is readable by any user on this machine. It may hold the "
+                            + "storage password, and it names the database. chmod 640 it and "
+                            + "give it to the group the service runs as."));
+        }
+        return List.of(new Finding(
+                Level.OK, "permissions", configFile + " is not world-readable"));
+    }
+
+    /**
+     * For SQLite: is the database somewhere the service can actually write?
+     *
+     * <p>This is the check that would have saved the most time. "It runs by
+     * hand and fails under systemd" is nearly always this -- a hardened unit
+     * with {@code ProtectSystem=strict} and a database path outside
+     * {@code ReadWritePaths=} -- and the failure arrives at start-up as a JDBC
+     * error about a file, several layers away from the cause.
+     */
+    private static List<Finding> examineStorageLocation(Config config) {
+        if (Backend.fromConfigName(config.getString(CoreConfig.STORAGE_BACKEND))
+                .filter(b -> b == Backend.SQLITE).isEmpty()) {
+            return List.of();
+        }
+
+        String url = config.getString(CoreConfig.STORAGE_URL);
+        String prefix = "jdbc:sqlite:";
+        if (!url.startsWith(prefix)) {
+            return List.of();
+        }
+        String path = url.substring(prefix.length());
+        if (path.isBlank() || path.startsWith(":")) {
+            // ":memory:" and friends. Not a file, nothing to check, and the
+            // configuration validator has already had its say about whether it
+            // is a sensible thing to run a deployment on.
+            return List.of();
+        }
+
+        List<Finding> findings = new ArrayList<>();
+        Path database = Path.of(path);
+
+        if (!database.isAbsolute()) {
+            findings.add(new Finding(
+                    Level.WARN, "storage",
+                    "the database path '" + path + "' is relative, so it resolves against the "
+                            + "working directory -- which under systemd is not where you ran "
+                            + "this command. Use an absolute path."));
+        }
+
+        Path directory = database.toAbsolutePath().getParent();
+        if (directory == null) {
+            return findings;
+        }
+        if (!Files.isDirectory(directory)) {
+            findings.add(new Finding(
+                    Level.FAIL, "storage",
+                    directory + " does not exist, so the database cannot be created there. "
+                            + "mkdir it and chown it to the user the service runs as."));
+        } else if (!Files.isWritable(directory)) {
+            findings.add(new Finding(
+                    Level.FAIL, "storage",
+                    directory + " is not writable by this user. SQLite needs to create the "
+                            + "database and its journal there. chown it to the service user, "
+                            + "and if the unit sets ProtectSystem=strict make sure the path is "
+                            + "in ReadWritePaths=."));
+        } else {
+            findings.add(new Finding(
+                    Level.OK, "storage", directory + " is writable"));
+        }
+        return findings;
+    }
+
+    /**
+     * Settings that are set and do nothing.
+     *
+     * <p>Not a failure -- everything works. It is here because a setting that
+     * appears to be present and has no effect is how somebody spends an
+     * afternoon: they set it, nothing changed, and nothing said why.
+     */
+    private static List<Finding> examineUnusedSettings(Config config) {
+        List<Finding> findings = new ArrayList<>();
+        boolean sqlite = Backend.fromConfigName(config.getString(CoreConfig.STORAGE_BACKEND))
+                .filter(b -> b == Backend.SQLITE).isPresent();
+
+        if (sqlite && config.findString(CoreConfig.STORAGE_USER).isPresent()) {
+            findings.add(new Finding(
+                    Level.WARN, "storage",
+                    "storage.user is set and SQLite ignores it. If you meant to use MariaDB, "
+                            + "storage.backend still says sqlite."));
+        }
+        if (!sqlite && config.findString(CoreConfig.STORAGE_USER).isEmpty()) {
+            findings.add(new Finding(
+                    Level.WARN, "storage",
+                    "storage.user is not set, and this backend needs one. Connecting will "
+                            + "fail at start-up rather than here."));
+        }
         return findings;
     }
 
