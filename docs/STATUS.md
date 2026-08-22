@@ -108,6 +108,42 @@ green; `reaper-manifest-validate` passes.*
 | `reaper-manifest-validate` passes | `ok    .reaper.toml  (1 guest)`, exit 0 |
 | `reaper test` green | See "the pre-push loop", below |
 
+## The pre-push loop
+
+Referenced from the gate table above, and missing from this document until
+Phase 10 — a promise it made and did not keep.
+
+```sh
+reaper up          # create the session
+reaper test        # sync, build, reset, run
+reaper down        # destroy it
+```
+
+**`reaper test` does not create its own session.** It did once, which is why
+every earlier note here says "`reaper test` green" as though that were the whole
+command, and why `reaper list` showed nothing after a run. The current CLI
+refuses instead:
+
+```
+reaper: no sessions for "soulbind". `reaper up` creates one (it is not part of
+`reaper test`, which needs a session to already be there)
+```
+
+That is a better refusal than the old implicit behaviour — a session is a
+machine, and creating one as a side effect of asking for a test run is the kind
+of thing that leaves a VM behind when the run dies. But it means the loop is
+three commands, and nothing in this repository said so.
+
+`reaper down` is not optional politeness: the session holds a machine until its
+TTL expires, and `reaper doctor` warns that a sweeper with no expired machine to
+find has never been proven to work on this site.
+
+What the run covers is the manifest in [`.reaper.toml`](../.reaper.toml): the
+unit suite on both storage backends, the cross-language vectors, PHP unit and
+mutation, the shell mutation battery and the group-check control, **the Java
+mutation ratchet**, the operator tools, the clean-install gate, the forum tier on
+both engines, and the full-stack tier on both engines.
+
 ## What was verified, not assumed
 
 **Per-module release levels.** One Java 25 toolchain; class-file major versions
@@ -226,7 +262,7 @@ Phase 1" ended when Phase 1 shipped them with fixtures.
     stage's own traffic; the forum tier's watchdog covers the browser suite
     the same way.
 
-## Known gaps## Known gaps
+## Known gaps
 
 **A failed session leaves the previous run's results on the workstation.**
 reaper's backward sync merges rather than mirrors, so when `reaper test` fails

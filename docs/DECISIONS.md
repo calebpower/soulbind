@@ -7849,3 +7849,41 @@ asserted anyway to catch a future relaxation of that rule. So the mutant cannot
 be killed without weakening the rule it guards. Recorded at the line so a sweep
 skips it rather than deleting a guard that exists for a change nobody has made
 yet.
+
+### 10.41 — The reaper upgrade changed the loop, and nothing said so
+
+A new reaper landed mid-session. `reaper doctor` reports the site healthy — 13
+ok, 2 warnings, 0 failed — and `.reaper.toml` validates unchanged, so the schema
+and the manifest carry over. One thing did change, and it is the thing every
+note in this repository assumed:
+
+```
+reaper: no sessions for "soulbind". `reaper up` creates one (it is not part of
+`reaper test`, which needs a session to already be there)
+```
+
+**`reaper test` no longer creates its session.** It did before, which is why
+every reference here says "`reaper test` green" as though that were the whole
+command, and why `reaper list` showed nothing after a run.
+
+The new behaviour is better. A session is a machine, and creating one as a side
+effect of asking for a test run is exactly how a VM gets left behind when the run
+dies. But the loop is three commands now — `up`, `test`, `down` — and this
+repository documented none of them.
+
+#### And a promise `docs/STATUS.md` was not keeping
+
+Chasing that turned up a dangling reference: the Phase 0 gate table has a row
+reading *"`reaper test` green | See 'the pre-push loop', below"* and **there is
+no such section**. It has been pointing at nothing.
+
+Written now, with the three-command form, what each command is for, and why
+`down` is not optional politeness — the session holds a machine until its TTL
+expires, and `reaper doctor` warns that a sweeper with no expired machine to
+find has never been proven to work on this site.
+
+Same class of defect as `OverrideView.id` in 10.26: a document that declares
+something and never fills it in. Cheaper to find, and it had been there longer.
+
+Also fixed while in the file: the `## Known gaps## Known gaps` heading, which
+had been duplicated on one line since Phase 0.
