@@ -799,7 +799,6 @@ public final class CoreHandlers {
 
     private static OverrideView toView(PolicyOverride override) {
         return new OverrideView(
-                null,
                 override.gateName(),
                 override.subjectId(),
                 override.identityRef(),

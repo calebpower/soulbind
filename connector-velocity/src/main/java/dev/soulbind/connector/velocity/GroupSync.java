@@ -235,10 +235,11 @@ final class GroupSync {
     /** A poll failure in one short phrase, for the latched outage line. */
     private static String describe(SoulbindClient.Outcome outcome) {
         if (outcome instanceof SoulbindClient.Outcome.Refused refused) {
-            // wireName(), not the enum's toString(). An operator who reads
-            // "INTERNAL" here and searches docs/protocol.md for it finds
-            // `internal`; the log should print the name the document uses.
-            return refused.code().wireName() + ": " + refused.message();
+            // reportedCode(), which is what core actually sent -- not this
+            // build's parse of it. A code this connector has no constant for
+            // parses to INTERNAL, and printing that would hide a version skew
+            // behind the least informative word available. DECISIONS 10.34.
+            return refused.reportedCode() + ": " + refused.message();
         }
         return "core unreachable";
     }

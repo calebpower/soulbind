@@ -7457,3 +7457,105 @@ assumed this time:** `Runner` is its only constructor, and `harness/fullstack/ru
 builds `:sim:installDist` and runs it against a live core in the session. It is
 exercised out of process, where PIT cannot see it — the same standing as
 `ScriptedDriver` in the chat connector.
+
+### 10.34 — core's storage and CLI, and a stack trace at an operator
+
+Working the mutation tail through `core`. **131 survivors to 100, 173 uncovered
+to 145, 68% killed to 75%, test strength 83% to 88%** — and that was before the
+CLI pass below.
+
+#### A repository nothing executed
+
+Every mutant in `JdbcRuntimeConfigRepository` came back "no coverage" — the
+reads, the upsert and the delete alike. It is what `config.set` writes and what
+the doctor reads back, so a silent failure surfaces to an operator as "the
+setting did not take", with nothing to grep for.
+
+The upsert is the part that needed the attention: it tries an UPDATE and falls
+back to an INSERT, which is two statements where a careless reading sees one.
+**Both orders** are now exercised — a key that exists and a key that does not,
+the second reached by setting, clearing, and setting again — because getting
+that backwards produces a repository that appears to work until somebody
+changes their mind twice.
+
+#### One column read back, eight bound
+
+The pattern was everywhere in the storage package: a write binds eight or nine
+parameters, and the test around it reads back the one or two the test was about.
+Mutation deleted individual `setString` calls across four repositories — the
+display, the proof method, the flags, an override's reason — and nothing failed.
+
+`StorageColumnsTest` round-trips every column of an identity, a rule, an
+override and an event payload, **with a distinct value in every field**, so a
+swap is as visible as an omission. Two of those fields carry weight beyond
+themselves: an override's `reason` is the entire record of why an exception
+exists, and its `expiresAt` is the difference between a temporary exception and
+a permanent one.
+
+#### Retry logic that SQLite cannot exercise
+
+`Jdbc`'s transaction and retry machinery was untested for a structural reason
+worth stating: **it is dead code on SQLite**, which serialises write
+transactions and cannot produce a serialisation failure at all. The workstation
+runs SQLite, so the storage suite ran the happy path and nothing else — commit,
+rollback, and the retryable check could each be deleted with no test noticing.
+
+Driven now through a proxied `Connection` rather than a database, because the
+question is not what an engine does but what this class does when the engine
+says no, and an engine that says no on demand is harder to arrange than one that
+is not there. Asserted: commit exactly once, autocommit set **and restored**
+(a pooled connection handed back with autocommit off makes the NEXT caller's
+writes silently never commit), the caller's own exception escaping rather than
+being replaced, a failed rollback attached rather than substituted, a
+serialisation failure found through the cause chain, and the bound holding at
+four attempts.
+
+#### The CLI's usage text, which nobody had read
+
+Eighteen of `cli.Main`'s twenty-two survivors were `println` lines in
+`usage()`. Nothing had ever asserted what an operator is shown when they type
+the command wrong.
+
+Now the usage names every verb the dispatcher knows **and** every named verb is
+recognised — checked on whether the dispatcher said "unknown verb", not on the
+exit code, because `register` without `--name` legitimately exits the same code
+an unknown verb does. Plus: the exit codes are documented, `-h` works as well as
+`--help`, the bare command is a failure rather than a help screen, and usage for
+a mistake goes to **stderr** where a script capturing stdout will not swallow it.
+
+Two older tests were deleted because these subsume them entirely. That is
+strengthening, and it is noted at the replacements so a reader does not go
+looking for what was removed.
+
+`Bootstrap.report` had six deletable lines, one of them the credential itself
+and three the warning that it will never be shown again — the difference between
+an operator copying it now and registering a second connector tomorrow.
+
+#### The defect the CLI pass found
+
+Walking every advertised verb with a config path that does not exist turned up
+an unhandled `UncheckedIOException`. **`doctor` handled a missing file and the
+other verbs did not**, which is the worst possible arrangement: the command an
+operator runs to check things was the only one that behaved, and
+`serve --config typo.toml` — the most ordinary mistake there is — came out as a
+stack trace.
+
+`run` now treats a config that cannot be READ the same as one that is wrong. The
+test walks the three verbs that read configuration and asserts none of them
+prints a stack trace, and asserts separately that `version` still answers
+without touching the file at all — because "which version is this" is the
+question somebody most wants answered on a broken install.
+
+#### Two things written down earlier, now done
+
+**`OverrideView.id` is removed.** It was declared and never populated, which is
+why removal-by-id was unreachable over the protocol; target-based removal made
+it unnecessary. A field nothing fills is a promise the protocol document makes
+and nothing keeps.
+
+**An unrecognised error code no longer vanishes.** `Outcome.Refused` carries
+`reportedCode` — what core actually sent — beside the parsed enum. An older
+connector against a newer core used to report every refusal it had no constant
+for as `internal`, with the real code gone from every log. Both effectors print
+the real one now, and `isRecognised()` makes a version skew something a
+connector can say rather than something it hides.

@@ -78,8 +78,51 @@ public final class SoulbindClient implements AutoCloseable {
          */
         record Ok(Payload payload) implements Outcome {}
 
-        /** Core answered, and the answer is no. */
-        record Refused(ErrorCode code, String message) implements Outcome {}
+        /**
+         * Core answered, and the answer is no.
+         *
+         * @param code the refusal as THIS build understands it, which is
+         *     {@link ErrorCode#INTERNAL} for anything it has no constant for
+         * @param message core's own words
+         * @param reportedCode the code exactly as core sent it
+         *
+         * <p><b>Why the third field.</b> An unrecognised code used to collapse
+         * to {@code INTERNAL} and the original was gone — not in a log, not
+         * anywhere. So an older connector talking to a newer core reported
+         * every refusal it had no name for as an internal error, and an
+         * operator chasing "internal" would never learn they had a version
+         * skew. Keeping both means a connector can branch on the parsed value
+         * and still SAY the real one. See DECISIONS 10.34.
+         */
+        record Refused(ErrorCode code, String message, String reportedCode) implements Outcome {
+
+            public Refused {
+                if (reportedCode == null || reportedCode.isBlank()) {
+                    reportedCode = code == null ? "" : code.wireName();
+                }
+            }
+
+            /**
+             * For a caller that has only a parsed code.
+             *
+             * <p>Mostly tests. Anything reading a real response should use the
+             * three-argument form, or the distinction above is lost at the one
+             * point it could have been kept.
+             */
+            public Refused(ErrorCode code, String message) {
+                this(code, message, null);
+            }
+
+            /**
+             * Whether this build recognised the code core sent.
+             *
+             * <p>False means a version skew, and saying so is more useful than
+             * anything else this connector can do about it.
+             */
+            public boolean isRecognised() {
+                return code != null && code.wireName().equals(reportedCode);
+            }
+        }
 
         /** Core did not answer. Distinct from being refused BY it. */
         record Unreachable(String detail) implements Outcome {}
@@ -126,12 +169,10 @@ public final class SoulbindClient implements AutoCloseable {
                 return new Outcome.Ok(new Payload(root.get(Wire.PAYLOAD)));
             }
             JsonNode error = root.get(Wire.ERROR);
-            ErrorCode code = error == null
-                    ? ErrorCode.INTERNAL
-                    : ErrorCode.fromWireName(error.path(Wire.ERROR_CODE).asText())
-                            .orElse(ErrorCode.INTERNAL);
+            String reportedCode = error == null ? "" : error.path(Wire.ERROR_CODE).asText("");
+            ErrorCode code = ErrorCode.fromWireName(reportedCode).orElse(ErrorCode.INTERNAL);
             String message = error == null ? "" : error.path(Wire.ERROR_MESSAGE).asText("");
-            return new Outcome.Refused(code, message);
+            return new Outcome.Refused(code, message, reportedCode);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             return new Outcome.Unreachable("the response could not be parsed");
         }

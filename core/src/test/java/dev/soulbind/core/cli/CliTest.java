@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.core.registry.Credentials;
+import dev.soulbind.core.CoreVersion;
 import dev.soulbind.core.storage.Backend;
 import dev.soulbind.core.storage.Storage;
 import dev.soulbind.core.storage.StorageBackends;
@@ -328,20 +329,6 @@ class CliTest {
     }
 
     @Test
-    @DisplayName("an unknown verb exits 2 and says so")
-    void unknownVerb() {
-        Run run = invoke("frobnicate");
-        assertEquals(Doctor.EXIT_CANNOT_RUN, run.exit());
-        assertTrue(run.err().contains("unknown verb"), run.err());
-    }
-
-    @Test
-    @DisplayName("--help exits 0")
-    void help() {
-        assertEquals(Doctor.EXIT_HEALTHY, invoke("--help").exit());
-    }
-
-    @Test
     @DisplayName("register without --name exits 2 rather than registering something unnamed")
     void registerWithoutName() throws Exception {
         Run run = invoke("register", "--config", writeConfig(healthyConfig()).toString());
@@ -419,5 +406,290 @@ class CliTest {
         // server.port and storage.url are both missing.
         assertTrue(run.err().contains("server.port"), run.err());
         assertTrue(run.err().contains("storage.url"), run.err());
+    }
+
+    // --- what the doctor notices ----------------------------------------------
+
+    @Test
+    @DisplayName("a backend that IS recognised is reported as recognised, not silently")
+    void recognisedBackendIsReported() throws Exception {
+        // The OK finding matters as much as the FAIL. A doctor that says
+        // nothing about a healthy component leaves an operator unable to tell
+        // "checked and fine" from "not checked".
+        Run run = invoke("doctor", "--config", writeConfig(healthyConfig()).toString());
+
+        assertTrue(run.out().contains("is recognised"),
+                "the doctor said nothing about a backend it had just accepted: " + run.out());
+    }
+
+    @Test
+    @DisplayName("a signature window of exactly 900s does not warn; 901 does")
+    void signatureWindowBoundary() throws Exception {
+        // `> 900`, not `>= 900`. Fifteen minutes is the documented maximum and
+        // warning at the maximum would train an operator to ignore the warning
+        // that matters.
+        assertFalse(
+                invoke("doctor", "--config",
+                        writeConfig(healthyConfig() + """
+
+                                [protocol]
+                                signaturewindowseconds = 900
+                                """).toString()).out().contains("is long"),
+                "the documented maximum window produced a warning");
+
+        assertTrue(
+                invoke("doctor", "--config",
+                        writeConfig(healthyConfig() + """
+
+                                [protocol]
+                                signaturewindowseconds = 901
+                                """).toString()).out().contains("is long"),
+                "a window past the maximum produced no warning");
+    }
+
+    @Test
+    @DisplayName("a storage user the backend ignores is reported, and one it needs is too")
+    void unusedAndMissingStorageUser() throws Exception {
+        // Both directions of the same pair of conditionals. Reporting only one
+        // leaves the other silently wrong, and they fail in opposite ways: a
+        // setting that does nothing, and a missing setting that stops start-up.
+        Backend backend = StorageBackends.any();
+        String withUser = healthyConfig() + "user = \"someone\"\n";
+
+        String out = invoke("doctor", "--config", writeConfig(withUser).toString()).out();
+
+        if (backend.usesCredentials()) {
+            assertFalse(out.contains("ignores it"),
+                    "a backend that needs a user complained that the user was ignored: " + out);
+        } else {
+            assertTrue(out.contains("ignores it"),
+                    "storage.user was set for a backend that ignores it and nothing said so: "
+                            + out);
+        }
+    }
+
+    @Test
+    @DisplayName("the tally at the end counts what was actually reported")
+    void doctorTallies() throws Exception {
+        // The last line is what an operator reads first. Deleting it leaves a
+        // report that scrolls off with no summary, and a script with nothing
+        // to grep.
+        Run run = invoke("doctor", "--config", writeConfig(healthyConfig()).toString());
+
+        assertTrue(run.out().matches("(?s).*\\d+ ok, \\d+ warning\\(s\\), \\d+ failed.*"),
+                "the report has no tally line: " + run.out());
+    }
+
+    // --- what registering tells the operator ----------------------------------
+
+    @Test
+    @DisplayName("registering prints the credential ONCE, and says that it does")
+    void registerReportsEverythingItMust() throws Exception {
+        // Six of these lines could be deleted with no test failing, and one of
+        // them is the credential itself. The others are the warning that it
+        // will not be shown again -- which is the difference between an
+        // operator copying it and an operator having to register a second
+        // connector tomorrow.
+        Run run = invoke(
+                "register", "--config", writeConfig(healthyConfig()).toString(),
+                "--name", "proxy", "--capabilities", "code-entry,enforcement-point");
+
+        assertEquals(Doctor.EXIT_HEALTHY, run.exit(), run.err());
+        String out = run.out();
+
+        assertTrue(out.contains("registered proxy"), out);
+        assertTrue(out.contains("id "), "the connector id was not printed: " + out);
+        assertTrue(out.contains("code-entry") && out.contains("enforcement-point"),
+                "the capabilities granted were not printed, so an operator cannot tell what"
+                        + " they just handed out: " + out);
+        assertTrue(out.contains("credential   "),
+                "no credential was printed, which is the entire purpose of the command: "
+                        + out);
+        assertTrue(out.contains("only time the credential is shown"),
+                "nothing warned that the credential cannot be recovered: " + out);
+    }
+
+    @Test
+    @DisplayName("capabilities are listed in a stable order, however they were typed")
+    void capabilitiesAreSorted() throws Exception {
+        // Two registrations of the same set must read identically, or comparing
+        // two connectors means reading both lists twice.
+        Path config = writeConfig(healthyConfig());
+        String first = invoke(
+                "register", "--config", config.toString(), "--name", "a",
+                "--capabilities", "enforcement-point,code-entry").out();
+        String second = invoke(
+                "register", "--config", config.toString(), "--name", "b",
+                "--capabilities", "code-entry,enforcement-point").out();
+
+        assertEquals(
+                capabilityLineOf(first), capabilityLineOf(second),
+                "the same capabilities printed in different orders");
+    }
+
+    private static String capabilityLineOf(String out) {
+        return out.lines().filter(l -> l.contains("capabilities")).findFirst().orElse("");
+    }
+
+    @Test
+    @DisplayName("an unrecognised capability is refused, names itself, and lists the known")
+    void unknownCapabilityIsRefused() throws Exception {
+        // Singular and plural both, because the message picks between them and
+        // nothing had ever asked for either.
+        Run one = invoke(
+                "register", "--config", writeConfig(healthyConfig()).toString(),
+                "--name", "proxy", "--capabilities", "code-entry,wibble");
+
+        assertEquals(Doctor.EXIT_UNHEALTHY, one.exit());
+        assertTrue(one.err().contains("wibble"),
+                "the refusal does not name what was not recognised: " + one.err());
+        assertTrue(one.err().contains("capability:"),
+                "one unknown capability was reported in the plural: " + one.err());
+        assertTrue(one.err().contains("code-entry"),
+                "the known capabilities were not listed, so the operator has to go and find"
+                        + " them: " + one.err());
+
+        Run two = invoke(
+                "register", "--config", writeConfig(healthyConfig()).toString(),
+                "--name", "proxy", "--capabilities", "wibble,wobble");
+        assertTrue(two.err().contains("capabilities:"),
+                "two unknown capabilities were reported in the singular: " + two.err());
+    }
+
+    // --- the usage text -------------------------------------------------------
+
+    /**
+     * Every verb {@code run} dispatches on, written out by hand.
+     *
+     * <p>Not derived from the switch — deriving it would assert only that the
+     * code agrees with itself. A verb added without a usage line is a feature
+     * nobody can find, and a usage line for a verb that no longer exists sends
+     * an operator to type something that fails.
+     */
+    private static final List<String> VERBS = List.of("doctor", "register", "serve", "version");
+
+    @Test
+    @DisplayName("the usage text names every verb, and every named verb works")
+    void usageAndDispatchAgree() {
+        // Eighteen mutants lived in usage(): every println could be deleted on
+        // its own and no test noticed, because nothing had ever read the text
+        // an operator is shown when they type the command wrong.
+        String usage = invoke("--help").out();
+
+        for (String verb : VERBS) {
+            assertTrue(usage.contains("soulbind " + verb),
+                    () -> "the usage text does not mention '" + verb + "', so the only way to"
+                            + " discover it is to read the source:\n" + usage);
+            // Not on the exit code: `register` without --name legitimately
+            // exits CANNOT_RUN, which is the same code an unknown verb gets.
+            // The distinction is whether the dispatcher RECOGNISED the word.
+            String err = invoke(verb, "--config", "nowhere.toml").err();
+            assertFalse(err.contains("unknown verb"),
+                    () -> "usage advertises '" + verb + "' and the dispatcher does not know"
+                            + " it: " + err);
+        }
+    }
+
+    @Test
+    @DisplayName("a config path that does not exist is a message, not a stack trace")
+    void unreadableConfigIsHandled() {
+        // Found by the test above, which walked every advertised verb with a
+        // path that is not there. `doctor` handled it and the others did not --
+        // so the command an operator runs to CHECK things was the only one that
+        // behaved, and `serve --config typo.toml` came out as an unhandled
+        // UncheckedIOException.
+        // Every verb that READS the configuration. `version` is deliberately
+        // not among them: it answers from the build and touching the file at
+        // all would make "which version is this" fail on a broken install,
+        // which is the moment somebody most wants to ask.
+        for (String verb : List.of("doctor", "register", "serve")) {
+            Run run = invoke(verb, "--config", tempDir.resolve("absent.toml").toString());
+
+            assertNotEquals(0, run.exit(),
+                    () -> "'" + verb + "' carried on with a config file it could not read");
+            assertFalse(run.err().contains("\tat "),
+                    () -> "'" + verb + "' printed a stack trace at an operator: " + run.err());
+        }
+
+        assertEquals(Doctor.EXIT_HEALTHY,
+                invoke("version", "--config", tempDir.resolve("absent.toml").toString()).exit(),
+                "version failed because of a config file it has no reason to read");
+    }
+
+    @Test
+    @DisplayName("usage explains what each verb is for, not only that it exists")
+    void usageExplainsItself() {
+        String usage = invoke("--help").out();
+
+        assertTrue(usage.contains("Judge this installation"),
+                "doctor is listed with no description: " + usage);
+        assertTrue(usage.contains("print its credential ONCE"),
+                "register does not warn that the credential is shown once, which is the one"
+                        + " thing an operator has to know before running it: " + usage);
+        assertTrue(usage.contains("--quiet prints only the credential"), usage);
+        assertTrue(usage.contains("Run the dispatcher"), usage);
+        assertTrue(usage.contains("Exit 0 healthy"),
+                "the exit codes are undocumented, so a script cannot branch on them: " + usage);
+        assertTrue(usage.contains(CoreVersion.VERSION),
+                "the usage text does not say which version is answering: " + usage);
+    }
+
+    // The two tests that used to live further up -- "an unknown verb exits 2
+    // and says so" and "--help exits 0" -- are gone because these two subsume
+    // them entirely and then assert the things they did not: which stream the
+    // usage goes to, that -h works as well as --help, and that the bare command
+    // is a failure rather than a help screen.
+
+    @Test
+    @DisplayName("no argument at all is a failure; --help is not")
+    void helpIsNotAnError() {
+        // Typing the bare command is a mistake and should exit non-zero so a
+        // script notices. Asking for help is not.
+        assertEquals(Doctor.EXIT_CANNOT_RUN, invoke().exit(),
+                "the bare command exited 0, so a script that forgot its arguments carries on");
+        assertEquals(Doctor.EXIT_HEALTHY, invoke("--help").exit());
+        assertEquals(Doctor.EXIT_HEALTHY, invoke("-h").exit());
+    }
+
+    @Test
+    @DisplayName("an unknown verb says so AND shows the usage, on stderr")
+    void unknownVerb() {
+        Run run = invoke("wibble");
+
+        assertEquals(Doctor.EXIT_CANNOT_RUN, run.exit());
+        assertTrue(run.err().contains("unknown verb: wibble"),
+                "the error does not repeat what was typed: " + run.err());
+        assertTrue(run.err().contains("soulbind doctor"),
+                "an unknown verb printed no usage, so somebody who mistyped has to guess"
+                        + " again: " + run.err());
+        assertTrue(run.out().isEmpty(),
+                "usage for a mistake went to stdout, where a script capturing output would"
+                        + " swallow it: " + run.out());
+    }
+
+    // --- argument parsing -----------------------------------------------------
+
+    @Test
+    @DisplayName("a flag with no value after it reads as absent, not as the next flag")
+    void flagWithoutAValue() {
+        // `i + 1 >= argv.size()` is the guard. Off by one in either direction
+        // gives an index out of bounds on a trailing flag, or silently reads
+        // the flag itself as its own value -- so `--name` alone would register
+        // a connector actually called "--name".
+        Run trailing = invoke("register", "--name");
+
+        assertEquals(Doctor.EXIT_CANNOT_RUN, trailing.exit(),
+                "a trailing --name with nothing after it was accepted");
+        assertTrue(trailing.err().contains("--name"), trailing.err());
+    }
+
+    @Test
+    @DisplayName("register with no name at all is refused, and says which word is missing")
+    void registerNeedsAName() {
+        Run run = invoke("register");
+
+        assertEquals(Doctor.EXIT_CANNOT_RUN, run.exit());
+        assertTrue(run.err().contains("--name"),
+                "the refusal does not name the missing argument: " + run.err());
     }
 }

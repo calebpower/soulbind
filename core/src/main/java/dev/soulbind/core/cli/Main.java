@@ -98,6 +98,16 @@ public final class Main {
             // operator fixing one per restart stops reading and starts guessing.
             err.println(e.getMessage());
             return Doctor.EXIT_UNHEALTHY;
+        } catch (java.io.UncheckedIOException e) {
+            // A config file that cannot be READ, as against one that is wrong.
+            // The loader signals the two differently and only the second was
+            // handled, so `serve --config nowhere.toml` -- a typo'd path, the
+            // most ordinary mistake there is -- came out as a stack trace.
+            // `doctor` handled it and the other verbs did not, which is the
+            // worst arrangement: the command an operator runs to check things
+            // is the one that behaves. DECISIONS 10.34.
+            err.println(e.getMessage());
+            return Doctor.EXIT_UNHEALTHY;
         } catch (IllegalArgumentException | IllegalStateException e) {
             err.println(e.getMessage());
             return Doctor.EXIT_UNHEALTHY;

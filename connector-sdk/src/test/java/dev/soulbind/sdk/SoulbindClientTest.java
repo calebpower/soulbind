@@ -203,7 +203,7 @@ class SoulbindClientTest {
         // told.
         SoulbindClient client = client(
                 InMemoryTransport.always(
-                        "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"unauthorized\","
+                        "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"missing-capability\","
                                 + "\"message\":\"that credential lacks code-entry\"}}"),
                 new DecisionCache());
 
@@ -211,6 +211,63 @@ class SoulbindClientTest {
                 SoulbindClient.Outcome.Refused.class, client.call("code.redeem", null));
         assertEquals("that credential lacks code-entry", refused.message(),
                 "the refusal reached the caller without core's explanation");
+    }
+
+    @Test
+    @DisplayName("a code this build does not know is kept, not flattened to INTERNAL")
+    void unknownCodeIsPreserved() {
+        // The skew case. An older connector against a newer core used to report
+        // every refusal it had no constant for as "internal", and the code core
+        // actually sent was gone -- not in a log, not anywhere. An operator
+        // chasing "internal" would never learn the two were different versions.
+        SoulbindClient client = client(
+                InMemoryTransport.always(
+                        "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"quota-exceeded\","
+                                + "\"message\":\"slow down\"}}"),
+                new DecisionCache());
+
+        SoulbindClient.Outcome.Refused refused = assertInstanceOf(
+                SoulbindClient.Outcome.Refused.class, client.call("code.redeem", null));
+
+        assertEquals("quota-exceeded", refused.reportedCode(),
+                "core's own code was discarded, so nothing anywhere can say what it actually"
+                        + " refused with");
+        assertEquals(ErrorCode.INTERNAL, refused.code(),
+                "an unrecognised code must still parse to something a switch can handle");
+        assertFalse(refused.isRecognised(),
+                "an unrecognised code was reported as understood, which is the version skew"
+                        + " being hidden rather than surfaced");
+    }
+
+    @Test
+    @DisplayName("a code this build DOES know reads back identically, and says so")
+    void knownCodeIsRecognised() {
+        SoulbindClient client = client(
+                InMemoryTransport.always(
+                        "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"missing-capability\","
+                                + "\"message\":\"nope\"}}"),
+                new DecisionCache());
+
+        SoulbindClient.Outcome.Refused refused = assertInstanceOf(
+                SoulbindClient.Outcome.Refused.class, client.call("code.redeem", null));
+
+        assertEquals("missing-capability", refused.reportedCode());
+        assertTrue(refused.isRecognised(),
+                "a code this build has a constant for was reported as unrecognised, so every"
+                        + " refusal would look like a version skew");
+    }
+
+    @Test
+    @DisplayName("a refusal built from a parsed code alone still reports one")
+    void twoArgumentFormFillsTheReportedCode() {
+        // The convenience form exists for callers that never saw a wire
+        // response -- tests, mostly. It must not leave reportedCode empty, or
+        // every log line built from it would trail off after the colon.
+        SoulbindClient.Outcome.Refused refused =
+                new SoulbindClient.Outcome.Refused(ErrorCode.MISSING_CAPABILITY, "nope");
+
+        assertEquals(ErrorCode.MISSING_CAPABILITY.wireName(), refused.reportedCode());
+        assertTrue(refused.isRecognised());
     }
 
     @Test
