@@ -7887,3 +7887,55 @@ something and never fills it in. Cheaper to find, and it had been there longer.
 
 Also fixed while in the file: the `## Known gaps## Known gaps` heading, which
 had been duplicated on one line since Phase 0.
+
+### 10.42 — The ratchet's first session run failed, in two different ways
+
+Run 26 went red at the new stage:
+
+```
+run: Java mutation ratchet
+ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
+```
+
+**My defect, and the obvious half.** The guest ships no language toolchains —
+that is the entire reason `[build] exec = "container"` exists and why every
+other Java stage in the manifest runs inside the pinned Temurin image. I wired
+the ratchet as a bare host command. Fixed by running it the way its neighbours
+already do.
+
+#### The half underneath, which the fix would have papered over
+
+`mutation-baseline.txt` said in its own header that the numbers come from the
+workstation and that **"a run in another configuration is not comparable to this
+file"**. Wiring the ratchet into the session contradicted that in the same
+commit that wrote it down. Had the JAVA_HOME failure not stopped it, the session
+run would have compared session counts against workstation rows and gone red for
+a reason having nothing to do with any change — and whoever read that would have
+learned only that the guard is unreliable.
+
+The counts are genuinely not portable: the workstation has no MariaDB, so
+`core`'s backend-specific paths count as uncovered there and are covered in a
+session. That is not noise to be tolerated, it is two different measurements.
+
+So the baseline is **keyed by environment**. `-PmutationEnv` selects the rows and
+defaults to `workstation`; the session stage passes `session`. A configuration
+with no rows fails loudly with the observed lines to paste in — the same refusal
+as an unmeasured module, for the same reason, and proven:
+
+```
+> no baseline row for 'session policy' in mutation-baseline.txt.
+  Observed now -- add this line if it is what you intend:
+```
+
+The environment is **named, never sniffed**. Deriving it from `REAPER_STATE` or
+the OS would have the guard silently compare against a different row when
+something in the environment changed, which is the failure this file exists to
+prevent one level down.
+
+The `session` rows are absent until a session run emits them. That is the design
+working rather than a gap: nobody has measured that configuration yet, and the
+ratchet says so instead of guessing.
+
+I had considered environment keying when building this and simplified it away as
+over-engineering. It did not survive first contact with the environment it was
+written for.

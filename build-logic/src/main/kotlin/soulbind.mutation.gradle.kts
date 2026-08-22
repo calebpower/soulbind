@@ -172,12 +172,20 @@ if (hasMainSources) tasks.register<JavaExec>("mutationTest") {
 // same commit as the code that needed it -- which is a decision, visible in a
 // diff, rather than a slide.
 //
-// ONE FIXED CONFIGURATION, stated. These numbers are produced with the fuzz tier
-// excluded (see the narrowing above) and with no MariaDB server, so the
-// backend-specific paths in `core` are counted as uncovered. Both make the
-// number HARSHER than the truth, which is the honest direction, and both mean a
-// run in a different configuration is not comparable. The ratchet refuses to
-// compare against a baseline it has no entry for rather than passing quietly.
+// KEYED BY ENVIRONMENT, because the numbers are not portable and pretending
+// otherwise fails in the least useful way: a battery going red for a reason
+// that has nothing to do with the change under test.
+//
+// The counts depend on which tests can run. The workstation has no MariaDB, so
+// `core`'s backend-specific paths count as uncovered there; a reaper session has
+// one. The fuzz tier is excluded in both. A single table would have the session
+// run fail against workstation numbers on its first execution, and the operator
+// would learn nothing except that the guard is unreliable.
+//
+// So each row names its environment, `-PmutationEnv` selects one (default
+// `workstation`), and a configuration with no rows fails LOUDLY with the
+// observed lines to paste in -- the same refusal as an unmeasured module, for
+// the same reason. DECISIONS 10.42.
 
 val baselineFile = rootProject.layout.projectDirectory.file("mutation-baseline.txt")
 
@@ -219,22 +227,26 @@ fun readReport(xml: java.io.File): MutationCounts {
     return MutationCounts(total, killed, survived, noCoverage, timedOut)
 }
 
-fun readBaseline(file: java.io.File): Map<String, MutationCounts> {
+fun readBaseline(file: java.io.File, environment: String): Map<String, MutationCounts> {
     if (!file.exists()) {
         return emptyMap()
     }
     return file.readLines()
         .map { it.substringBefore('#').trim() }
         .filter { it.isNotEmpty() }
-        .associate { line ->
+        .map { line ->
             val parts = line.split(Regex("""\s+"""))
-            require(parts.size == 6) {
-                "mutation-baseline.txt: expected '<module> <total> <killed> <survived> " +
-                        "<noCoverage> <timedOut>', got: $line"
+            require(parts.size == 7) {
+                "mutation-baseline.txt: expected '<environment> <module> <total> <killed> " +
+                        "<survived> <noCoverage> <timedOut>', got: $line"
             }
-            parts[0] to MutationCounts(
-                    parts[1].toInt(), parts[2].toInt(), parts[3].toInt(), parts[4].toInt(),
-                    parts[5].toInt())
+            parts
+        }
+        .filter { it[0] == environment }
+        .associate { parts ->
+            parts[1] to MutationCounts(
+                    parts[2].toInt(), parts[3].toInt(), parts[4].toInt(), parts[5].toInt(),
+                    parts[6].toInt())
         }
 }
 
@@ -247,6 +259,13 @@ if (hasMainSources) tasks.register("mutationRatchet") {
     val module = project.name
     val report = layout.buildDirectory.file("reports/pitest/mutations.xml")
     val baseline = baselineFile
+    // Named, never sniffed. Deriving it from REAPER_STATE or the OS would make
+    // the guard silently compare against a different row when something in the
+    // environment changed, which is the failure this whole file exists to
+    // prevent one level down.
+    val environment =
+            if (project.hasProperty("mutationEnv")) project.property("mutationEnv").toString()
+            else "workstation"
 
     doLast {
         val xml = report.get().asFile
@@ -256,14 +275,15 @@ if (hasMainSources) tasks.register("mutationRatchet") {
                             "this ratchet would have passed a module it never measured.")
         }
         val now = readReport(xml)
-        val was = readBaseline(baseline.asFile)[module]
+        val was = readBaseline(baseline.asFile, environment)[module]
                 ?: throw GradleException(
-                        "no baseline row for '$module' in ${baseline.asFile}.\n" +
+                        "no baseline row for '$environment $module' in " +
+                                "${baseline.asFile}.\n" +
                                 "A module with no recorded baseline is a module whose coverage " +
                                 "nobody has decided, so this refuses rather than passing.\n" +
                                 "Observed now -- add this line if it is what you intend:\n" +
-                                "    $module ${now.total} ${now.killed} ${now.survived} " +
-                                "${now.noCoverage} ${now.timedOut}")
+                                "    $environment $module ${now.total} ${now.killed} " +
+                                "${now.survived} ${now.noCoverage} ${now.timedOut}")
 
         // SURVIVED and NO_COVERAGE, not the percentage. A percentage moves when
         // mutants are added or removed and says nothing about whether anything
@@ -288,7 +308,7 @@ if (hasMainSources) tasks.register("mutationRatchet") {
 
         if (complaints.isNotEmpty()) {
             throw GradleException(
-                    "mutation coverage regressed in :$module\n" +
+                    "mutation coverage regressed in :$module [$environment]\n" +
                             complaints.joinToString("\n") { "  $it" } + "\n\n" +
                             "Read build/reports/pitest/index.html and either kill them, or " +
                             "-- if the change is deliberate and the reason is written down " +
@@ -298,22 +318,22 @@ if (hasMainSources) tasks.register("mutationRatchet") {
                             "(${was.timedOut} -> ${now.timedOut} here), this is timing noise " +
                             "rather than a regression -- re-run this module alone to " +
                             "confirm before changing anything.\n" +
-                            "    $module ${now.total} ${now.killed} ${now.survived} " +
-                            "${now.noCoverage} ${now.timedOut}")
+                            "    $environment $module ${now.total} ${now.killed} " +
+                            "${now.survived} ${now.noCoverage} ${now.timedOut}")
         }
 
         val improved = (was.survived - now.survived) + (was.noCoverage - now.noCoverage)
         if (improved > 0) {
             logger.lifecycle(
-                    ":$module mutation coverage IMPROVED by $improved mutant(s) " +
+                    ":$module [$environment] mutation coverage IMPROVED by $improved mutant(s) " +
                             "(survivors ${was.survived} -> ${now.survived}, uncovered " +
                             "${was.noCoverage} -> ${now.noCoverage}). Tighten the baseline in " +
                             "${baseline.asFile.name} so it cannot slide back:\n" +
-                            "    $module ${now.total} ${now.killed} ${now.survived} " +
-                            "${now.noCoverage} ${now.timedOut}")
+                            "    $environment $module ${now.total} ${now.killed} " +
+                            "${now.survived} ${now.noCoverage} ${now.timedOut}")
         } else {
             logger.lifecycle(
-                    ":$module mutation coverage held: ${now.killed}/${now.total} killed, " +
+                    ":$module [$environment] mutation coverage held: ${now.killed}/${now.total} killed, " +
                             "${now.survived} survived, ${now.noCoverage} uncovered, " +
                             "${now.timedOut} timed out")
         }

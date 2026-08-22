@@ -273,8 +273,21 @@ cp -r connector-flarum/build/infection/. out/infection/
 # baseline cannot be compared with, and a ratchet comparing unlike things fires
 # for the wrong reason. Closing that gap is its own task, not a side effect of
 # this one.
+# IN THE PINNED CONTAINER, like every other Java stage here. The guest ships no
+# language toolchains -- that is why `[build] exec = "container"` exists -- and
+# the first version of this stage ran `./gradlew` on the host and died with
+# "JAVA_HOME is not set". DECISIONS 10.42.
+#
+# `-PmutationEnv=session` selects this environment's rows. They are not the
+# workstation's: a session has a MariaDB server, so core's backend-specific
+# paths are covered here and uncovered there. Comparing the two would fail the
+# battery for a reason that has nothing to do with the change under test.
 echo "run: Java mutation ratchet"
-GRADLE_USER_HOME=/reaper/cache/gradle ./gradlew --no-daemon mutationRatchet
+podman run --rm --network host -v "$PWD":/work -w /work \
+  -e GRADLE_USER_HOME=/work/.gradle-run-home \
+  docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012526d6fb31cc78123c740ebdc1cfd2dced12 \
+  ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache \
+    -PmutationEnv=session mutationRatchet
 
 echo "run: shell mutation battery"
 sh harness/fullstack/mutation/run.sh
