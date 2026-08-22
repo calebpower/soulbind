@@ -94,7 +94,61 @@ class LinkCommandLogicTest {
 
         assertTrue(reply.success());
         assertTrue(reply.message().contains("Linked"), reply.message());
-        assertTrue(reply.message().contains("1 other account"), reply.message());
+        // "1 other account." with the stop: "1 other account" is a PREFIX of
+        // "1 other accounts", so the assertion that stood here passed whichever
+        // branch ran.
+        assertTrue(reply.message().contains("1 other account."), reply.message());
+    }
+
+    @Test
+    @DisplayName("the plural agrees with the count, on both sides of the boundary")
+    void pluralAgreesWithTheCount() {
+        LinkCommandLogic.Reply three = logic(InMemoryTransport.always(
+                "{\"schema\":1,\"ok\":true,\"payload\":{\"subjectId\":\"s1\","
+                        + "\"identities\":[{},{},{}]}}"))
+                .redeem(PLAYER, "Alex", "BCDFGHJK");
+
+        assertTrue(three.message().contains("2 other accounts."), three.message());
+    }
+
+    @Test
+    @DisplayName("a refusal with no message at all still says something useful")
+    void refusalWithNoMessage() {
+        // Core can refuse with an empty message -- an older build, a proxy that
+        // ate the body. Passing that through leaves the player staring at a
+        // blank reply and no idea what to do next.
+        LinkCommandLogic.Reply reply = logic(InMemoryTransport.always(refusal("")))
+                .redeem(PLAYER, "Alex", "BCDFGHJK");
+
+        assertFalse(reply.success());
+        assertTrue(reply.message().contains("Ask for a new one"),
+                "an empty refusal produced an empty reply: '" + reply.message() + "'");
+    }
+
+    @Test
+    @DisplayName("a refusal that BEGINS with the separator keeps its whole text")
+    void refusalBeginningWithASeparator() {
+        // The `colon > 0` boundary rather than `>= 0`. A colon at position zero
+        // leaves no reason in front of it, so the whole message is the reason --
+        // and under `>= 0` the player is shown a fragment of it instead.
+        LinkCommandLogic.Reply reply =
+                logic(InMemoryTransport.always(refusal(": no reason given")))
+                        .redeem(PLAYER, "Alex", "BCDFGHJK");
+
+        assertTrue(reply.message().contains(": no reason given"),
+                "the message was cut at a separator that had nothing before it: "
+                        + reply.message());
+    }
+
+    @Test
+    @DisplayName("an unknown refusal with no separator is shown whole")
+    void unknownRefusalWithoutASeparator() {
+        LinkCommandLogic.Reply reply =
+                logic(InMemoryTransport.always(refusal("something odd happened")))
+                        .redeem(PLAYER, "Alex", "BCDFGHJK");
+
+        assertEquals("something odd happened", reply.message(),
+                "core's own words were altered on the way to the player");
     }
 
     @Test
@@ -191,5 +245,21 @@ class LinkCommandLogicTest {
         LinkCommandLogic logic = logic(transport);
         assertTrue(logic.issue(PLAYER, "Alex").success());
         assertTrue(logic.redeem(PLAYER, "Alex", "BCDFGHJK").success());
+    }
+
+    @Test
+    @DisplayName("an unknown refusal is shown EXACTLY the words after the separator")
+    void unknownRefusalIsCutInTheRightPlace() {
+        // `substring(colon + 2)`, off by two either way, still contains the
+        // sentence -- it just carries two characters of the machine-readable
+        // prefix in front of it, or eats two of the message. Only equality can
+        // see the difference.
+        LinkCommandLogic.Reply reply =
+                logic(InMemoryTransport.always(refusal("some-future-reason: the specifics")))
+                        .redeem(PLAYER, "Alex", "BCDFGHJK");
+
+        assertEquals("the specifics", reply.message(),
+                "the message was cut in the wrong place, so the player is shown a fragment or"
+                        + " a fragment of the code");
     }
 }

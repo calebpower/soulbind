@@ -7680,3 +7680,68 @@ Recorded at the line.
 Seven uncovered remain: `PlayerLinkView` (2) and `SoulbindPlanPlugin` (5), the
 latter being the Plan entry point, which needs Plan running — the same standing
 as `JdaSurface` in the chat connector and `ScriptedDriver` in its harness.
+
+### 10.37 — connector-velocity: 63% to 77%, and a message that blamed the wrong thing
+
+**214 mutants: 135 killed to 164, 16 survivors to 3, 63 uncovered to 47. Test
+strength 89% to 98%.** All three remaining survivors are equivalent mutants,
+recorded at the line.
+
+#### The configuration that would have caught 10.23
+
+All twelve mutants in `VelocityConfig` were "no coverage", and one of them is
+the check that reports **"effector.group is set but gate.join is not, so nothing
+will ever grant it"**. That is the warning which would have told somebody the
+group effector was inert — and DECISIONS 10.23 records that it *was* inert for
+an entire phase. The check existed. Nothing ran it.
+
+Also now asserted: `failMode` defaults to CLOSED. A proxy that fails **open** by
+accident admits everybody the moment core is unreachable, which is the gate not
+existing at exactly the moment it matters.
+
+The timeout band is tested on both edges — `< 50` and `> 10000`, not `<=` and
+`>=`, so a value the message itself calls legal is not refused. And the
+group-without-a-gate check is deliberately **not** symmetric with a
+gate-without-a-group: enforcing a join gate and granting no group is an ordinary
+deployment, and warning about it would train an operator to ignore this check.
+
+#### A defect: an empty kind blamed on the platform setting
+
+`whyNotMine` reported the reference `:abc` as *"on another platform; this
+connector is 'game'"* — quoting a platform called nothing at an operator, who
+then goes and checks a setting that is fine. A colon at position zero leaves an
+empty kind, which is a **malformed reference**, and it now says so. `colon <= 0`
+rather than `< 0`.
+
+The sibling in `playerIdOf` keeps `< 0` and the `<= 0` mutant there is
+genuinely equivalent — an empty kind never equals this connector's, so the check
+beside it already returns null for those inputs. Noted at the line rather than
+chased.
+
+#### Prefix assertions, again
+
+`contains("1 other account")` is a prefix of `"1 other accounts"`, so the plural
+was unasserted here exactly as it was in the chat connector. And an unknown
+refusal is now asserted by **equality** — `substring(colon + 2)` off by two in
+either direction still contains the sentence, carrying two characters of the
+machine-readable prefix in front of it or eating two of the message, and only
+equality can see that.
+
+`allows()` also now logs `reportedCode()` rather than the parsed enum, matching
+what 10.34 did for the outage line.
+
+#### Three equivalent mutants, all written down
+
+* `allows()` returning TRUE instead of null. The only caller treats null as "do
+  nothing" and TRUE as "still allowed, do nothing". The distinction is kept
+  because it is the honest description of what happened and a future caller that
+  wants to log the two differently needs it.
+* `playerIdOf`'s colon boundary, above.
+* `humanise`'s `colon > 0` against `>= 0`: at position zero it makes the reason
+  the empty string, which matches no case, and the default arm falls back to the
+  whole message — exactly what the unmutated branch produces.
+
+47 uncovered remain, and they are the plugin's wiring: `SoulbindVelocityPlugin`
+(23) and its `LinkCommand` (6) need a running Velocity, and `LuckPermsGroups`
+(11) needs LuckPerms on the classpath. That is the `JdaSurface` shape, and the
+`GuildRoles` seam is the fix when it is worth doing.

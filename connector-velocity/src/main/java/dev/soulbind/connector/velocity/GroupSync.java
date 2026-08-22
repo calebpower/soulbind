@@ -287,11 +287,18 @@ final class GroupSync {
             return "allow".equals(ok.payload().text("effect"));
         }
         if (outcome instanceof SoulbindClient.Outcome.Refused refused) {
-            log.accept("could not ask about gate '" + gate + "': " + refused.code()
+            log.accept("could not ask about gate '" + gate + "': " + refused.reportedCode()
                     + ": " + refused.message()
                     + ". Reconciling after a rule change needs enforcement-point;"
                     + " without it this connector keeps every group it has granted.", null);
         }
+        // Returning TRUE here instead of null is an EQUIVALENT mutant, not a
+        // surviving one: the only caller treats null as "do nothing" and TRUE
+        // as "still allowed, do nothing", so no observable behaviour separates
+        // them. The distinction is kept anyway because it is the honest
+        // description of what happened, and a future caller that wants to log
+        // "could not ask" differently from "asked and was told yes" needs it.
+        // DECISIONS 10.37.
         return null;
     }
 
@@ -310,8 +317,13 @@ final class GroupSync {
         if (identityRef == null || identityRef.isBlank()) {
             return "the event names no identity at all";
         }
+        // `<= 0`, not `< 0`. A colon at position zero leaves an EMPTY kind,
+        // and reporting that as "on another platform" quotes a platform called
+        // nothing at an operator -- who then goes and checks a setting that is
+        // fine. An empty kind is a malformed reference, which is what this
+        // says. DECISIONS 10.37.
         int colon = identityRef.indexOf(':');
-        if (colon < 0) {
+        if (colon <= 0) {
             return "'" + identityRef + "' is not a kind:id reference";
         }
         if (!identityRef.substring(0, colon).equals(platformKind)) {
@@ -334,6 +346,11 @@ final class GroupSync {
             return null;
         }
         int colon = identityRef.indexOf(':');
+        // The `<= 0` mutant of `< 0` here is EQUIVALENT rather than surviving
+        // through inattention: a colon at position zero leaves an empty kind,
+        // which never equals this connector's, so the check beside it returns
+        // null for exactly the inputs the mutant would catch. Recorded so a
+        // later sweep skips it -- same as RoleEffector's. DECISIONS 10.37.
         if (colon < 0 || !identityRef.substring(0, colon).equals(platformKind)) {
             return null;
         }

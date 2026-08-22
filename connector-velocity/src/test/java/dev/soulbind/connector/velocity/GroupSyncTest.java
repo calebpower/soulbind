@@ -335,4 +335,164 @@ class GroupSyncTest {
         assertFalse(noGroup.isConfigured());
         assertEquals(0, noGroup.drain().seen());
     }
+
+    // --- the rest of the drain ------------------------------------------------
+
+    @Test
+    @DisplayName("a failed poll reports a drain that did nothing, rather than nothing at all")
+    void failedPollReturnsAnEmptyDrain() {
+        Recording r = recording();
+        InMemoryTransport transport = new InMemoryTransport(request ->
+                "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"internal\","
+                        + "\"message\":\"down\"}}");
+        GroupSync s = new GroupSync(
+                new SoulbindClient(transport, "cred", CLOCK, new DecisionCache()),
+                r.effector(), new IdempotentApplier(), GATE, GROUP, "game",
+                List::of, (m, c) -> { });
+
+        GroupSync.Drained drained = s.drain();
+
+        assertEquals(0, drained.seen());
+        assertEquals(0, drained.applied());
+        assertFalse(drained.acknowledged(),
+                "a drain that could not poll reported acknowledging something");
+    }
+
+    @Test
+    @DisplayName("nothing is acknowledged when the first event could not be applied")
+    void nothingAcknowledgedWhenTheFirstEventFails() {
+        // `lastClean > 0`, not `>= 0`. Acknowledging position zero moves the
+        // cursor past an event this connector never applied, and the event
+        // never comes back -- the group simply never appears.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+        // No idempotency key: applyOnce refuses it, which is the failure path.
+        String broken = "{\"sequence\":1,\"type\":\"subject.requirements-met\","
+                + "\"idempotencyKey\":\"\",\"identityRef\":\"game:" + PLAYER
+                + "\",\"gate\":\"" + GATE + "\",\"payload\":{}}";
+
+        GroupSync.Drained drained = sync(r, "allow", List.of(), log, broken).drain();
+
+        assertFalse(drained.acknowledged(),
+                "the cursor moved past an event that was never applied, so it will never be"
+                        + " delivered again");
+        assertTrue(log.stream().anyMatch(m -> m.contains("stopping the drain")), log.toString());
+    }
+
+    @Test
+    @DisplayName("a revoke that lands is reported, like a grant")
+    void revokeIsReported() {
+        Recording r = recording();
+        r.effector().grant(PLAYER, GROUP);
+        List<String> log = new ArrayList<>();
+
+        sync(r, "allow", List.of(), log,
+                event(1, "subject.requirements-lost", "game:" + PLAYER, GATE)).drain();
+
+        assertTrue(
+                log.stream().anyMatch(m -> m.contains("revoked") && m.contains(GROUP)),
+                "a group came off and nothing said so, so the only way to confirm it is to"
+                        + " read the permissions plugin's storage: " + log);
+    }
+
+    @Test
+    @DisplayName("a requirements-LOST for another gate is announced too, not only a met")
+    void lostForAnotherGateIsAlsoSaid() {
+        // Both halves of `met || lost`. Saying so for one and not the other
+        // leaves half the silent drops silent.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+
+        sync(r, "allow", List.of(), log,
+                event(1, "subject.requirements-lost", "game:" + PLAYER, "somebody.else"))
+                .drain();
+
+        assertTrue(log.stream().anyMatch(m -> m.contains("somebody.else")), log.toString());
+    }
+
+    @Test
+    @DisplayName("an unreachable core is named as unreachable, not as an empty refusal")
+    void unreachableIsNamed() {
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+        InMemoryTransport transport = InMemoryTransport.always(page());
+        transport.goDown();
+
+        new GroupSync(
+                new SoulbindClient(transport, "cred", CLOCK, new DecisionCache()),
+                r.effector(), new IdempotentApplier(), GATE, GROUP, "game",
+                List::of, (m, c) -> log.add(m)).drain();
+
+        assertTrue(log.stream().anyMatch(m -> m.contains("core unreachable")),
+                "an unreachable core was reported with an empty reason, so the line reads as"
+                        + " though core answered and said nothing: " + log);
+    }
+
+    @Test
+    @DisplayName("a rule change that revokes nothing says nothing")
+    void reconcileIsSilentWhenNothingChanges() {
+        // `revoked > 0`, not `>= 0`. A line reading "removed the group from 0
+        // players" after every rule edit is noise, and the one that matters is
+        // in among it.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+
+        sync(r, "allow", List.of(PLAYER), log, event(1, "rule.changed", "", GATE)).drain();
+
+        assertTrue(log.stream().noneMatch(m -> m.contains("no longer qualify")),
+                "a rule change that took nothing away announced that it had: " + log);
+    }
+
+    @Test
+    @DisplayName("a gate core DENIES is false, not null, so reconciliation can act")
+    void deniedIsFalseNotNull() {
+        // null means unaskable and must strip nothing; false means core said
+        // no and the group must come off. Collapsing the two either strips
+        // everybody during an outage or nobody after a rule change.
+        Recording r = recording();
+        r.effector().grant(PLAYER, GROUP);
+
+        sync(r, "deny", List.of(PLAYER), new ArrayList<>(),
+                event(1, "rule.changed", "", GATE)).drain();
+
+        assertFalse(r.granted().contains(PLAYER + "/" + GROUP),
+                "core denied this player and the group stayed on");
+    }
+
+    @Test
+    @DisplayName("a reference with an EMPTY kind is malformed, not 'another platform'")
+    void emptyKindIsMalformed() {
+        // Reporting `:abc` as "on another platform; this connector is 'game'"
+        // quotes a platform called nothing at an operator, who then goes and
+        // checks a setting that is fine.
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+
+        sync(r, "allow", List.of(), log,
+                event(1, "subject.requirements-met", ":no-kind-here", GATE)).drain();
+
+        assertTrue(log.stream().anyMatch(m -> m.contains("not a kind:id reference")),
+                "an empty kind was blamed on the platform configuration: " + log);
+        assertFalse(log.stream().anyMatch(m -> m.contains("another platform")), log.toString());
+    }
+
+    @Test
+    @DisplayName("an outage line carries core's own code and message")
+    void outageLineCarriesTheReason() {
+        Recording r = recording();
+        List<String> log = new ArrayList<>();
+        InMemoryTransport transport = new InMemoryTransport(request ->
+                "{\"schema\":1,\"ok\":false,\"error\":{\"code\":\"missing-capability\","
+                        + "\"message\":\"needs enforcement-point\"}}");
+
+        new GroupSync(
+                new SoulbindClient(transport, "cred", CLOCK, new DecisionCache()),
+                r.effector(), new IdempotentApplier(), GATE, GROUP, "game",
+                List::of, (m, c) -> log.add(m)).drain();
+
+        assertTrue(log.stream().anyMatch(m -> m.contains("missing-capability")),
+                "the outage line does not carry core's error code: " + log);
+        assertTrue(log.stream().anyMatch(m -> m.contains("needs enforcement-point")),
+                "the outage line does not carry core's message: " + log);
+    }
 }

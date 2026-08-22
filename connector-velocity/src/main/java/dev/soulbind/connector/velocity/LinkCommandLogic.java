@@ -102,6 +102,10 @@ public final class LinkCommandLogic {
             return "That code did not work. Ask for a new one and try again.";
         }
         int colon = message.indexOf(": ");
+        // The `>= 0` mutant of this is EQUIVALENT: with a colon at position
+        // zero it makes `reason` the empty string, which matches no case, and
+        // the default arm then falls back to the whole message -- exactly what
+        // taking the whole message as the reason produces. DECISIONS 10.37.
         String reason = colon > 0 ? message.substring(0, colon) : message;
 
         return switch (reason) {
