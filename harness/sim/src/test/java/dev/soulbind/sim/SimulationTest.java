@@ -178,6 +178,59 @@ class SimulationTest {
     }
 
     @Test
+    @DisplayName("reads are accepted and link nothing, so links are FEWER than acceptances")
+    void linksAreCountedNotAcceptances() {
+        // `> linksBefore`, not `>=`. Describe and decide are accepted hundreds
+        // of times and grow the graph not at all; a counter that treated every
+        // acceptance as a link would report a run doing far more than it did,
+        // and didWork() would then be satisfied by a run that linked nothing.
+        InMemoryCore core = new InMemoryCore();
+        Simulation.Outcome outcome = Simulation.run(20260820L, world(), core, core, 300, 100);
+
+        int accepted = outcome.actionsTaken() - outcome.refusals();
+        assertTrue(outcome.linksMade() < accepted,
+                () -> "every accepted action was counted as a link (" + outcome.linksMade()
+                        + " of " + accepted + "), so the link count is really an acceptance"
+                        + " count and didWork() means nothing");
+        assertTrue(outcome.linksMade() > 0, outcome::summary);
+    }
+
+    @Test
+    @DisplayName("checks fall on the period, so a long period leaves the trace quiet")
+    void checksFallOnThePeriod() {
+        // A period longer than the run means every violation is found by the
+        // final sweep and none during it. Inverting "is a check due" would put
+        // them in the trace at every action instead -- which still finds the
+        // defect, and still reads as working, while quietly checking three
+        // hundred times more often than asked.
+        InMemoryCore core = new InMemoryCore().with(InMemoryCore.Defect.REDEEM_DOES_NOT_LINK);
+        Simulation.Outcome outcome = Simulation.run(20260820L, world(), core, core, 200, 1000);
+
+        assertFalse(outcome.clean(), "the defective core was not caught at all");
+        assertTrue(outcome.trace().stream().noneMatch(line -> line.contains("!!")),
+                "a check ran mid-run with a period of 1000 over 200 actions: "
+                        + outcome.trace().stream().filter(l -> l.contains("!!")).limit(3)
+                                .toList());
+    }
+
+    @Test
+    @DisplayName("an accepted retired-credential call is reported in the words of the fault")
+    void staleCredentialAcceptanceSaysWhichFault() {
+        // The two mustBeRefused classes produce different messages, and the
+        // difference is the whole diagnostic: one means a code was claimed
+        // twice, the other means somebody locked out is still acting.
+        InMemoryCore core = new InMemoryCore()
+                .with(InMemoryCore.Defect.RETIRED_CREDENTIAL_STILL_WORKS);
+        Simulation.Outcome outcome = Simulation.run(20260820L, world(), core, core, 400, 50);
+
+        assertTrue(
+                outcome.violations().stream()
+                        .anyMatch(v -> v.complaint().contains("credential was retired")),
+                () -> "a core that honoured a retired credential was not reported in those"
+                        + " terms:\n" + outcome.summary());
+    }
+
+    @Test
     @DisplayName("the run says WHEN it first diverged, not just that it did")
     void violationsAreLocatedInTheRun() {
         // With the shrinker deferred (DECISIONS 9.1) this is what makes a

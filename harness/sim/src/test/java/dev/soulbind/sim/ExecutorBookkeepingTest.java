@@ -228,6 +228,67 @@ class ExecutorBookkeepingTest {
         assertTrue(world.linkedRefs().isEmpty(), world.linkedRefs()::toString);
     }
 
+    @Test
+    @DisplayName("a display is recorded only when the redeem was accepted AND named a target")
+    void displayIsRecordedOnlyWhenBothHold() {
+        // Both halves of the guard. Recording on a refusal would have the model
+        // expecting core to hold a display it never accepted; recording with no
+        // target named would attribute it to nothing.
+        World refused = world();
+        ShadowModel refusedModel = new ShadowModel();
+        Simulation.execute(
+                new Action(ActionKind.REDEEM_CODE, ALEX, "BCDFGHJK", CHAT),
+                new ScriptedDriver(CoreDriver.Result.refused("no")), refused, refusedModel);
+        assertTrue(refusedModel.displayFor(CHAT).isEmpty(),
+                "a display core refused to accept was recorded as sent");
+
+        World noTarget = world();
+        ShadowModel noTargetModel = new ShadowModel();
+        Simulation.execute(
+                new Action(ActionKind.REDEEM_CODE, ALEX, "BCDFGHJK", null),
+                new ScriptedDriver(CoreDriver.Result.ok(null)), noTarget, noTargetModel);
+        assertTrue(noTargetModel.displayFor(CHAT).isEmpty(), "a display was attributed to"
+                + " an account the action never named");
+    }
+
+    @Test
+    @DisplayName("an actor with no identities still names something core can parse")
+    void staleCredentialWithNoIdentities() {
+        // An actor can be rotated before it has linked anything. Splitting an
+        // empty list would put a null through the driver and the run would die
+        // on the one action written to prove core stays up.
+        ScriptedDriver driver = new ScriptedDriver(CoreDriver.Result.refused("retired"));
+
+        Simulation.execute(
+                new Action(ActionKind.STALE_CREDENTIAL,
+                        new Actor("nobody", List.of(), 1), null, null),
+                driver, world(), new ShadowModel());
+
+        assertTrue(driver.calls.contains("retired"), driver.calls::toString);
+    }
+
+    @Test
+    @DisplayName("a reference with no colon, or none at all, still reaches core as something")
+    void malformedReferencesAreSplitSafely() {
+        // split() is the last thing between a generator bug and a
+        // NullPointerException that ends the run. A run that dies is a run that
+        // reports nothing, which is worse than one that asks core a silly
+        // question and is refused.
+        ScriptedDriver noColon = new ScriptedDriver(CoreDriver.Result.ok(null));
+        Simulation.execute(
+                new Action(ActionKind.DESCRIBE, ALEX, "no-colon-here", null),
+                noColon, world(), new ShadowModel());
+        assertTrue(noColon.calls.contains("describe"), noColon.calls::toString);
+
+        ScriptedDriver nullSubject = new ScriptedDriver(CoreDriver.Result.ok(null));
+        Simulation.execute(
+                new Action(ActionKind.ISSUE_CODE, ALEX, null, null),
+                nullSubject, world(), new ShadowModel());
+        assertTrue(nullSubject.calls.contains("issue game:nobody"),
+                "a null subject did not fall back to a parseable reference: "
+                        + nullSubject.calls);
+    }
+
     // --- the mutating actions -------------------------------------------------
 
     @Test

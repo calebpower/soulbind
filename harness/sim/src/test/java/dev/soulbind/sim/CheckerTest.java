@@ -132,4 +132,35 @@ class CheckerTest {
                 "a second, different divergence was swallowed by the deduplication");
         assertEquals(20, later.get(0).afterAction());
     }
+
+    @Test
+    @DisplayName("clean() is false the moment anything has been recorded")
+    void cleanTracksTheViolations() {
+        // The single most consequential boolean in this module: `clean()` is
+        // what every runner reads to decide whether a seed passed. A version
+        // that always answered true would report every run in the tier as clean
+        // -- including the ones that found real defects -- and mutation showed
+        // nothing could tell the difference.
+        Checker checker = new Checker(List.of(), 10);
+        assertTrue(checker.clean(), "a checker that has seen nothing is not clean");
+
+        checker.record(new Checker.Violation("made-up", "something diverged", 7));
+
+        assertFalse(checker.clean(),
+                "a checker holding a violation reported the run as clean, which is every"
+                        + " defect this tier can find being reported as a pass");
+        assertEquals(1, checker.violations().size());
+    }
+
+    @Test
+    @DisplayName("a period of exactly one is allowed, and checks every action")
+    void aPeriodOfOneIsLegal() {
+        // The boundary is `< 1`, not `<= 1`. Checking after every action is
+        // expensive but legitimate -- it is what a hunt narrowing down a seed
+        // wants -- and refusing it would take away the sharpest setting.
+        Checker checker = new Checker(List.of(), 1);
+
+        assertTrue(checker.isDue(1), "a period of one did not check after the first action");
+        assertTrue(checker.isDue(2));
+    }
 }

@@ -233,4 +233,79 @@ class GeneratorTest {
                         + " adversarial classes are documenting an intention rather than"
                         + " landing at depth");
     }
+
+    @Test
+    @DisplayName("an actor holding nothing is never asked to act on one of its accounts")
+    void anActorWithNoIdentities() {
+        // DECIDE and DOUBLE_REDEEM both index into the actor's identities. An
+        // actor can hold none -- the sim creates them, and a rotation can
+        // arrive before a link does -- and proposing either would end the run
+        // on an index out of bounds rather than on a finding.
+        World world = new World(
+                new java.util.ArrayList<>(List.of(new Actor("ghost", List.of(), 0))),
+                List.of("game.join"));
+        world.codeIssued("SPENTONE", "game:someone");
+        world.codeSpent("SPENTONE");
+
+        Generator generator = new Generator(20260820L);
+        for (int i = 0; i < 200; i++) {
+            var next = generator.next(world);
+            if (next.isEmpty()) {
+                break;
+            }
+            ActionKind kind = next.get().kind();
+            assertTrue(
+                    kind != ActionKind.DECIDE && kind != ActionKind.DOUBLE_REDEEM,
+                    () -> kind + " was proposed for an actor that holds no identity at all");
+        }
+    }
+
+    @Test
+    @DisplayName("a double redeem is never proposed when no code has been spent")
+    void noDoubleRedeemWithoutASpentCode() {
+        // The action means "claim a code core has already claimed". With no
+        // spent code there is nothing to claim twice, and proposing it anyway
+        // would have the run send an unknown code, be refused for the wrong
+        // reason, and count that refusal as the nemesis working.
+        World world = new World(
+                new java.util.ArrayList<>(List.of(
+                        new Actor("alex", List.of("game:alex", "chat:alex"), 0))),
+                List.of("game.join"));
+
+        Generator generator = new Generator(20260820L);
+        for (int i = 0; i < 200; i++) {
+            var next = generator.next(world);
+            if (next.isEmpty()) {
+                break;
+            }
+            assertTrue(next.get().kind() != ActionKind.DOUBLE_REDEEM,
+                    "a double redeem was proposed in a world where no code has been spent");
+        }
+    }
+
+    @Test
+    @DisplayName("a redeem never offers the account the code was issued for")
+    void redeemNeverTargetsItsOwnAccount() {
+        // Core refuses an account linking to itself, so proposing it spends a
+        // draw on an answer that is known in advance -- and the refusal then
+        // pads the refusal count with something that proves nothing.
+        World world = new World(
+                new java.util.ArrayList<>(List.of(
+                        new Actor("alex", List.of("game:alex", "chat:alex"), 0))),
+                List.of("game.join"));
+        world.codeIssued("BCDFGHJK", "game:alex");
+
+        Generator generator = new Generator(20260820L);
+        for (int i = 0; i < 300; i++) {
+            var next = generator.next(world);
+            if (next.isEmpty()) {
+                break;
+            }
+            Action action = next.get();
+            if (action.kind() == ActionKind.REDEEM_CODE) {
+                assertNotEquals("game:alex", action.detail(),
+                        "a code issued for game:alex was offered back to game:alex");
+            }
+        }
+    }
 }

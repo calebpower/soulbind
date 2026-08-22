@@ -169,6 +169,14 @@ public final class Invariants {
                         if (!seen.add(row.sequence())) {
                             complaints.add("audit sequence " + row.sequence()
                                     + " appears more than once");
+                        // `<=`, and the `<` mutant of it is EQUIVALENT rather
+                        // than surviving through inattention: `previous` starts
+                        // at 0 and the only caller reads `auditSince(0)`, which
+                        // returns rows with `sequence > 0`. A row numbered zero
+                        // therefore cannot reach here, and equality with any
+                        // later `previous` is caught by the duplicate branch
+                        // above. Recorded so a later sweep skips it. DECISIONS
+                        // 10.33.
                         } else if (row.sequence() <= previous) {
                             complaints.add("audit sequence went from " + previous + " to "
                                     + row.sequence() + "; the log is not append-only");

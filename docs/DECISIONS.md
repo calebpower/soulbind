@@ -7372,3 +7372,88 @@ Left: `SdkCore` (44, executed by nothing here — it is the real-SDK driver, and
 whether the session tier covers it needs checking rather than assuming),
 `Runner` (8 survived, 24 uncovered), `Simulation` (11), `Invariants` (7). A
 second pass, not a different kind of work.
+
+### 10.33 — Finishing the sim's survivors, and the hole they were hiding
+
+Second pass over `:sim`, continuing 10.32. **69 survivors to 19; 53% killed to
+70%; test strength 68% to 92%.**
+
+#### The one that mattered: a branch nothing had ever executed
+
+`Simulation.run` turns an ACCEPTED action of a `mustBeRefused` class into a
+violation without consulting the model, because the expected answer is knowable
+without one. Two classes are marked: `DOUBLE_REDEEM` and `STALE_CREDENTIAL`.
+
+`InMemoryCore` had a defect for the first — `CODE_STAYS_REDEEMABLE` — and
+**none for the second**. Every core the tier had ever run against refused a
+retired credential, so the branch that reports an acceptance was written,
+shipped, and never once executed. Mutation found it by deleting the
+`checker.record` and changing no result anywhere.
+
+`RETIRED_CREDENTIAL_STILL_WORKS` is now in the catalogue, and the tier catches
+it. That is the most serious defect in that list: everything else corrupts
+data, this one lets somebody who should have been locked out keep acting.
+
+#### `Checker.clean()` — the single most consequential boolean here
+
+`clean()` is what every runner reads to decide whether a seed passed. Mutating
+it to return true unconditionally survived. Every run in the tier would have
+reported clean, **including the ones that found real defects**, and nothing
+could tell the difference. One test, four lines.
+
+#### What else was unasserted
+
+* **`ActionKind.mustBeRefused` and `isNemesis`** — both could answer a constant.
+  The first retires the check above for every class at once; the second makes
+  the trace's `[nemesis]` marking either universal or absent, and that marking
+  is the first thing anybody uses to read a failed seed.
+* **The trace and the violation lines.** They are the whole of what somebody has
+  to work from when a seed fails — the run is gone. Nothing asserted that an
+  action renders its subject and target, that absent fields are omitted rather
+  than printed as `null`, or that a violation names its invariant and the action
+  it was first seen after.
+* **The link counter.** `> linksBefore`, not `>=`. Describe and decide are
+  accepted hundreds of times and link nothing; a counter treating every
+  acceptance as a link would satisfy `didWork()` on a run that linked nothing —
+  which is the exact fault `didWork()` was written for.
+* **The generator's applicability guards.** An actor holding no identities being
+  offered `DECIDE`, a `DOUBLE_REDEEM` proposed with no spent code, a redeem
+  offering an account the code was issued for. Each proposes something core will
+  refuse for a reason that has nothing to do with what is under test, and the
+  refusal then pads the count.
+* **`decisionsFollowTheRules`' unaskable branch.** Inverting it would skip every
+  answer core gave and judge only its silences — the invariant would run
+  hundreds of times, complain about nothing, and look like a healthy
+  deployment.
+
+#### A fixture that answers questions nobody asked
+
+Writing that last test surfaced something worth knowing: `FakeCore.decide`
+returns **"allow" by default**. A test that forgets to script a decision gets a
+permissive answer rather than a missing one, which is the direction that hides
+faults. Not changed here — it would ripple through every existing case — but
+recorded, and the new tests script both questions the invariant asks rather than
+relying on the default.
+
+#### An equivalent mutant, recorded at the line
+
+`auditSequenceStrictlyIncreases`, `row.sequence() <= previous` mutated to `<`.
+`previous` starts at 0 and the only caller reads `auditSince(0)`, which returns
+rows with `sequence > 0` — so a row numbered zero cannot reach the comparison,
+and equality with any later `previous` is caught by the duplicate branch above.
+I wrote a test for it first, watched it fail, and traced why. Noted in the
+source so a later sweep skips it.
+
+#### The tail, named rather than averaged
+
+19 survivors left: `Runner` 8 (the CLI layer — report counters, the hunt's
+narrowing, credential parsing), `Invariants` 6 (the `quote` diagnostic renderer,
+the text round-trip's dedupe, and two boundaries), `Simulation` 4, `Generator` 1
+(the weighted-roll boundary, which needs a distribution assertion rather than an
+example).
+
+76 remain uncovered, and `SdkCore` is 44 of them. **Checked rather than
+assumed this time:** `Runner` is its only constructor, and `harness/fullstack/run.sh`
+builds `:sim:installDist` and runs it against a live core in the session. It is
+exercised out of process, where PIT cannot see it — the same standing as
+`ScriptedDriver` in the chat connector.

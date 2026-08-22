@@ -192,6 +192,61 @@ class OracleSelfTest {
     }
 
     @Test
+    @DisplayName("a decide core CAN answer is judged, not skipped as unaskable")
+    void answerableDecisionsAreJudged() {
+        // `effect.isEmpty()` means core could not be asked, and the envelope
+        // invariant reports that separately. Inverting the test would skip
+        // every answer core DID give and judge only the silences -- so this
+        // invariant would run hundreds of times, complain about nothing, and
+        // look exactly like a healthy deployment.
+        ShadowModel model = new ShadowModel();
+        model.sawUnlinked(GAME);
+        model.ruleSet("game.join", true);
+
+        // The probe silenced, so the only thing left to complain about is the
+        // account the model named -- which is the path this test is for.
+        FakeCore core = new FakeCore()
+                .decides("game.join", GAME, "allow")
+                .decides("game.join", "game:soulbind-sim-never-linked-probe", "deny");
+
+        List<String> complaints =
+                check(Invariants.decisionsFollowTheRules(), model, core);
+
+        assertTrue(complaints.stream().anyMatch(c -> c.contains(GAME)),
+                () -> "core admitted an unlinked account the model knows about, through a"
+                        + " gate that requires a link, and the invariant said nothing about"
+                        + " that account: " + complaints);
+    }
+
+    @Test
+    @DisplayName("an unaskable gate is NOT turned into a policy verdict")
+    void unaskableGatesAreLeftAlone() {
+        // The other side of the same conditional, and the reason it exists: an
+        // outage must be reported once, by the invariant that watches the
+        // transport, and not a second time as though core had made a decision.
+        ShadowModel model = new ShadowModel();
+        model.sawUnlinked(GAME);
+        model.ruleSet("game.join", true);
+
+        // BOTH questions this invariant asks have to go unanswered, or the
+        // other one complains and says nothing about the branch under test:
+        // the probe account it invents, and the unlinked account from the
+        // model. FakeCore answers "allow" by default, which is worth knowing on
+        // its own -- a test that forgets to script a decision gets a permissive
+        // answer rather than a missing one.
+        FakeCore silent = new FakeCore()
+                .decides("game.join", GAME, "")
+                .decides("game.join", "game:soulbind-sim-never-linked-probe", "");
+
+        List<String> complaints =
+                check(Invariants.decisionsFollowTheRules(), model, silent);
+
+        assertTrue(complaints.isEmpty(),
+                () -> "a gate core could not answer was reported as a policy failure: "
+                        + complaints);
+    }
+
+    @Test
     @DisplayName("a 5xx is caught even when everything else agrees")
     void envelopeInvariantComplainsIndependently() {
         // The cheap oracle earns its place here. The model and core agree

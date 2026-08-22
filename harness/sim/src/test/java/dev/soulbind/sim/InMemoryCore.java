@@ -61,6 +61,21 @@ final class InMemoryCore implements CoreDriver, CoreView {
         SERVES_A_5XX,
 
         /**
+         * A retired credential still works.
+         *
+         * <p>The hole this catalogue had. `STALE_CREDENTIAL` was generated,
+         * sent, and refused by every core the tier had ever run against -- so
+         * the branch that turns an ACCEPTANCE into a violation was written,
+         * shipped, and never once executed. Mutation found it: deleting the
+         * `checker.record` for it changed no result anywhere.
+         *
+         * <p>A core that honours a rotated-away credential is the most serious
+         * defect in this list. Everything else corrupts data; this one lets
+         * somebody who should have been locked out keep acting.
+         */
+        RETIRED_CREDENTIAL_STILL_WORKS,
+
+        /**
          * Rules are stored and never applied: every gate allows everybody.
          *
          * <p>The defect the tier could not see for an entire phase. `SET_RULE`
@@ -242,6 +257,12 @@ final class InMemoryCore implements CoreDriver, CoreView {
 
     @Override
     public Result withRetiredCredential(Actor actor, String platformKind, String platformId) {
+        if (defects.contains(Defect.RETIRED_CREDENTIAL_STILL_WORKS)) {
+            // Accepted, which must never happen. The run records that as a
+            // violation itself, without consulting the model, because only the
+            // executor knows the credential it just used had been retired.
+            return Result.ok(null);
+        }
         // The coherent outcome §11 asks for: a refusal, not a crash, and the
         // live session is undisturbed -- nothing here mutates anything.
         return Result.refused("credential is not valid");
