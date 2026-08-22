@@ -39,6 +39,27 @@ performs exhaustively.
 executed by a test that did not notice.** After the first round of fixes: 1,632
 / 1,039 / 411 / 182, test strength 85%.
 
+**Every Java module swept in Phase 10, and the tier is now RATCHETED.** One row
+per module in `mutation-baseline.txt`; `mutationRatchet` fails a module whose
+survivor or no-coverage count has gone up; it runs in `.reaper.toml`. Run 29 is
+the first battery green with it in, `reaper exit=0` on both storage axes.
+
+| Module | Killed | Survivors | Uncovered |
+|---|---|---|---|
+| `core` | 68% → **79%** | 131 → **78** | 173 → **121** |
+| `connector-discord` | 48% → **76%** | 28 → **1** | 114 → 71 |
+| `connector-velocity` | 63% → **77%** | 16 → **3** | 63 → 47 |
+| `connector-plan` | 70% → **92%** | 10 → **1** | 20 → **7** |
+| `sim` | 53% → **71%** | 69 → **15** | 79 → 75 |
+| `config` | 88% → **95%** | 6 → **3** | 6 → **2** |
+| `connector-sdk` | 88% → **90%** | 3 → **2** | 9 → 8 |
+| `policy` | 98% | 2 | 0 |
+| `protocol` | 98% | 1 | 0 |
+
+Survivors across the tree went from roughly 250 to **106**, and a growing share
+of what remains is equivalent mutants recorded at the line rather than gaps.
+DECISIONS 10.28 through 10.43.
+
 **`connector-discord` swept in Phase 10: 48% to 76%, and test strength 82% to
 99%** — 28 survivors to one equivalent mutant, reasoned about at the line so a
 later sweep skips it. The role decisions came out of the live-platform adapter
