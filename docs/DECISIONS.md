@@ -7939,3 +7939,54 @@ ratchet says so instead of guessing.
 I had considered environment keying when building this and simplified it away as
 over-engineering. It did not survive first contact with the environment it was
 written for.
+
+### 10.43 — The environment keying was wrong, and the measurement said so
+
+10.42 keyed the ratchet's baseline by environment on this reasoning:
+
+> The counts are genuinely not portable: the workstation has no MariaDB, so
+> `core`'s backend-specific paths count as uncovered there and are covered in a
+> session.
+
+Run 28 emitted the session rows. **Every one matched the workstation's exactly**,
+`core` included:
+
+```
+session core 992 785 78 121 8      workstation core 992 785 78 121 8
+```
+
+The reasoning was wrong about its own stage. The session invocation deliberately
+runs the ratchet **without MariaDB in scope** — I wrote that into the stage
+comment in the same commit — so both environments run the identical
+configuration and produce identical numbers. There was never a difference to key
+on.
+
+Two tables that must be kept identical drift, and drift makes a guard protect
+less without saying so. That is worse than the problem the keying was meant to
+solve, so it is gone: one table, `-PmutationEnv` removed, and the claim that the
+two environments agree is now **measured and recorded** rather than assumed in
+either direction.
+
+What keeps it true is the pinned invocation — fuzz excluded, no MariaDB, one
+Gradle command in the manifest. Change any of those and the numbers move for a
+reason that is not a regression, which is now stated at both the baseline and
+the stage.
+
+#### What that cost, and what it bought
+
+Four battery runs. Run 26 died on `JAVA_HOME` (the stage ran on the host, which
+ships no toolchains). Run 27 refused correctly and reported **one** module,
+because Gradle fails fast — a guard needing nine sessions to configure is one
+nobody finishes configuring, so `--continue` went in. Run 28 emitted all nine
+and disproved the premise of 10.42.
+
+Three of those four runs were spent on defects in a stage added the same day.
+The stage is thirty lines. Two of the three would have been caught by running it
+once in the environment it targets before reasoning about what it would do
+there — which is the same lesson as the `groups` stage in 10.24 through 10.27,
+learned again on cheaper ground.
+
+The keying is not a wasted detour in one respect: it forced the question "are
+these two things comparable" to be answered with a measurement instead of a
+sentence, and the answer is now in the file where somebody would otherwise
+re-derive it from the same wrong hunch.

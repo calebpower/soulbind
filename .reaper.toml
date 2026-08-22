@@ -278,10 +278,12 @@ cp -r connector-flarum/build/infection/. out/infection/
 # the first version of this stage ran `./gradlew` on the host and died with
 # "JAVA_HOME is not set". DECISIONS 10.42.
 #
-# `-PmutationEnv=session` selects this environment's rows. They are not the
-# workstation's: a session has a MariaDB server, so core's backend-specific
-# paths are covered here and uncovered there. Comparing the two would fail the
-# battery for a reason that has nothing to do with the change under test.
+# NO MARIADB IN SCOPE, deliberately -- the ratchet's baseline was recorded
+# without one, and this is what keeps the two comparable. A session run
+# confirmed it: every module's counts here matched the workstation's exactly.
+# Pointing this at the MariaDB container would produce better numbers that the
+# committed baseline cannot be compared with, and a guard comparing unlike
+# things fires for the wrong reason.
 #
 # `--continue` because a report of everything that regressed is worth more than
 # the first regression alphabetically, and because without it a run that has
@@ -292,7 +294,7 @@ podman run --rm --network host -v "$PWD":/work -w /work \
   -e GRADLE_USER_HOME=/work/.gradle-run-home \
   docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012526d6fb31cc78123c740ebdc1cfd2dced12 \
   ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache --continue \
-    -PmutationEnv=session mutationRatchet
+    mutationRatchet
 
 echo "run: shell mutation battery"
 sh harness/fullstack/mutation/run.sh

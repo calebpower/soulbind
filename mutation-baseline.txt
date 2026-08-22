@@ -27,21 +27,17 @@
 # tolerance for it: a tolerance is a threshold by another name, and the whole
 # argument for a ratchet is that nobody negotiates a number.
 #
-# KEYED BY ENVIRONMENT, because these numbers are not portable. The counts
-# depend on which tests can run: the workstation has no MariaDB, so `core`'s
-# backend-specific paths count as uncovered there, and a reaper session has one.
-# The fuzz tier is excluded in both.
+# ONE TABLE, and that is MEASURED rather than assumed. These rows were keyed by
+# environment for one release, on the reasoning that a reaper session has a
+# MariaDB server and the workstation does not. A session run emitted its own
+# rows and every one matched these exactly, `core` included -- because the
+# session stage deliberately runs the ratchet WITHOUT MariaDB in scope, which is
+# stated in .reaper.toml at the invocation. Two identical tables drift, and
+# drift makes the guard protect less without saying so.
 #
-# A single table would have the session run fail against workstation numbers on
-# its first execution, and whoever read that would learn nothing except that the
-# guard is unreliable. So `-PmutationEnv` selects the rows, defaulting to
-# `workstation`, and a configuration with no rows fails LOUDLY with the observed
-# lines to paste in -- the same refusal as an unmeasured module, for the same
-# reason.
-#
-# The `session` rows are absent until a session run emits them. That is the
-# design working, not a gap: nobody has measured that configuration yet, and the
-# ratchet says so rather than guessing.
+# ONE FIXED CONFIGURATION is what keeps that true: the fuzz tier excluded, no
+# MariaDB, one Gradle command in the manifest. Change any of those and the
+# numbers move for a reason that is not a regression.
 #
 # NOT TOML, deliberately, though this repository's convention is TOML wherever
 # it owns the file. This is not configuration -- it is a checked-in expectations
@@ -51,13 +47,13 @@
 #
 # Recorded 2026-08-21, after DECISIONS 10.28 and 10.29.
 
-# env        module              total killed surv nocov  t/o
-workstation  config                  99     94    3     2    0
-workstation  connector-discord      303    231    1    71    0
-workstation  connector-plan         102     94    1     7    0
-workstation  connector-sdk          104     94    2     8    0
-workstation  connector-velocity     214    164    3    47    0
-workstation  core                   992    785   78   121    8
-workstation  policy                  84     82    2     0    0
-workstation  protocol                98     96    1     0    1
-workstation  sim                    312    222   15    75    0
+# module              total killed surv nocov  t/o
+config                  99     94    3     2    0
+connector-discord      303    231    1    71    0
+connector-plan         102     94    1     7    0
+connector-sdk          104     94    2     8    0
+connector-velocity     214    164    3    47    0
+core                   992    785   78   121    8
+policy                  84     82    2     0    0
+protocol                98     96    1     0    1
+sim                    312    222   15    75    0
