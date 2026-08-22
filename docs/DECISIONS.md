@@ -7745,3 +7745,33 @@ what 10.34 did for the outage line.
 (23) and its `LinkCommand` (6) need a running Velocity, and `LuckPermsGroups`
 (11) needs LuckPerms on the classpath. That is the `JdaSurface` shape, and the
 `GuildRoles` seam is the fix when it is worth doing.
+
+### 10.38 — A fixture that answered "allow" to questions nobody asked
+
+`FakeCore.decide` returned **"allow"** for any gate and account a test had not
+scripted. So an oracle test that forgot to script a decision got a permissive
+answer rather than a missing one — the direction that hides faults, in the one
+fixture whose entire job is letting the oracle's own tests fabricate core's
+replies.
+
+Flagged in 10.33 and left alone there because changing it would ripple through
+every existing case. It does not: the default is now `""` — "core could not be
+asked" — and **no existing test failed**. Nothing was relying on it.
+
+#### But the control was already vacuous, for a different reason
+
+Following through turned up something worse than the default. The healthy-core
+control walks every invariant and asserts silence, and `decisionsFollowTheRules`
+iterates `model.rules()` — which the control's model never populated. So that
+invariant was iterating an empty map and asserting nothing, and would have
+stayed silent against a healthy core and a broken one alike. **The control could
+not tell the difference**, which is exactly the failure the control exists to
+prevent, one level up.
+
+The control now sets a rule and scripts the healthy answer to the probe
+explicitly, so the invariant runs and stays silent for a reason rather than by
+declining to look.
+
+That is the second time in this module that the thing checking the checkers was
+itself unchecked — 10.32 found the executor's oracle bookkeeping, and this is
+the control that was supposed to notice.

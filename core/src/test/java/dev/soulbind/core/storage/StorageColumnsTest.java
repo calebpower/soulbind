@@ -19,6 +19,7 @@ package dev.soulbind.core.storage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.core.identity.Identity;
@@ -276,5 +277,44 @@ class StorageColumnsTest {
             assertEquals(Map.of(), events.get(1).payload(),
                     "an empty payload came back as something other than an empty map");
         }
+    }
+
+    // --- what open() configures -----------------------------------------------
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("foreign keys are enforced, so an identity cannot outlive its subject")
+    void foreignKeysAreEnforced(Backend backend) {
+        // SQLite enforces foreign keys only when asked, per connection, and
+        // `open()` asks. Deleting that one line leaves every constraint in the
+        // schema decorative: an identity could be bound to a subject that does
+        // not exist, and nothing would say so until somebody read the graph and
+        // found a dangling reference.
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            assertThrows(
+                    RuntimeException.class,
+                    () -> storage.identities().bind(
+                            "no-such-subject", "game", "player-1", "Alex", Map.of(),
+                            "link-code", null, CREATED),
+                    "an identity was bound to a subject that does not exist, so the foreign"
+                            + " key in the schema is not being enforced");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("closing releases the store, rather than leaving the pool open")
+    void closeReleasesTheStore(Backend backend) {
+        // Both lines of close(). A connector that opens and closes a store per
+        // command leaks a pool and, on SQLite, a writer thread per open --
+        // which is invisible until something has been running for a week.
+        Storage storage = StorageBackends.open(backend, tempDir);
+        storage.identities().createSubject(CREATED);
+        storage.close();
+
+        assertThrows(
+                RuntimeException.class,
+                () -> storage.identities().createSubject(CREATED),
+                "a closed store still served a write, so nothing was actually released");
     }
 }

@@ -127,9 +127,18 @@ final class FakeCore implements CoreView {
         return this;
     }
 
+    /**
+     * The scripted answer, or "" — meaning core could not be asked.
+     *
+     * <p>Not "allow". A default of "allow" means a test that forgets to script
+     * a decision gets a PERMISSIVE answer rather than a missing one, which is
+     * the direction that hides faults — in a fixture whose entire job is
+     * letting the oracle's own tests fabricate core's replies. Every caller
+     * that meant "allow" now says so. DECISIONS 10.38.
+     */
     @Override
     public String decide(String gate, String platformKind, String platformId) {
-        return decisions.getOrDefault(gate + "|" + platformKind + ":" + platformId, "allow");
+        return decisions.getOrDefault(gate + "|" + platformKind + ":" + platformId, "");
     }
 
     @Override

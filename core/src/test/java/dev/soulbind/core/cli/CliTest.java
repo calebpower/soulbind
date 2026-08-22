@@ -632,6 +632,54 @@ class CliTest {
                 "the exit codes are undocumented, so a script cannot branch on them: " + usage);
         assertTrue(usage.contains(CoreVersion.VERSION),
                 "the usage text does not say which version is answering: " + usage);
+        assertTrue(usage.contains("not a second"),
+                "the closing paragraph is gone -- the one that says everything else is an"
+                        + " operation under the same capability table rather than a second"
+                        + " management surface: " + usage);
+
+        // Blank lines between the entries. A wall of text is a usage screen
+        // people stop reading, and each separator is its own deletable
+        // println.
+        assertTrue(usage.split("\n\n").length >= 5,
+                "the usage runs the verbs together with no spacing: " + usage);
+    }
+
+    @Test
+    @DisplayName("version prints the version, and nothing else")
+    void versionPrints() {
+        Run run = invoke("version");
+
+        assertEquals(Doctor.EXIT_HEALTHY, run.exit());
+        assertTrue(run.out().contains(CoreVersion.VERSION),
+                "`soulbind version` did not print a version: " + run.out());
+    }
+
+    @Test
+    @DisplayName("a configuration this build cannot parse is explained, not merely refused")
+    void unparseableConfigExplains() throws Exception {
+        // The ConfigException arm. Exiting non-zero with an empty stderr tells
+        // an operator that something is wrong and nothing about what -- and the
+        // loader has already written every problem at once, which is the whole
+        // reason it is printed as it stands.
+        Run run = invoke("doctor", "--config",
+                writeConfig("this is not toml at all [[[").toString());
+
+        assertNotEquals(Doctor.EXIT_HEALTHY, run.exit());
+        assertFalse(run.out().isEmpty() && run.err().isEmpty(),
+                "an unparseable configuration was refused with no explanation anywhere");
+    }
+
+    @Test
+    @DisplayName("a trailing --config with no path is refused rather than reaching past the end")
+    void trailingConfigFlag() {
+        // `i + 1 >= argv.size()`. Moving that boundary reaches one past the end
+        // of the argument list, and the exception is not one `run` catches --
+        // so a typo at the end of a command line becomes a stack trace.
+        Run run = invoke("doctor", "--config");
+
+        assertNotEquals(Doctor.EXIT_HEALTHY, run.exit());
+        assertFalse(run.err().contains("\tat "),
+                "a trailing flag produced a stack trace: " + run.err());
     }
 
     // The two tests that used to live further up -- "an unknown verb exits 2

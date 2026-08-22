@@ -71,9 +71,21 @@ class OracleSelfTest {
     void healthyCoreProducesNoComplaints() {
         ShadowModel model = linkedModel();
         model.redeemed("BCDF2345");
+
+        // A RULE, so `decisions-follow-the-rules` actually runs here. Without
+        // one it iterates an empty map and this control says nothing about it
+        // -- the invariant would stay silent against a healthy core and against
+        // a broken one, and the control could not tell.
+        model.ruleSet("game.join", true);
+
         FakeCore core = new FakeCore()
                 .linked(GAME, CHAT)
-                .audited("identity.linked");
+                .audited("identity.linked")
+                // A healthy core refuses an account it has never heard of at a
+                // gate requiring linkage. Scripted rather than defaulted: the
+                // default is now "could not be asked", which would make this
+                // control pass by the invariant declining to look.
+                .decides("game.join", "game:soulbind-sim-never-linked-probe", "deny");
 
         for (Invariant invariant : Invariants.all()) {
             assertEquals(List.of(), check(invariant, model, core),
