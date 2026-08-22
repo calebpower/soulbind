@@ -659,24 +659,26 @@ public final class CoreHandlers {
                         "override.remove names exactly one of subjectId or identityRef");
             }
 
-            List<String> affected = transitions.targetsOf(
-                    bySubject ? view.subjectId() : null,
-                    byIdentity ? view.identityRef() : null);
+            // The values, not `bySubject ? ... : null`. The check above has
+            // already established that exactly one of the two is non-blank, so
+            // the ternaries could only ever turn a blank into a null -- which
+            // every reader of them treats identically. Four equivalent mutants
+            // lived in that redundancy; deleting it is better than writing four
+            // notes explaining why they cannot be killed. DECISIONS 10.35.
+            String subjectId = view.subjectId();
+            String identityRef = view.identityRef();
+
+            List<String> affected = transitions.targetsOf(subjectId, identityRef);
             Map<String, Set<String>> gatesBefore = transitions.before(affected);
 
-            int removed = policy.removeOverridesFor(
-                    view.gate(),
-                    bySubject ? view.subjectId() : null,
-                    byIdentity ? view.identityRef() : null);
+            int removed = policy.removeOverridesFor(view.gate(), subjectId, identityRef);
 
             // Audited even when nothing matched. "The operator tried to remove
             // an override that was not there" is a fact worth having when
             // somebody later asks why a gate still admits them.
             audit.append(new AuditEntry(
                     0L, clock.instant(), "connector:" + connector.id(), "override.removed",
-                    bySubject ? view.subjectId() : null,
-                    byIdentity ? view.identityRef() : null,
-                    view.gate(),
+                    subjectId, identityRef, view.gate(),
                     Map.of("removed", Integer.toString(removed))));
 
             transitions.emit(gatesBefore, affected);

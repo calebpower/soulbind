@@ -7559,3 +7559,70 @@ connector against a newer core used to report every refusal it had no constant
 for as `internal`, with the real code gone from every log. Both effectors print
 the real one now, and `isRecognised()` makes a version skew something a
 connector can say rather than something it hides.
+
+### 10.35 — What CoreHandlers' uncovered mutants actually were, after two wrong guesses
+
+I said in a report that `CoreHandlers`' 58 uncovered mutants were "mostly the
+MariaDB-only paths that do not run on this workstation", **without checking**.
+That went into a recommendation about which module to work on next. Task #68
+existed to verify it before it was repeated as fact, and it was wrong twice.
+
+**Guess one, wrong.** Mapping the lambdas to line numbers shows they are not
+backend paths at all. They are the malformed-payload branches — one
+`unreadable(...)` per operation, twenty-odd of them:
+
+```
+L286  return unreadable(Operation.CODE_ISSUE, CodeIssueRequest.class);
+L307  return unreadable(Operation.CODE_REDEEM, CodeRedeemRequest.class);
+L373  return unreadable(Operation.ATTEST, AttestRequest.class);
+```
+
+**Guess two, also wrong.** "Then it must be the fuzz exclusion" — `ProtocolFuzzTest`
+is `@Tag("fuzz")` and PIT deliberately excludes it, and the narrowing's own note
+says a mutant killed only by fuzzing is reported here as surviving. Measured
+rather than asserted this time:
+
+| | core uncovered | `CoreHandlers` uncovered |
+|---|---|---|
+| fuzz excluded (the baseline configuration) | 142 | 58 |
+| fuzz included | 136 | 54 |
+
+Four mutants. The fuzz tier barely reaches them. **They were simply untested:**
+for most operations, "core was sent a payload it cannot parse" had nothing
+asserting the refusal.
+
+#### Covered by asking every operation the same question
+
+A parameterised test over `CoreHandlers.implemented()`, sending each operation a
+payload carrying a field this build does not know. Derived from the implemented
+list so an operation added tomorrow is covered the day it exists, rather than
+when somebody remembers.
+
+Twenty binding operations, and exactly one accepted: `heartbeat`, which reads
+nothing at all — deliberately, because a heartbeat that touched anything else
+would let a flapping connector rewrite its own row. Recorded as the single
+exception, in a **hand-written** list rather than a derived one: an operation
+that stopped validating its payload would otherwise be added to the set by the
+very change that broke it, and the test would agree with it.
+
+#### Three things the first pass got wrong, and the second caught
+
+* **The assertion was too weak.** Three `if (request.isEmpty())` mutants
+  survived being executed. Negating the check makes the handler reach through
+  an empty `Optional`, throw, and the dispatcher answers `internal` — still
+  `ok:false`, still a refusal, and indistinguishable from a clean one unless the
+  CODE is checked too. It is now.
+* **Four equivalent mutants were my own redundancy.** The `override.remove`
+  handler wrote `bySubject ? view.subjectId() : null` in three places, when the
+  guard immediately above has already established that exactly one of the two is
+  non-blank — so the ternary could only ever turn a blank into a null, which
+  every downstream reader treats identically. Deleted rather than documented:
+  four notes explaining why four mutants cannot be killed is worse than not
+  writing the redundancy.
+* **The heartbeat's single line was deletable.** `connectors.touchLastSeen`.
+  Without it `connector.list` reports every connector as never seen, and an
+  operator's only means of spotting one that has stopped calling home stops
+  working — silently, and in the direction where everything looks fine.
+
+`CoreHandlers`: 58 uncovered to 38, 12 survivors to 5.
+core overall: **131 survivors to 80, 173 uncovered to 122, 68% killed to 79%.**

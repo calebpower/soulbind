@@ -17,14 +17,19 @@
 package dev.soulbind.core.transport;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.soulbind.core.registry.Authorizer.Operation;
+import dev.soulbind.core.storage.StorageBackends;
 import dev.soulbind.core.storage.Backend;
 import dev.soulbind.protocol.Capability;
+import dev.soulbind.protocol.ErrorCode;
 import dev.soulbind.protocol.Wire;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.EnumSet;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.io.TempDir;
@@ -64,6 +69,80 @@ class UnreadablePayloadTest {
                 core.postSigned(core.request(op, payload), clock.instant()).body());
         assertFalse(json.get(Wire.OK).asBoolean(), () -> op + " was accepted: " + json);
         return json.get(Wire.ERROR);
+    }
+
+    /**
+     * Operations that bind no payload, so an unknown field cannot fail them.
+     *
+     * <p>Written out by hand rather than derived. An operation that stops
+     * validating its payload would otherwise be added to this set by the very
+     * code that broke it, and the test would agree.
+     */
+    private static final Set<Operation> BIND_NOTHING = Set.of(
+            // Answers from the registry and the runtime config with no request
+            // shape at all. There is nothing to misread.
+            Operation.CONNECTOR_LIST,
+            Operation.CONFIG_GET,
+
+            // A liveness ping. It writes last-seen and answers with the time,
+            // reading nothing -- deliberately, because a heartbeat that touched
+            // anything else would let a flapping connector rewrite its own row.
+            // Ignoring an unknown field is the right behaviour here and the
+            // only place in the table where it is.
+            Operation.HEARTBEAT);
+
+    static java.util.stream.Stream<Operation> bindingOperations() {
+        return CoreHandlers.implemented().stream().filter(op -> !BIND_NOTHING.contains(op));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("bindingOperations")
+    @DisplayName("EVERY operation that binds a payload refuses one it cannot read, and says so")
+    void everyOperationRefusesAnUnreadablePayload(Operation operation) throws Exception {
+        // Fifty-four mutants lived in these branches -- one `unreadable(...)`
+        // per operation, and almost none of them executed by anything. Two
+        // guesses about why were both wrong: they are not the MariaDB-only
+        // paths, and re-running with the fuzz tier included moved the number by
+        // four. They were simply untested.
+        //
+        // Parameterised over `implemented()` so an operation added tomorrow is
+        // covered the day it exists, rather than when somebody remembers.
+        Clock clock = TestCore.fixedClock();
+        try (TestCore core = new TestCore(
+                backend(), tempDir, EnumSet.allOf(Capability.class), clock)) {
+
+            JsonNode json = core.codec.mapper().readTree(
+                    core.postSigned(
+                            core.request(
+                                    operation.wireName(),
+                                    "{\"soulbind-no-such-field\":\"anything\"}"),
+                            clock.instant()).body());
+
+            assertFalse(json.get(Wire.OK).asBoolean(),
+                    () -> operation.wireName() + " ACCEPTED a payload it cannot have"
+                            + " understood. A field this build does not know was ignored,"
+                            + " so a caller sending the wrong shape is told nothing: " + json);
+
+            String message = json.get(Wire.ERROR).path(Wire.ERROR_MESSAGE).asText("");
+            assertFalse(message.isBlank(),
+                    () -> operation.wireName() + " refused with no explanation at all");
+
+            // A CLEAN refusal, not a crash reported as one. A handler that
+            // tested `!request.isEmpty()` by mistake would reach through an
+            // empty Optional, throw, and the dispatcher would answer `internal`
+            // -- still a refusal, still ok:false, and indistinguishable from
+            // this test's point of view unless the code is checked too.
+            String code = json.get(Wire.ERROR).path(Wire.ERROR_CODE).asText("");
+            assertNotEquals(ErrorCode.INTERNAL.wireName(), code,
+                    () -> operation.wireName() + " answered an unreadable payload with an"
+                            + " internal error, which means it threw rather than refused: "
+                            + message);
+        }
+    }
+
+    /** One backend is enough here: this is about payload binding, not persistence. */
+    private static Backend backend() {
+        return StorageBackends.any();
     }
 
     @ParameterizedTest(name = "{0}")
@@ -122,6 +201,36 @@ class UnreadablePayloadTest {
                     message.contains("could not read the payload"),
                     () -> "this payload read fine; it was simply missing its gate. Got: "
                             + message);
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("a heartbeat records that the connector was seen")
+    void heartbeatTouchesLastSeen(Backend backend) throws Exception {
+        // The one line the heartbeat handler has, and it could be deleted with
+        // nothing failing. Without it `connector.list` reports every connector
+        // as never seen, and the operator's only way to spot one that has
+        // stopped calling home stops working -- silently, and in the direction
+        // where everything looks fine.
+        Clock clock = TestCore.fixedClock();
+        try (TestCore core = new TestCore(
+                backend, tempDir, Set.of(Capability.CONFIG_MANAGEMENT), clock)) {
+
+            assertTrue(
+                    core.storage.connectors().findByName(core.connector.name()).orElseThrow()
+                            .lastSeenAt() == null,
+                    "a connector that has never called was already recorded as seen");
+
+            JsonNode json = core.codec.mapper().readTree(
+                    core.postSigned(core.request("heartbeat", "{}"), clock.instant()).body());
+            assertTrue(json.get(Wire.OK).asBoolean(), json::toString);
+
+            assertTrue(
+                    core.storage.connectors().findByName(core.connector.name()).orElseThrow()
+                            .lastSeenAt() != null,
+                    "a heartbeat did not record that the connector was seen, so connector.list"
+                            + " will report it as never having called");
         }
     }
 }

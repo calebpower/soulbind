@@ -47,7 +47,7 @@ connector-discord      299    228    1    70    0
 connector-plan         102     72   10    20    0
 connector-sdk          104     92    3     9    0
 connector-velocity     214    135   16    63    0
-core                   998    764   84   142    8
+core                     992    783   80   122    7
 policy                  84     82    2     0    0
 protocol                98     96    1     0    1
 sim                      312    217   19    76    0
