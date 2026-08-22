@@ -62,6 +62,12 @@ public final class ConfigSchema {
                 // Unreachable while ConfigKey's path rule holds, and asserted
                 // anyway: this is the check that would catch a future relaxation
                 // of that rule turning two keys into one environment variable.
+                //
+                // So the `!clash.equals(...)` mutant is EQUIVALENT by design,
+                // not by oversight -- there is no input that reaches it with
+                // the rule in force. Recorded here so a sweep skips it rather
+                // than deleting a guard that exists for a future change.
+                // DECISIONS 10.40.
                 problems.add("keys '" + clash + "' and '" + key.path()
                         + "' both map to " + key.envName());
             }

@@ -7812,3 +7812,40 @@ stale-credential action — so a file missing either produces a run quietly
 narrower than it claims. And `hunt`'s budget floor is `< 1` because a budget of
 zero tries nothing and reports having found nothing, which is indistinguishable
 from a hunt that looked properly.
+
+### 10.40 — config and the SDK: the small surfaces nobody had read back
+
+`config` 87 killed to 94 of 99; `connector-sdk` 92 to 94 of 104.
+
+**A configuration that forgot where it came from.** `Config.source()` is what
+every error message names and `Config.schema()` is what the doctor walks to
+report unknown keys. Both could return nothing and no test noticed — so a
+configuration would be refused with no file named, and the doctor would find no
+keys to check. Likewise every `find*`: each could return an empty `Optional`
+unconditionally, every caller's default would silently apply, and the file would
+stop meaning anything.
+
+**"That should be an integer" is half an answer.** `describeType` says what the
+value actually *is*, and it is the difference between an operator spotting the
+quotes they left on and re-reading the line twice. It was untested; mutating all
+three arms to `""` now fails.
+
+**The message that names the accessor.** Reading an optional key with `get()`
+tells you to use `findBoolean()` instead, built from the key's type. Blanking it
+leaves an operator told to call a method that does not exist.
+
+**`IdempotentApplier`'s floor is `< 1`, not `<= 1`.** A capacity of one is
+legitimate — it dedups consecutive redeliveries of the same event, which is the
+common case — and refusing it would take away the cheapest useful setting. And
+`forgetAll` had nothing calling it in a test: without it working, a connector
+whose cursor is reset still holds keys from before the reset and silently skips
+the very events the reset exists to redeliver.
+
+#### One equivalent mutant that is equivalent BY DESIGN
+
+`ConfigSchema.of`'s `!clash.equals(key.path())`. Its own comment already says
+the branch is unreachable while `ConfigKey`'s path rule holds, and that it is
+asserted anyway to catch a future relaxation of that rule. So the mutant cannot
+be killed without weakening the rule it guards. Recorded at the line so a sweep
+skips it rather than deleting a guard that exists for a change nobody has made
+yet.

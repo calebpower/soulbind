@@ -18,6 +18,7 @@ package dev.soulbind.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -533,6 +534,118 @@ class ConfigLoaderTest {
                     IllegalArgumentException.class,
                     () -> ConfigSchema.of(HOST).merge(
                             ConfigSchema.of(ConfigKey.optional("server.host", Type.INTEGER, "x"))));
+        }
+    }
+
+    // --- the loaded object's own surface --------------------------------------
+
+    @Test
+    @DisplayName("a loaded configuration remembers where it came from and what it was read against")
+    void configKnowsItsProvenance() {
+        // `source` is what every error message names, and `schema` is what the
+        // doctor walks to report unknown keys. Both could return nothing and
+        // no test noticed -- so a configuration would be refused with no file
+        // named, and the doctor would find no keys to check.
+        Config config = parse("""
+                [server]
+                host = "127.0.0.1"
+                port = 7000
+                """);
+
+        assertEquals("test", config.source());
+        assertSame(SCHEMA, config.schema(),
+                "the configuration does not carry the schema it was read against, so nothing"
+                        + " downstream can ask what keys are legal");
+    }
+
+    @Test
+    @DisplayName("every find* returns the value when it is there, not merely an Optional")
+    void findReturnsWhatIsThere() {
+        // Each accessor could return an empty Optional unconditionally and
+        // survive: every caller has a default, so every default would silently
+        // apply and the configuration file would stop meaning anything.
+        Config config = parse("""
+                [server]
+                host = "0.0.0.0"
+                port = 7100
+                tls = true
+                """);
+
+        assertEquals(java.util.Optional.of("0.0.0.0"), config.findString(HOST));
+        assertEquals(java.util.Optional.of(7100), config.findInt(PORT));
+        assertEquals(java.util.Optional.of(true), config.findBoolean(TLS));
+    }
+
+    @Test
+    @DisplayName("reading an optional key with get() says which find* to use instead")
+    void getOnAnOptionalKeyNamesTheAlternative() {
+        // The message builds "findBoolean" from the key's type. Getting that
+        // wrong -- or blanking it -- leaves an operator told to call a method
+        // that does not exist.
+        Config config = parse("""
+                [server]
+                host = "127.0.0.1"
+                port = 7000
+                """);
+
+        IllegalStateException thrown =
+                assertThrows(IllegalStateException.class, () -> config.getBoolean(TLS));
+
+        assertTrue(thrown.getMessage().contains("findBoolean()"),
+                "the message does not name the accessor to use instead: "
+                        + thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("server.tls"), thrown.getMessage());
+    }
+
+    @Test
+    @DisplayName("two components declaring the same key is refused, and the key is named")
+    void duplicateKeyIsRefused() {
+        // Two components declaring one path means whichever loaded first wins
+        // silently, and the losing component reads a value it did not define.
+        IllegalArgumentException thrown = assertThrows(
+                IllegalArgumentException.class,
+                () -> ConfigSchema.of(
+                        HOST, PORT,
+                        ConfigKey.optional("server.host", Type.STRING, "declared twice")));
+
+        assertTrue(thrown.getMessage().contains("server.host"),
+                "the refusal does not name the duplicated key: " + thrown.getMessage());
+    }
+
+    @Test
+    @DisplayName("a secret key carries no type of its own, and says so rather than guessing")
+    void secretKeysAreStrings() {
+        ConfigKey secret = ConfigKey.secret("storage.password", false, "database password");
+
+        assertEquals(Type.STRING, secret.type(),
+                "a secret was declared as something other than a string, so reading it needs"
+                        + " an accessor nobody would guess");
+    }
+
+    @Test
+    @DisplayName("a wrong-typed value is reported by what it IS, not merely as wrong")
+    void wrongTypeNamesWhatItFound() {
+        // "server.port should be an integer" is half an answer. "…and this is a
+        // boolean" is the whole one, and it is the difference between an
+        // operator finding the quotes they left on and re-reading the line
+        // twice.
+        for (String[] pair : new String[][] {
+                {"tls = 7000", "an integer"},
+                {"tls = \"yes\"", "a string"},
+                {"port = true", "a boolean"},
+                {"port = 1.5", "a float"}}) {
+            ConfigException thrown = assertThrows(
+                    ConfigException.class,
+                    () -> parse("""
+                            [server]
+                            host = "127.0.0.1"
+                            port = 7000
+                            """.replace(pair[0].split(" ")[0] + " = ", "ignored = ")
+                            + "[server]\n" + pair[0] + "\n"));
+
+            assertTrue(thrown.getMessage().contains(pair[1]),
+                    () -> "the complaint does not say what the value actually is ("
+                            + pair[1] + "): " + thrown.getMessage());
         }
     }
 }

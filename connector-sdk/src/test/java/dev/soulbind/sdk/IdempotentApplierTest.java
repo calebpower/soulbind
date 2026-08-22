@@ -180,4 +180,36 @@ class IdempotentApplierTest {
         assertFalse(applier.applyOnce("event-7", (java.util.function.Consumer<String>) received::add));
         assertEquals(1, received.size(), "a repeated key ran the effect twice");
     }
+
+    @Test
+    @DisplayName("a capacity of exactly one is legal, and remembers exactly one")
+    void capacityOfOne() {
+        // `< 1`, not `<= 1`. One is a legitimate capacity -- it dedups
+        // consecutive redeliveries of the same event, which is the common case
+        // -- and refusing it would take away the cheapest useful setting.
+        IdempotentApplier applier = new IdempotentApplier(1);
+
+        assertTrue(applier.applyOnce("a", () -> { }));
+        assertFalse(applier.applyOnce("a", () -> { }), "the one thing it remembers was lost");
+        assertTrue(applier.applyOnce("b", () -> { }));
+        assertTrue(applier.applyOnce("a", () -> { }),
+                "a capacity of one remembered two keys");
+    }
+
+    @Test
+    @DisplayName("forgetAll forgets, so a reconnecting connector re-applies from its cursor")
+    void forgetAllForgets() {
+        // Called when a connector's cursor is reset. Without it the applier
+        // still holds keys from before the reset and silently skips the very
+        // events the reset exists to redeliver.
+        IdempotentApplier applier = new IdempotentApplier();
+        applier.applyOnce("a", () -> { });
+        assertEquals(1, applier.remembered());
+
+        applier.forgetAll();
+
+        assertEquals(0, applier.remembered(), "forgetAll left keys behind");
+        assertTrue(applier.applyOnce("a", () -> { }),
+                "an event was still skipped after the applier was told to forget everything");
+    }
 }
