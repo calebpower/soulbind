@@ -282,11 +282,16 @@ cp -r connector-flarum/build/infection/. out/infection/
 # workstation's: a session has a MariaDB server, so core's backend-specific
 # paths are covered here and uncovered there. Comparing the two would fail the
 # battery for a reason that has nothing to do with the change under test.
+#
+# `--continue` because a report of everything that regressed is worth more than
+# the first regression alphabetically, and because without it a run that has
+# rows to establish reports ONE module per session -- and a guard that takes
+# nine fifty-minute runs to configure is a guard nobody finishes configuring.
 echo "run: Java mutation ratchet"
 podman run --rm --network host -v "$PWD":/work -w /work \
   -e GRADLE_USER_HOME=/work/.gradle-run-home \
   docker.io/library/eclipse-temurin@sha256:c42fecf62f32725c65cfea284c012526d6fb31cc78123c740ebdc1cfd2dced12 \
-  ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache \
+  ./gradlew --no-daemon --project-cache-dir /tmp/gradle-run-cache --continue \
     -PmutationEnv=session mutationRatchet
 
 echo "run: shell mutation battery"
