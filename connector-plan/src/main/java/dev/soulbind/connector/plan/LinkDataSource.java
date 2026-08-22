@@ -240,6 +240,10 @@ public final class LinkDataSource {
                 // The EARLIEST, which is when this subject first became linked.
                 // The latest would move every time somebody adds a platform,
                 // making "verified at" read as "last touched".
+                // `<` and its `<=` mutant are EQUIVALENT: two identities
+                // carrying the same timestamp produce the same earliest either
+                // way, and there is no third case. Recorded so a later sweep
+                // skips it rather than rediscovering it. DECISIONS 10.36.
                 if (at > 0 && (earliest == null || at < earliest)) {
                     earliest = at;
                 }

@@ -7626,3 +7626,57 @@ very change that broke it, and the test would agree with it.
 
 `CoreHandlers`: 58 uncovered to 38, 12 survivors to 5.
 core overall: **131 survivors to 80, 173 uncovered to 122, 68% killed to 79%.**
+
+### 10.36 — connector-plan: 70% to 92%, and a dashboard's quiet failures
+
+`connector-plan` renders a read-only page, which gives it exactly one way to be
+actively harmful: printing a confident answer it does not have. That distinction
+was already tested. What was not tested was everything that decides **how long
+it keeps an answer** and **which answer it keeps**.
+
+**102 mutants: 72 killed to 94, 10 survivors to 1, 20 uncovered to 7. Test
+strength 87% to 99%.**
+
+#### The configuration nothing executed
+
+All thirteen mutants in `PlanConfig` came back "no coverage" — the defaults, the
+TTL floor, and the one check that stops the connector starting. These are values
+an operator sets once and never looks at again, which is exactly why a default
+that changes quietly is expensive: the symptom appears months later as a
+dashboard behaving differently from the one next to it.
+
+Two of them matter more than the rest. `showSubjectId` defaults to **false**,
+and the subject id identifies a person across every platform they hold — it is
+nobody's business by accident. And a blank `platformkind` falls back rather than
+asking core about `:someone`, which core cannot match to anything, so every
+player would render as unlinked with nothing saying why.
+
+#### Boundaries on both caches
+
+`> now`, not `>= now`, on the per-player cache and again on the server summary.
+An entry whose deadline is this instant has expired; serving it makes the TTL an
+operator configured one tick longer than they asked for, forever. Both are now
+asserted at exactly the deadline rather than a second past it.
+
+The sweep is the same boundary in the other direction — `<= now` — and it is
+what stops the cache growing forever. Checking expiry on read without ever
+removing gives correct answers and unbounded memory, and a dashboard runs for
+months. Testing it needed 4096 entries, because the sweep is deliberately rare:
+doing it on every read would walk the whole map for every provider on every page,
+and Plan renders eight per player.
+
+#### A boolean asserted in one direction
+
+`linked()` could return false unconditionally and survive. The only test
+touching it was the **outage** case, where false is correct — so the boolean
+every Plan page renders as a tick or a cross had never been asserted true.
+
+#### The one survivor left, and it is equivalent
+
+`read()`'s `at < earliest` against `<=`: two identities carrying the same
+timestamp produce the same earliest either way, and there is no third case.
+Recorded at the line.
+
+Seven uncovered remain: `PlayerLinkView` (2) and `SoulbindPlanPlugin` (5), the
+latter being the Plan entry point, which needs Plan running — the same standing
+as `JdaSurface` in the chat connector and `ScriptedDriver` in its harness.

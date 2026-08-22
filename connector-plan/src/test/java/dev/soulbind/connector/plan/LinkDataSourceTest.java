@@ -628,4 +628,136 @@ class LinkDataSourceTest {
                         + "different one per JVM run -- and a table that reshuffles between "
                         + "refreshes looks like data changing when nothing has");
     }
+
+    // --- the TTL, and the boundaries around it --------------------------------
+
+    @Test
+    @DisplayName("a TTL that is null, negative or zero falls back to the default")
+    void ttlFallback() {
+        // Three separate conditions and three separate mutants. Zero or
+        // negative would mean every question is a round trip, which is a page
+        // load per provider per player -- Plan renders eight of them.
+        for (Duration bad : new Duration[] {null, Duration.ofSeconds(-1), Duration.ZERO}) {
+            var counting = new java.util.concurrent.atomic.AtomicInteger();
+            InMemoryTransport transport = new InMemoryTransport(request -> {
+                counting.incrementAndGet();
+                return ok("{\"linked\":false}");
+            });
+            var clock = new MutableClock(NOW);
+            LinkDataSource source = new LinkDataSource(
+                    new SoulbindClient(transport, "cred", clock, new DecisionCache()),
+                    "game", bad, false, clock);
+
+            source.player("p1");
+            source.player("p1");
+
+            assertEquals(1, counting.get(),
+                    () -> "a TTL of " + bad + " produced no caching at all, so every provider"
+                            + " on every page is its own round trip");
+        }
+    }
+
+    @Test
+    @DisplayName("an answer expiring exactly now is re-asked, not served")
+    void expiryBoundary() {
+        // `> now`, not `>= now`. An entry whose deadline is this instant has
+        // expired; serving it means the TTL an operator configured is one
+        // millisecond longer than they asked for, forever.
+        var counting = new java.util.concurrent.atomic.AtomicInteger();
+        InMemoryTransport transport = new InMemoryTransport(request -> {
+            counting.incrementAndGet();
+            return ok("{\"linked\":false}");
+        });
+        var clock = new MutableClock(NOW);
+        LinkDataSource source = new LinkDataSource(
+                new SoulbindClient(transport, "cred", clock, new DecisionCache()),
+                "game", Duration.ofSeconds(30), false, clock);
+
+        source.player("p1");
+        clock.advance(Duration.ofSeconds(30));
+        source.player("p1");
+
+        assertEquals(2, counting.get(),
+                "an entry that expired exactly now was served from the cache");
+    }
+
+    @Test
+    @DisplayName("the cache sweeps expired entries rather than growing forever")
+    void expiredEntriesAreSwept() {
+        // Correct answers, unbounded memory: checking expiry on read without
+        // ever removing leaves every player ever asked about resident for the
+        // life of the process. A dashboard runs for months.
+        InMemoryTransport transport = InMemoryTransport.always(ok("{\"linked\":false}"));
+        var clock = new MutableClock(NOW);
+        LinkDataSource source = new LinkDataSource(
+                new SoulbindClient(transport, "cred", clock, new DecisionCache()),
+                "game", Duration.ofSeconds(30), false, clock);
+
+        // Past SWEEP_THRESHOLD, which is 4096: the sweep is deliberately rare,
+        // because doing it on every read would walk the whole map for every
+        // provider on every page.
+        for (int i = 0; i < 4100; i++) {
+            source.player("player-" + i);
+        }
+        int before = source.cachedEntries();
+        assertTrue(before > 0, "nothing was cached at all");
+
+        // Everything above is now stale -- at EXACTLY the deadline, because the
+        // sweep's predicate is `<= now`. An entry whose expiry is this instant
+        // has expired, and sweeping only what is strictly older leaves one
+        // generation of dead entries behind on every pass.
+        clock.advance(Duration.ofSeconds(30));
+        source.player("the-one-that-sweeps");
+
+        assertTrue(source.cachedEntries() < before,
+                () -> "expired entries survived the sweep: " + before + " -> "
+                        + source.cachedEntries());
+    }
+
+    @Test
+    @DisplayName("a verification time of zero is not treated as the earliest")
+    void zeroVerificationIsNotEarliest() {
+        // `at > 0`, and the boundary matters: an identity core has not proven
+        // carries zero, and taking that as the earliest would render "linked
+        // since 1 January 1970" on somebody's page.
+        InMemoryTransport transport = InMemoryTransport.always(ok(
+                "{\"linked\":true,\"identities\":["
+                        + "{\"platformKind\":\"game\",\"verifiedAtEpochSeconds\":0},"
+                        + "{\"platformKind\":\"chat\",\"verifiedAtEpochSeconds\":1700000000}]}"));
+
+        PlayerLinkView view = source(transport).player("p1");
+
+        assertEquals(java.util.Optional.of(1700000000L), view.verifiedAtEpochSeconds(),
+                "an unproven identity's zero was taken as the earliest verification, so the"
+                        + " page reports a date in 1970");
+    }
+
+    @Test
+    @DisplayName("a summary expiring exactly now is recomputed, not served")
+    void summaryExpiryBoundary() {
+        // Same boundary as the per-player cache, on the other cache. A server
+        // page that serves a summary one tick past its deadline reports a
+        // roster that has already changed -- and the number an operator is
+        // looking at is the one thing that page is for.
+        var counting = new java.util.concurrent.atomic.AtomicInteger();
+        InMemoryTransport transport = new InMemoryTransport(request -> {
+            counting.incrementAndGet();
+            return ok("{\"linked\":false}");
+        });
+        var clock = new MutableClock(NOW);
+        LinkDataSource source = new LinkDataSource(
+                new SoulbindClient(transport, "cred", clock, new DecisionCache()),
+                "game", Duration.ofSeconds(30), false, clock);
+
+        source.summary(List.of("p1"), Map.of("p1", "Alex"));
+        int afterFirst = counting.get();
+        source.summary(List.of("p1"), Map.of("p1", "Alex"));
+        assertEquals(afterFirst, counting.get(), "the summary was not cached at all");
+
+        clock.advance(Duration.ofSeconds(30));
+        source.summary(List.of("p1"), Map.of("p1", "Alex"));
+
+        assertTrue(counting.get() > afterFirst,
+                "a summary that expired exactly now was served from the cache");
+    }
 }

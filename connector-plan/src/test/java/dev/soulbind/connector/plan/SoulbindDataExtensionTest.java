@@ -268,4 +268,21 @@ class SoulbindDataExtensionTest {
     private static String describe(List<Object[]> rows) {
         return rows.stream().map(Arrays::toString).toList().toString();
     }
+
+    @Test
+    @DisplayName("a linked player reads as linked, not merely 'not unknown'")
+    void linkedIsTrueForALinkedPlayer() {
+        // `linked()` could return false unconditionally and survive: the only
+        // test touching it was the outage case, where false is CORRECT. So the
+        // boolean every Plan page renders as a tick or a cross was asserted in
+        // one direction only.
+        SoulbindDataExtension extension = extension(
+                InMemoryTransport.always(ok(
+                        "{\"linked\":true,\"identities\":[{\"platformKind\":\"game\"},"
+                                + "{\"platformKind\":\"chat\"}]}")),
+                false, Map.of());
+
+        assertTrue(extension.linked(UUID.fromString("11111111-2222-3333-4444-555555555555")),
+                "a player core reported as linked rendered as not linked");
+    }
 }
