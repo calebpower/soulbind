@@ -50,4 +50,4 @@ connector-velocity     214    135   16    63    0
 core                   996    685  131   173    7
 policy                  84     82    2     0    0
 protocol                98     96    1     0    1
-sim                    312    164   69    79    0
+sim                      312    198   38    76    0

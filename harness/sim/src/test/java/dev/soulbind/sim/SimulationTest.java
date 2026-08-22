@@ -118,6 +118,66 @@ class SimulationTest {
     }
 
     @Test
+    @DisplayName("a run that is not exhausted takes EXACTLY the actions it was asked for")
+    void theRunTakesExactlyWhatItWasAsked() {
+        // `actionsTaken() > 300` was the assertion here, and a loop running one
+        // short of its bound satisfies it. Exactness is what pins the boundary,
+        // and the trace has to agree: one line per action, or the record of the
+        // run is not a record of the run.
+        InMemoryCore core = new InMemoryCore();
+        Simulation.Outcome outcome = Simulation.run(20260820L, world(), core, core, 120, 40);
+
+        assertEquals(120, outcome.actionsTaken(),
+                "the run did not take the number of actions it was given, and nothing but"
+                        + " this says so: " + outcome.summary());
+        assertEquals(120, outcome.trace().size(),
+                "the trace does not have one line per action, so it cannot be read back as"
+                        + " what happened");
+    }
+
+    @Test
+    @DisplayName("every action is counted as accepted or refused, and nothing falls between")
+    void everyActionIsAccountedFor() {
+        // The counters are how a person decides whether a clean run meant
+        // anything. A refusal miscounted as an acceptance -- or as neither --
+        // makes "400 actions, 0 violations" unreadable.
+        InMemoryCore core = new InMemoryCore();
+        Simulation.Outcome outcome = Simulation.run(20260820L, world(), core, core, 200, 50);
+
+        long ok = outcome.trace().stream().filter(line -> line.endsWith("=> ok")).count();
+        long refused = outcome.trace().stream().filter(line -> line.contains("=> refused:"))
+                .count();
+
+        assertEquals(outcome.actionsTaken(), ok + refused,
+                "an action was neither accepted nor refused in the trace: " + outcome.trace()
+                        .stream().filter(l -> !l.endsWith("=> ok") && !l.contains("=> refused:"))
+                        .toList());
+        assertEquals(outcome.refusals(), refused,
+                "the refusal counter disagrees with the trace it was counted from");
+        assertTrue(refused > 0,
+                "nothing was refused in two hundred actions, so the refusal path is not being"
+                        + " exercised and its counter proves nothing");
+    }
+
+    @Test
+    @DisplayName("a run that linked nothing does not claim to have worked")
+    void noLinksIsNotWork() {
+        // The specific fault this flag exists for: three seeds sharing one
+        // identity namespace meant seeds two and three linked nothing at all,
+        // and both reported clean. Zero successful links is a harness fault.
+        // `linksMade > 0`, not `>= 0`.
+        Simulation.Outcome nothing = new Simulation.Outcome(
+                1L, 400, 0, 400, List.of(), List.of());
+        Simulation.Outcome something = new Simulation.Outcome(
+                1L, 400, 1, 399, List.of(), List.of());
+
+        assertFalse(nothing.didWork(),
+                "a run that made no links at all reported that it had done work");
+        assertTrue(something.didWork(),
+                "a run that made a link reported that it had not");
+    }
+
+    @Test
     @DisplayName("the run says WHEN it first diverged, not just that it did")
     void violationsAreLocatedInTheRun() {
         // With the shrinker deferred (DECISIONS 9.1) this is what makes a

@@ -7293,3 +7293,82 @@ asked for at once, which is how the ratchet is meant to run.
 A shared build service capped at one concurrent usage, rather than starving
 PIT's own threads: the threads inside a run are what make it bearable, and
 trading them for cross-module parallelism buys the slow case with the fast one.
+
+### 10.32 — The sim's oracle was never checked against what the sim did
+
+The ratchet's first whole-tree run refused `:sim` for having no baseline row —
+312 mutants, 164 killed, **69 survived**, and nothing had ever looked at it.
+Which matters more than the number: this is the tier that drives simulated
+people through the whole system, and a harness whose own assertions are wrong
+reports clean and means nothing.
+
+#### The gap `OracleSelfTest` cannot see
+
+`OracleSelfTest` proves each invariant complains when core is broken, and it is
+thorough — eleven scenarios, a healthy control, a timing bound. It asks: *does
+the oracle fire?*
+
+It cannot ask the other question: **is the oracle told the truth?** The
+invariants compare a shadow model against what core says. Every `model.*` and
+`world.*` call in `Simulation.execute` is a fact the model needs. If one of them
+stops happening, the fact is missing from the model — and the comparison is then
+made between two views that both omit it. Every invariant stays silent. The run
+reports hundreds of actions and no violations, which reads exactly like success.
+
+Mutation put a number on it: **nine of those updates could be deleted outright
+with no test failing.** Among them, on the redeem path, `model.linked`,
+`world.linked`, `world.codeSpent` and `model.redeemed` — which is to say the
+oracle could forget the link it just made, and nothing would notice.
+
+`execute` is now package-private so a test can drive one action at a time
+against a real `World` and `ShadowModel`, and `ExecutorBookkeepingTest` asserts
+what each kind must record. Including the two that must record **nothing**:
+`DOUBLE_REDEEM` and `STALE_CREDENTIAL` succeed only when core is broken, so
+writing their success into the model would have the oracle adopt the bug and
+then confirm it.
+
+The most valuable assertion turned out to be a separation the model already
+documented and nothing enforced: an account with only a code issued for it goes
+in `neverLinked`, never in `knownIdentities`. Merge those two sets and the
+linkage invariant starts complaining about core being **right**.
+
+#### The world quietly narrows a run rather than failing it
+
+`World` answers "what is worth doing next". A wrong answer does not fail a
+run — it shrinks one. A world that reports everybody linked stops proposing
+links. One that keeps a spent code on offer spends the rest of the run
+re-drawing an answer that cannot change. One that rotates the wrong actor
+retires a credential the run then wrongly expects to be refused.
+
+All of it looks like a clean pass, and none of it was tested. `WorldTest`
+covers it now, both directions of each conditional.
+
+#### `contains` and `>` where the point was exactness
+
+`SimulationTest` asserted `actionsTaken() > 300` on a 400-action run. A loop
+running one short of its bound satisfies that. It now asserts the exact count
+and that the trace has one line per action — because a trace shorter than the
+run is not a record of the run.
+
+It also now checks that every action is counted as accepted **or** refused and
+that the refusal counter agrees with the trace it was counted from. Those
+counters are how a person decides whether a clean run meant anything.
+
+And `didWork()` — `linksMade > 0`, not `>= 0` — has a test for the fault it was
+written for: three seeds sharing one identity namespace meant two of them linked
+nothing at all and both reported clean.
+
+#### Where it got to, and what is left
+
+| | Before | After |
+|---|---|---|
+| Killed | 164 (53%) | **198 (63%)** |
+| Survived | 69 | **38** |
+| Test strength | 68% | **84%** |
+
+`World` is clean. `Simulation` went 28 survivors to 11.
+
+Left: `SdkCore` (44, executed by nothing here — it is the real-SDK driver, and
+whether the session tier covers it needs checking rather than assuming),
+`Runner` (8 survived, 24 uncovered), `Simulation` (11), `Invariants` (7). A
+second pass, not a different kind of work.

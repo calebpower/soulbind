@@ -163,7 +163,21 @@ public final class Simulation {
                 seed, taken, linksMade, refusals, checker.violations(), List.copyOf(trace));
     }
 
-    private static CoreDriver.Result execute(
+    /**
+     * Performs one action and records what it means into the model and world.
+     *
+     * <p>Package-private rather than private, and the reason is worth stating:
+     * every {@code model.*} and {@code world.*} call in here is a fact the
+     * ORACLE needs, and the invariants compare the model against core. If one
+     * of these calls stops happening, the model quietly loses a fact, the
+     * comparison is made between two views that both omit it, and **every
+     * invariant stays silent**. `OracleSelfTest` cannot see that — it proves
+     * each invariant fires against a broken core, which is the other half.
+     *
+     * <p>Mutation found nine of these deletable with no test failing. See
+     * {@code ExecutorBookkeepingTest} and DECISIONS 10.32.
+     */
+    static CoreDriver.Result execute(
             Action action, CoreDriver driver, World world, ShadowModel model) {
 
         String[] ref = split(action.subject());
