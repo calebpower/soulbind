@@ -7112,3 +7112,184 @@ way to getting better is the number being honest.
 platform's own permission rather than from a role name, and that decision is
 still untested. It needs a `SlashCommandInteractionEvent`, which is the single
 hardest JDA type to stand up, so it is named here rather than left as a number.
+
+### 10.30 — The mutation ratchet, because nothing was watching the Java tiers
+
+PHP mutation and the shell mutation battery are both in `.reaper.toml`. **Java
+mutation was in neither** — `mutationTest` ran only when somebody went and asked
+for it, which is how `connector-discord` reached 48% without anybody deciding
+that it should. A tier that runs when remembered is a tier that measures how
+good somebody's memory was.
+
+#### A ratchet, not a threshold
+
+`soulbind.mutation.gradle.kts` already argued the case against a threshold, and
+it was right: a threshold gets lowered the first time it is inconvenient, and a
+lowered threshold is a decision about what this project permanently stops
+noticing.
+
+A ratchet asks a different question — **is this module worse than it was?**
+Nobody has to defend a number, and nobody can drift past one. `mutation-baseline.txt`
+holds one row per module, `mutationRatchet` fails a module whose counts have
+gone up, and raising a row is an edit made in the same commit as the change that
+needed it. A row edited on its own, in its own commit, is exactly the smell the
+file exists to make visible.
+
+#### It compares SURVIVED and NO_COVERAGE, never the percentage
+
+A percentage moves whenever mutants are added or removed and says nothing about
+whether anything got worse. Refactoring away a hundred killed mutants improves
+the percentage; adding a hundred untested lines can too, if enough of them are
+equivalent. Neither is an improvement.
+
+The two counts that mean something are **mutants a test runs and does not
+notice** and **mutants no test executes at all**. Those going up is the
+regression, and there is no arithmetic that makes it look like progress.
+
+New untested code raising `NO_COVERAGE` is not an exception to this. It is the
+case the ratchet exists for.
+
+#### It refuses rather than passing
+
+A module with no baseline row fails, printing the observed line to paste in. A
+missing report fails. The one thing a coverage guard must never do is pass a
+module it did not measure — that is the shape of every green run this repository
+has had to go back and disbelieve.
+
+It also reports **improvements**, with the tighter line to copy in. A ratchet
+that only ever complains is one whose baseline slowly becomes fiction.
+
+#### One fixed configuration, stated
+
+The recorded numbers come from the workstation, with the fuzz tier excluded and
+**no MariaDB server**, so `core`'s backend-specific paths count as uncovered.
+Both make the numbers harsher than the truth, which is the honest direction, and
+both mean a run in another configuration is not comparable to this file. The
+session invocation deliberately does not point core at the MariaDB container it
+has running, for exactly that reason — a ratchet comparing unlike things fires
+for the wrong reason, and the operator who sees that once stops believing it.
+
+Closing that gap is its own task rather than a side effect of this one.
+
+#### Not TOML
+
+This repository's convention is TOML wherever it owns the file, and this is a
+deliberate exception: `mutation-baseline.txt` is not configuration, it is a
+checked-in expectations table, closer to a lock file. Columns, because the thing
+that matters is being readable in a diff. And no parser, because build-logic
+ships no dependencies and adding one to read four integers would put a library
+in the graph the licence guard reads.
+
+#### How I know it fires
+
+**Stated plainly: this guard's proof is a recorded experiment, not a committed
+must-fail fixture, and that is weaker than what every other guard here has.**
+Four runs against `:policy`, whose real state is 84 mutants, 82 killed, 2
+survived, 0 uncovered:
+
+| What was done | What happened |
+|---|---|
+| Nothing — the tree as committed | `held: 82/84 killed, 2 survived, 0 uncovered` |
+| Added a small method nothing tests | `regressed: uncovered 0 -> 6` |
+| Tightened the row to claim 0 survivors | `regressed: survivors 0 -> 2` |
+| Deleted the row entirely | refused, printed the line to add |
+| Loosened the row to claim 14 survivors | passed, and asked for the baseline to be tightened |
+
+The reason it is an experiment rather than a fixture: proving a comparison of
+two integers would cost a full PIT run per assertion, minutes per module, to
+test forty lines whose only inputs are those integers. Making it cheap means
+either an escape hatch in the build logic for feeding it fabricated reports —
+which is a hole somebody eventually uses for real — or extracting the comparison
+into a script and giving the build a Python dependency it does not have today.
+Neither trade looked worth it; if the balance changes, the fixture is the fix.
+
+One attempt is worth recording because it **failed to prove anything**: weakening
+a real assertion in `RuleFactoryTest` from `assertEquals(Effect.ALLOW, ...)` to
+`assertNotNull(...)` did *not* raise the survivor count, because other tests
+cover the same mutants. That is a fact about `policy` being well covered rather
+than about the ratchet, and it is the reason the fixture above adds new code
+instead.
+
+### 10.31 — Building the ratchet found three things it was built to find
+
+The ratchet's own first runs turned up a stale report, a broken module and a
+module nobody was watching. That is a reasonable advertisement for it, and the
+first of the three is a mistake of mine that needs recording rather than
+smoothing over.
+
+#### A ten-hour-old report, read as current
+
+`:connector-velocity:mutationTest` had been **failing since `LuckPermsGroups`
+landed** (10.23). PIT's coverage minion loads every mutable class before it
+mutates anything; `LuckPermsGroups` names `net.luckperms` types in its
+signatures; the api is `compileOnly`, so it is absent from the test runtime; the
+load threw `NoClassDefFoundError` and the minion died with `UNKNOWN_ERROR`.
+
+**The failure was invisible, because a failed run leaves the previous report on
+disk.** I read that file, reported its numbers as current, recorded them in the
+baseline, and used them to rank which module to work on next:
+
+| | Reported | Actual |
+|---|---|---|
+| total | 125 | 214 |
+| survived | 5 | **16** |
+| uncovered | 40 | 63 |
+| strength | 94% | 89% |
+
+Eleven of those sixteen survivors are in `GroupSync` — code written that same
+day. And the claim built on it, that velocity was "the worst headline and the
+best actual state", was wrong.
+
+How: the earlier build log says `BUILD FAILED in 6m 1s`, and I grepped it for
+the summary lines I wanted instead of reading its status. That is the third time
+this exact shape has landed in this project — `python3 | tee` swallowing a
+status, a commit made on a red build, and now this.
+
+Two fixes, one for the cause and one for the class:
+
+* `testRuntimeOnly(libs.luckperms.api)`, mirroring what `velocity-api` already
+  had. Never `testCompileOnly`: nothing in the tests should be **able** to name
+  a LuckPerms type, which is what `GuildRoles` and `GroupEffector` exist to
+  ensure.
+* **`mutationTest` deletes its report before running.** A missing report is a
+  loud failure; a stale one is a quiet, confident wrong answer, and only the
+  second kind survives being read by somebody in a hurry.
+
+#### A module nobody had decided about
+
+The first whole-tree run refused `:sim` — 312 mutants, 164 killed, **69
+survived**, 79 uncovered — because I enumerated modules by hand when recording
+the baseline and missed it. The refusal-rather-than-pass rule is what surfaced
+it, on the first run, which is exactly the case it was written for.
+
+`sim` is now the second-worst module in the tree and nothing had ever looked at
+it. A simulation harness whose own assertions are wrong produces false green
+across every tier that trusts it.
+
+#### The measurement is not perfectly deterministic, and that is written down
+
+`core` came back "improved by one" with no code change: 132 survivors to 131,
+against `TIMED_OUT: 7`. A mutant near PIT's timeout budget lands in `TIMED_OUT`
+on a loaded machine and `SURVIVED` on an idle one, and those are different
+columns.
+
+A guard that fires on noise is a guard somebody disables. The response is
+**not** a tolerance — a tolerance is a threshold by another name, and the whole
+argument for a ratchet is that nobody negotiates a number. Instead `TIMED_OUT`
+gets its own column so a flip is visible as a flip, and the failure message says
+so directly: if the only movement is between survived and timed-out, this is
+timing noise, re-run the module alone before changing anything.
+
+An occasional false fire that diagnoses itself in one line is the better trade.
+
+#### And a crash that only appears at full scale
+
+`./gradlew mutationRatchet` over the whole tree died with `Coverage generator
+Minion exited abnormally`. `org.gradle.parallel=true`, eight cores, each PIT run
+asking for four threads and forking minions — several at once exhausted the
+machine. Every module passes alone; the failure appears only when the tree is
+asked for at once, which is how the ratchet is meant to run.
+
+A shared build service capped at one concurrent usage, rather than starving
+PIT's own threads: the threads inside a run are what make it bearable, and
+trading them for cross-module parallelism buys the slow case with the fast one.

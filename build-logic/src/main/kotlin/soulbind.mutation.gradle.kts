@@ -65,11 +65,18 @@ val hasMainSources = mainSourceSet.java.srcDirs.any { dir ->
     dir.walkTopDown().any { it.isFile && it.extension == "java" }
 }
 
+// One PIT run at a time across the whole build. See MutationLock.
+val mutationLock = gradle.sharedServices.registerIfAbsent(
+        "soulbindMutationLock", MutationLock::class.java) {
+    maxParallelUsages.set(1)
+}
+
 if (hasMainSources) tasks.register<JavaExec>("mutationTest") {
     group = "verification"
     description = "Runs PIT mutation coverage over this module's main classes."
 
     dependsOn(tasks.named<Test>("test"))
+    usesService(mutationLock)
 
     classpath = pitest
     mainClass.set("org.pitest.mutationtest.commandline.MutationCoverageReport")
@@ -87,6 +94,23 @@ if (hasMainSources) tasks.register<JavaExec>("mutationTest") {
     outputs.upToDateWhen { false }
 
     doFirst {
+        // The previous report is DELETED before this one runs.
+        //
+        // Without this, a failed run leaves the last successful report on disk,
+        // where it reads as current -- and it will be read as current. That is
+        // not hypothetical: connector-velocity's run broke the moment
+        // LuckPermsGroups landed, stayed broken for a day, and its ten-hour-old
+        // numbers were reported as fresh, recorded in a baseline, and used to
+        // rank which module to work on next. Nothing about the stale file said
+        // it was stale. DECISIONS 10.31.
+        //
+        // A missing report is a loud, obvious failure. A stale one is a quiet,
+        // confident wrong answer, which is strictly worse.
+        val stale = reportDir.get().asFile
+        if (stale.exists()) {
+            stale.deleteRecursively()
+        }
+
         val runtime = testSourceSet.runtimeClasspath.filter { it.exists() }
         val mutable = mainSourceSet.output.classesDirs.filter { it.exists() }
         val sources = mainSourceSet.java.srcDirs.filter { it.exists() }
@@ -128,6 +152,171 @@ if (hasMainSources) tasks.register<JavaExec>("mutationTest") {
                 // Re-enable with -PmutationIncludesFuzz.
                 *(if (project.hasProperty("mutationIncludesFuzz")) arrayOf()
                   else arrayOf("--excludedGroups", "fuzz")))
+    }
+}
+
+// --- the ratchet -----------------------------------------------------------
+//
+// A mutation report nobody reads is a mutation report that was not produced.
+// Until Phase 10 the Java tiers ran only when somebody remembered to ask, which
+// is how connector-discord reached 48% without anybody deciding that it should.
+//
+// A RATCHET, not a threshold, and the distinction is the whole design. The
+// comment on `--failWhenNoMutations` above is right that thresholds get lowered
+// the first time one is inconvenient, and that a lowered threshold is a decision
+// about what this project permanently stops noticing. A ratchet asks a different
+// question: is this module WORSE than it was? Nobody has to defend a number,
+// and nobody can drift past one either.
+//
+// The baseline is committed, and raising it is an edit somebody makes in the
+// same commit as the code that needed it -- which is a decision, visible in a
+// diff, rather than a slide.
+//
+// ONE FIXED CONFIGURATION, stated. These numbers are produced with the fuzz tier
+// excluded (see the narrowing above) and with no MariaDB server, so the
+// backend-specific paths in `core` are counted as uncovered. Both make the
+// number HARSHER than the truth, which is the honest direction, and both mean a
+// run in a different configuration is not comparable. The ratchet refuses to
+// compare against a baseline it has no entry for rather than passing quietly.
+
+val baselineFile = rootProject.layout.projectDirectory.file("mutation-baseline.txt")
+
+/** One module's row. */
+data class MutationCounts(
+        val total: Int,
+        val killed: Int,
+        val survived: Int,
+        val noCoverage: Int,
+        val timedOut: Int)
+
+fun readReport(xml: java.io.File): MutationCounts {
+    // The XML is one <mutation status="..."> per mutant. Counted by hand rather
+    // than with a parser dependency: build-logic ships no XML library, and
+    // adding one to read four numbers would be a dependency in the graph the
+    // licence guard reads.
+    var total = 0
+    var killed = 0
+    var survived = 0
+    var noCoverage = 0
+    var timedOut = 0
+    Regex("""status=['"]([A-Z_]+)['"]""").findAll(xml.readText()).forEach { match ->
+        total++
+        when (match.groupValues[1]) {
+            "KILLED" -> killed++
+            "SURVIVED" -> survived++
+            "NO_COVERAGE" -> noCoverage++
+            // A KILL, in PIT's terms: the mutant made the test hang and PIT
+            // stopped it. Recorded in its own column rather than folded in,
+            // because it is the one status that moves on its own -- a mutant
+            // near the timeout budget lands in TIMED_OUT on a loaded machine
+            // and in SURVIVED on an idle one. When this guard fires and the
+            // only movement is between these two columns, it is noise; re-run
+            // the module to confirm before touching anything.
+            "TIMED_OUT" -> timedOut++
+            else -> { }
+        }
+    }
+    return MutationCounts(total, killed, survived, noCoverage, timedOut)
+}
+
+fun readBaseline(file: java.io.File): Map<String, MutationCounts> {
+    if (!file.exists()) {
+        return emptyMap()
+    }
+    return file.readLines()
+        .map { it.substringBefore('#').trim() }
+        .filter { it.isNotEmpty() }
+        .associate { line ->
+            val parts = line.split(Regex("""\s+"""))
+            require(parts.size == 6) {
+                "mutation-baseline.txt: expected '<module> <total> <killed> <survived> " +
+                        "<noCoverage> <timedOut>', got: $line"
+            }
+            parts[0] to MutationCounts(
+                    parts[1].toInt(), parts[2].toInt(), parts[3].toInt(), parts[4].toInt(),
+                    parts[5].toInt())
+        }
+}
+
+if (hasMainSources) tasks.register("mutationRatchet") {
+    group = "verification"
+    description = "Fails if this module's mutation coverage is worse than the committed baseline."
+
+    dependsOn(tasks.named("mutationTest"))
+
+    val module = project.name
+    val report = layout.buildDirectory.file("reports/pitest/mutations.xml")
+    val baseline = baselineFile
+
+    doLast {
+        val xml = report.get().asFile
+        if (!xml.exists()) {
+            throw GradleException(
+                    "no mutation report at $xml. mutationTest produced nothing, which means " +
+                            "this ratchet would have passed a module it never measured.")
+        }
+        val now = readReport(xml)
+        val was = readBaseline(baseline.asFile)[module]
+                ?: throw GradleException(
+                        "no baseline row for '$module' in ${baseline.asFile}.\n" +
+                                "A module with no recorded baseline is a module whose coverage " +
+                                "nobody has decided, so this refuses rather than passing.\n" +
+                                "Observed now -- add this line if it is what you intend:\n" +
+                                "    $module ${now.total} ${now.killed} ${now.survived} " +
+                                "${now.noCoverage} ${now.timedOut}")
+
+        // SURVIVED and NO_COVERAGE, not the percentage. A percentage moves when
+        // mutants are added or removed and says nothing about whether anything
+        // got worse; these two are counts of mutants nobody catches, and that
+        // number going up is the regression.
+        //
+        // New untested code raising NO_COVERAGE is not an exception to this. It
+        // is the case the ratchet exists for.
+        val complaints = mutableListOf<String>()
+        if (now.survived > was.survived) {
+            complaints.add(
+                    "survivors ${was.survived} -> ${now.survived}: " +
+                            "${now.survived - was.survived} more mutant(s) that a test runs " +
+                            "and does not notice")
+        }
+        if (now.noCoverage > was.noCoverage) {
+            complaints.add(
+                    "uncovered ${was.noCoverage} -> ${now.noCoverage}: " +
+                            "${now.noCoverage - was.noCoverage} more mutant(s) that no test " +
+                            "executes at all")
+        }
+
+        if (complaints.isNotEmpty()) {
+            throw GradleException(
+                    "mutation coverage regressed in :$module\n" +
+                            complaints.joinToString("\n") { "  $it" } + "\n\n" +
+                            "Read build/reports/pitest/index.html and either kill them, or " +
+                            "-- if the change is deliberate and the reason is written down " +
+                            "-- update this line in ${baseline.asFile.name} in the SAME " +
+                            "commit.\n" +
+                            "If the ONLY movement is between survived and timed-out " +
+                            "(${was.timedOut} -> ${now.timedOut} here), this is timing noise " +
+                            "rather than a regression -- re-run this module alone to " +
+                            "confirm before changing anything.\n" +
+                            "    $module ${now.total} ${now.killed} ${now.survived} " +
+                            "${now.noCoverage} ${now.timedOut}")
+        }
+
+        val improved = (was.survived - now.survived) + (was.noCoverage - now.noCoverage)
+        if (improved > 0) {
+            logger.lifecycle(
+                    ":$module mutation coverage IMPROVED by $improved mutant(s) " +
+                            "(survivors ${was.survived} -> ${now.survived}, uncovered " +
+                            "${was.noCoverage} -> ${now.noCoverage}). Tighten the baseline in " +
+                            "${baseline.asFile.name} so it cannot slide back:\n" +
+                            "    $module ${now.total} ${now.killed} ${now.survived} " +
+                            "${now.noCoverage} ${now.timedOut}")
+        } else {
+            logger.lifecycle(
+                    ":$module mutation coverage held: ${now.killed}/${now.total} killed, " +
+                            "${now.survived} survived, ${now.noCoverage} uncovered, " +
+                            "${now.timedOut} timed out")
+        }
     }
 }
 

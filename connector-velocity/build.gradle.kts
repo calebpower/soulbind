@@ -22,6 +22,24 @@ dependencies {
     // types. Still never shipped.
     testCompileOnly(libs.velocity.api)
     testRuntimeOnly(libs.velocity.api)
+
+    // And LuckPerms on the TEST runtime, for a reason that only shows up under
+    // mutation coverage. No test constructs a LuckPerms type -- LuckPermsGroups
+    // exists precisely so they do not have to -- but PIT's coverage minion
+    // LOADS every mutable class in the module before it mutates anything, and
+    // LuckPermsGroups references net.luckperms types in its signatures. With
+    // the api absent from the test runtime that load throws
+    // NoClassDefFoundError, the minion dies with "UNKNOWN_ERROR", and the whole
+    // module's mutation run fails.
+    //
+    // It failed that way from the moment LuckPermsGroups landed (DECISIONS
+    // 10.23) and the failure was invisible: the previous report stayed on disk
+    // and anybody reading it -- including me -- read ten-hour-old numbers as
+    // current. DECISIONS 10.31.
+    //
+    // testRuntimeOnly, never testCompileOnly: nothing in the tests should be
+    // ABLE to name a LuckPerms type. The seam is the point.
+    testRuntimeOnly(libs.luckperms.api)
 }
 
 // A fat jar, because a proxy plugin gets one file and no classpath.

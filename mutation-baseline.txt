@@ -1,0 +1,53 @@
+# The mutation ratchet's baseline. See build-logic/src/main/kotlin/soulbind.mutation.gradle.kts.
+#
+# WHAT THIS IS. One row per module: the number of mutants PIT generated, how
+# many a test killed, how many a test ran without noticing, and how many no test
+# executed at all. `mutationRatchet` fails a module whose SURVIVED or NO_COVERAGE
+# count is higher than its row here.
+#
+# WHY A RATCHET AND NOT A THRESHOLD. A threshold is a number somebody negotiates
+# the first time it is inconvenient, and a lowered threshold is a decision about
+# what this project permanently stops noticing. A ratchet asks only "is this
+# worse than it was". Nobody has to defend a number and nobody can drift past
+# one.
+#
+# RAISING A ROW IS A DELIBERATE ACT, in the same commit as the change that
+# needed it, with the reason in the commit message -- exactly like re-pinning an
+# artefact in a pins.env. A row edited on its own, in its own commit, is the
+# smell this file exists to make visible.
+#
+# NEW UNTESTED CODE RAISING NO_COVERAGE IS NOT AN EXCEPTION. It is the case this
+# file exists for.
+#
+# TIMED_OUT IS A KILL, and it has its own column because it is the one status
+# that moves on its own: a mutant near PIT's timeout budget lands in TIMED_OUT
+# on a loaded machine and in SURVIVED on an idle one. If this guard fires and
+# the only movement is between those two columns, it is timing noise -- re-run
+# that module alone before changing anything. There is deliberately NO
+# tolerance for it: a tolerance is a threshold by another name, and the whole
+# argument for a ratchet is that nobody negotiates a number.
+#
+# ONE FIXED CONFIGURATION. These were produced on the workstation with the fuzz
+# tier excluded and no MariaDB server, so `core`'s backend-specific paths count
+# as uncovered. Both make the numbers HARSHER than the truth, which is the
+# honest direction, and both mean a run in another configuration is not
+# comparable to this file.
+#
+# NOT TOML, deliberately, though this repository's convention is TOML wherever
+# it owns the file. This is not configuration -- it is a checked-in expectations
+# table, closer to a lock file, and it is laid out in columns because the thing
+# that matters about it is being readable in a diff. Reading it also needs no
+# parser, and build-logic ships no dependencies.
+#
+# Recorded 2026-08-21, after DECISIONS 10.28 and 10.29.
+
+# module              total killed surv nocov  t/o
+config                  99     87    6     6    0
+connector-discord      299    228    1    70    0
+connector-plan         102     72   10    20    0
+connector-sdk           98     86    3     9    0
+connector-velocity     214    135   16    63    0
+core                   996    685  131   173    7
+policy                  84     82    2     0    0
+protocol                98     96    1     0    1
+sim                    312    164   69    79    0

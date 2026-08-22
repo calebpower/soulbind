@@ -69,7 +69,13 @@ harsh: MariaDB-only paths never run on this machine, and the seeded fuzz tier is
 excluded by tag, so a mutant killed only by fuzzing is counted here as
 surviving.
 
-Neither tool is gated on a threshold and neither is wired into `check`.
+Neither tool is gated on a threshold and neither is wired into `check` — but the
+Java tier is now **ratcheted**. `mutation-baseline.txt` holds one row per module
+and `mutationRatchet` fails a module whose survivor or no-coverage count has
+gone up, which is a different question from a threshold: nobody has to defend a
+number, and nobody can drift past one. It runs in `.reaper.toml`, where slow
+things belong, because until Phase 10 the Java tiers ran only when somebody
+remembered to ask. DECISIONS 10.30.
 
 ## What runs today
 

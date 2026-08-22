@@ -253,6 +253,29 @@ cp -r connector-flarum/build/infection/. out/infection/
 # Cheap and early. No database, no proxy, no forum, so a broken check surfaces
 # in seconds instead of after the tier it guards has spent twenty minutes.
 # ---------------------------------------------------------------------------
+# The Java mutation ratchet.
+#
+# Until now the Java tiers ran ONLY when somebody remembered to ask -- PHP and
+# shell mutation were in this manifest and PIT was not -- which is how
+# connector-discord reached 48% without anybody deciding that it should.
+#
+# Here rather than in `check` for the reason build-logic states: a mutation run
+# costs minutes per module where the test task costs seconds, and a slow `check`
+# is a `check` people stop running. This manifest is where slow things belong.
+#
+# It compares against mutation-baseline.txt and fails only on a REGRESSION, so
+# nobody has a threshold to negotiate. Raising a row is an edit in the same
+# commit as the change that needed it.
+#
+# NO MARIADB IN SCOPE, deliberately and statedly: the baseline was recorded with
+# no server, so core's backend-specific paths count as uncovered there too.
+# Running this against a server would produce better numbers that the committed
+# baseline cannot be compared with, and a ratchet comparing unlike things fires
+# for the wrong reason. Closing that gap is its own task, not a side effect of
+# this one.
+echo "run: Java mutation ratchet"
+GRADLE_USER_HOME=/reaper/cache/gradle ./gradlew --no-daemon mutationRatchet
+
 echo "run: shell mutation battery"
 sh harness/fullstack/mutation/run.sh
 
