@@ -295,4 +295,42 @@ class GuildScopeTest {
         assertFalse(surface.revokeRole("acct-1", "linked"));
         assertFalse(surface.hasRole("acct-1", "linked"));
     }
+
+    @Test
+    @DisplayName("administrator comes from the platform's permission, and needs a member")
+    void administratorNeedsBothAMemberAndThePermission() {
+        // The decision that gates every administrative command. Both halves:
+        // a caller the library reports no member for -- a direct message, or
+        // one the gateway has not cached -- is not an administrator whatever
+        // else is true, and a member without the permission is not one either.
+        assertTrue(
+                JdaSurface.invocationOf(
+                        "soulbind", List.of(), "acct-1", "Root", true, true)
+                        .invoker().isAdministrator());
+
+        assertFalse(
+                JdaSurface.invocationOf(
+                        "soulbind", List.of(), "acct-1", "Root", true, false)
+                        .invoker().isAdministrator(),
+                "a member without the administrator permission was treated as one");
+
+        assertFalse(
+                JdaSurface.invocationOf(
+                        "soulbind", List.of(), "acct-1", "Root", false, true)
+                        .invoker().isAdministrator(),
+                "somebody the platform reports no membership for was treated as an"
+                        + " administrator of a server they may not even be in");
+    }
+
+    @Test
+    @DisplayName("the invocation carries the command, its arguments and who ran it")
+    void invocationCarriesEverything() {
+        ChatSurface.Invocation invocation = JdaSurface.invocationOf(
+                "link", List.of("BCDFGHJK"), "acct-1", "Alex", true, false);
+
+        assertEquals("link", invocation.command());
+        assertEquals(List.of("BCDFGHJK"), invocation.arguments());
+        assertEquals("acct-1", invocation.invoker().platformId());
+        assertEquals("Alex", invocation.invoker().displayName());
+    }
 }

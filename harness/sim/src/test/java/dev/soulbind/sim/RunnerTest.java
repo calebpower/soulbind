@@ -16,6 +16,9 @@
 
 package dev.soulbind.sim;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -150,5 +153,99 @@ class RunnerTest {
                     () -> "an identity does not carry the run tag, so a replay would collide"
                             + " with an earlier run's rows: " + actor.identities());
         }
+    }
+
+    // --- reading credentials --------------------------------------------------
+
+    @Test
+    @DisplayName("credentials are read by name, and both reserved names are required")
+    void readCredentials(@TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path file = dir.resolve("creds.env");
+        java.nio.file.Files.writeString(file, """
+                # a comment, and a blank line follow
+
+                admin = admin-secret
+                retired=retired-secret
+                proxy = proxy-secret
+                """);
+
+        java.util.Map<String, String> read = Runner.readCredentials(file);
+
+        assertEquals("admin-secret", read.get("admin"),
+                "spaces around the separator were not stripped, so the credential carries a"
+                        + " leading space and every signed request is refused");
+        assertEquals("retired-secret", read.get("retired"));
+        assertEquals("proxy-secret", read.get("proxy"));
+        assertEquals(3, read.size(),
+                "a comment or a blank line was read as a credential: " + read.keySet());
+    }
+
+    @Test
+    @DisplayName("a line that is not name=value is refused, rather than half-read")
+    void malformedCredentialLine(@TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path file = dir.resolve("creds.env");
+        java.nio.file.Files.writeString(file, "admin=a\nretired=b\nthis-has-no-separator\n");
+
+        assertThrows(IllegalStateException.class, () -> Runner.readCredentials(file),
+                "a malformed line was skipped, so a typo'd credential name silently becomes a"
+                        + " missing connector rather than an error");
+    }
+
+    @Test
+    @DisplayName("a missing reserved credential is named, not merely counted")
+    void missingReservedCredential(@TempDir java.nio.file.Path dir) throws Exception {
+        // Both are reserved for a reason: without `admin` the run cannot set a
+        // rule, and without `retired` it cannot generate the stale-credential
+        // action -- so the run would be quietly narrower than it claims.
+        for (String present : new String[] {"admin", "retired"}) {
+            String missing = present.equals("admin") ? "retired" : "admin";
+            java.nio.file.Path file = dir.resolve(present + ".env");
+            // Two actors as well, so the file fails the reserved-name check
+            // rather than the "no actors at all" one -- otherwise this passes
+            // for a reason that has nothing to do with what it is testing.
+            java.nio.file.Files.writeString(
+                    file, present + "=one\nalex=two\nsam=three\n");
+
+            IllegalStateException thrown = assertThrows(
+                    IllegalStateException.class, () -> Runner.readCredentials(file));
+            assertTrue(thrown.getMessage().contains("'" + missing + "'"),
+                    () -> "the complaint does not name the credential that is missing, so an"
+                            + " operator has to work out which of the two it means: "
+                            + thrown.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("an equals sign inside the value is part of the value")
+    void valueMayContainAnEquals() {
+        // `indexOf` rather than a split: a credential is base64 and can end in
+        // padding. Splitting on every separator would truncate it, and the
+        // symptom is every request refused for a reason that looks like a
+        // server fault.
+        assertDoesNotThrow(() -> {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("creds");
+            java.nio.file.Path file = dir.resolve("creds.env");
+            // An actor as well: readCredentials refuses a file with only the
+            // two reserved names, because a run with no actors exercises
+            // nothing.
+            java.nio.file.Files.writeString(file, "admin=abc==\nretired=b\nalex=c\n");
+            assertEquals("abc==", Runner.readCredentials(file).get("admin"));
+        });
+    }
+
+    // --- the hunt -------------------------------------------------------------
+
+    @Test
+    @DisplayName("a hunt budget below one is refused, because it reads as a clean hunt")
+    void huntBudgetFloor() {
+        // `< 1`, and the boundary matters in the direction that looks like
+        // success: a budget of zero tries nothing and reports having found
+        // nothing, which is indistinguishable from a hunt that looked properly.
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> Runner.hunt(() -> 1L, 0, seed -> null));
+        assertDoesNotThrow(
+                () -> Runner.hunt(() -> 1L, 1,
+                        seed -> new Simulation.Outcome(seed, 1, 1, 0, List.of(), List.of())));
     }
 }

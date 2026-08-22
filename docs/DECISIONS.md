@@ -7775,3 +7775,40 @@ declining to look.
 That is the second time in this module that the thing checking the checkers was
 itself unchecked — 10.32 found the executor's oracle bookkeeping, and this is
 the control that was supposed to notice.
+
+### 10.39 — The decision that decides who may change policy
+
+`JdaSurface.adopt` builds an invocation from a slash-command event, and it makes
+exactly one decision: **is this caller an administrator of this server?** It is
+asked of the platform's own permission rather than inferred from a role name,
+because a name is something anybody with rename rights can arrange.
+
+That decision gates every administrative command — `rules`, `connectors`,
+everything behind `/soulbind`. Reaching it meant standing up a
+`SlashCommandInteractionEvent`, the hardest type in JDA to fabricate, so the
+decision governing who may change policy was the one thing in that file no test
+could reach.
+
+`invocationOf` is the decision with the library taken out: the two facts
+(`memberPresent`, `hasAdministrator`) go in as booleans and the invocation comes
+out. Both halves are now asserted, and the second is the security-relevant one —
+**a caller the library reports no member for is not an administrator**, whatever
+else is true. That is a direct message, or a member the gateway has not cached,
+and treating either as an administrator would hand policy control to somebody
+who may not even be in the server.
+
+#### And the sim's runner
+
+`Runner.readCredentials` parses `name=credential` lines and reserves two names.
+Untested, and each of its faults is quiet: whitespace not stripped makes every
+signed request fail for a reason that looks like a server fault; a malformed
+line skipped turns a typo'd name into a missing connector rather than an error;
+and `indexOf` rather than a split matters because a credential is base64 and can
+end in padding.
+
+Both reserved names are required for a stated reason — without `admin` the run
+cannot set a rule, and without `retired` it cannot generate the
+stale-credential action — so a file missing either produces a run quietly
+narrower than it claims. And `hunt`'s budget floor is `< 1` because a budget of
+zero tries nothing and reports having found nothing, which is indistinguishable
+from a hunt that looked properly.

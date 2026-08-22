@@ -97,19 +97,46 @@ public final class JdaSurface implements ChatSurface {
                 .toList();
 
         Member member = event.getMember();
-        Invocation invocation = new Invocation(
+        Invocation invocation = invocationOf(
                 event.getName(),
                 arguments,
-                new Invoker(
-                        event.getUser().getId(),
-                        event.getUser().getEffectiveName(),
-                        // Administrator on THIS server, asked of the platform
-                        // rather than inferred from a role name. A name is
-                        // something anybody with rename rights can arrange.
-                        member != null && member.hasPermission(Permission.ADMINISTRATOR)));
+                event.getUser().getId(),
+                event.getUser().getEffectiveName(),
+                member != null,
+                member != null && member.hasPermission(Permission.ADMINISTRATOR));
 
         pending.put(invocation, event);
         return invocation;
+    }
+
+    /**
+     * Builds the invocation, with the one decision in it separated out.
+     *
+     * <p>The decision is <b>administrator on THIS server, asked of the
+     * platform</b> — never inferred from a role name, because a name is
+     * something anybody with rename rights can arrange. It gates every
+     * administrative command, and reaching it meant standing up a
+     * {@code SlashCommandInteractionEvent}, which is the hardest type in the
+     * library to fabricate. So the decision that decides who may change policy
+     * was the one thing here no test could reach. DECISIONS 10.39.
+     *
+     * @param memberPresent whether the caller is a member of the server at all.
+     *     A command invoked where the library reports no member — a direct
+     *     message, or a member the gateway has not cached — is not an
+     *     administrator, whatever else is true.
+     */
+    static ChatSurface.Invocation invocationOf(
+            String command,
+            List<String> arguments,
+            String userId,
+            String displayName,
+            boolean memberPresent,
+            boolean hasAdministrator) {
+
+        return new ChatSurface.Invocation(
+                command, arguments,
+                new ChatSurface.Invoker(
+                        userId, displayName, memberPresent && hasAdministrator));
     }
 
     @Override
