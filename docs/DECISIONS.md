@@ -8567,3 +8567,63 @@ Also in this commit, and unrelated except by file: `val x by
 tasks.registering(T::class)` became `tasks.register<T>("x")`. The delegate form
 is deprecated and Gradle 10 removes it. The task keeps its name, so nothing
 downstream moves; there is no test, because there is no behaviour to assert.
+
+### 10.53 — A release-time assertion in a build-time guard
+
+Run 33 failed 1m26s into the build half, before the battery ran:
+
+```
+PluginJarGuardTest > the version the host will report ...
+  connector-velocity was built without a readable git tag, so it would ship
+  announcing itself as 0.0.0-unversioned. See SoulbindVersion.
+```
+
+10.51 derived the version from `git describe` and added, alongside the two
+assertions that earn their place, a third: that the result is not
+`0.0.0-unversioned`. That assertion was verified on this workstation and on a
+GitHub runner. Both have git and a `.git` directory. **The reaper guest has
+neither**: the tree arrives by rsync and the build runs inside a digest-pinned
+Temurin image, which is a JDK, not a development environment. A probe against a
+live guest reported `PROBE_GIT_BIN=none`.
+
+So the derivation behaved correctly — it answered "I do not know", which is
+true — and a guard failed the session for it.
+
+**The assertion was in the wrong place, not wrong.** "This artifact is not
+unversioned" is a property of a RELEASE. It was being asserted on every build in
+every environment. The release path already holds the stronger form:
+`release.yml` requires `core-${tag}.tar.gz` by name, which an unversioned build
+cannot produce, and which names the tag rather than merely rejecting one string.
+Removing it from the guard narrows exactly one thing — no per-build check that
+an artifact carries a release version — and narrows nothing else. The token
+check and the metadata-matches-the-build check both still run everywhere, and
+both still catch what they were written for, because an unversioned build stamps
+`0.0.0-unversioned` into the metadata and the comparison holds.
+
+**A second, sharper instance in the same change.**
+`SoulbindVersionTest.theRepositoryDescribesItself` asserted that `describe`
+returns an answer — which is to say, it asserted that the environment has git.
+It does not run in the guest today, because reaper's build command never reaches
+the included build's tests, so it had not failed yet. It would have the moment
+anyone wired `guards` into that command, which the specification's gate argues
+for.
+
+Fixed by the seam, as everywhere else here: `describeCommand()` is the argv and
+is asserted anywhere; `describe()` is the call that needs a git. The test now
+asserts both environments rather than skipping one — with git it must answer,
+without git it must return null and not throw, which is precisely what the guest
+requires in order to configure at all. Neither branch is a skip: each asserts
+something the build depends on. `docs/testing-methodology.md` DECISIONS 7.2
+already says why "runs only where a tool is installed" is the wrong shape, and
+this is that shape avoided rather than accepted.
+
+Mutation-checked in both directions, which mattered here more than usual: with
+git absent from the test JVM's PATH the suite passed, and a passing suite does
+not prove the no-git branch ran rather than the git branch. Inverting the
+no-git assertion made it fail, which is what proves it executed.
+
+**What this cost, and the general lesson.** Two environments agreeing is not
+coverage of a third. The workstation and the runner are both developer machines;
+the guest is deliberately not one, and that is the whole reason it is worth
+testing on. A change that reads the environment needs checking against the
+environment that has least, not against the two that are alike.

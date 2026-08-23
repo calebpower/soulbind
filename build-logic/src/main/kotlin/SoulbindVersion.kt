@@ -113,23 +113,34 @@ object SoulbindVersion {
     }
 
     /**
+     * The question put to git, separated so it can be asserted without asking it.
+     *
+     * Not every environment that builds this has git: the reaper guest builds
+     * inside a digest-pinned JDK image with no `git` binary in it, which is
+     * correct for what that image is for. A test that could only check this
+     * plumbing by running it would be a test that fails there, so the argv is
+     * split out as the half that can be checked anywhere.
+     *
+     * `--match v[0-9]*` so only version tags are candidates: a `nightly` or
+     * `last-known-good` tag elsewhere in the history must not become the name
+     * of an artifact. `--tags` so lightweight tags count, because that is what
+     * `git tag v0.1.0` makes by default.
+     */
+    fun describeCommand(): List<String> = listOf(
+        "git", "describe", "--tags", "--match", "v[0-9]*",
+        "--abbrev=7", "--dirty=+dirty")
+
+    /**
      * Ask git, and return null rather than throwing if it cannot answer.
      *
-     * `--match v[0-9]*` so that only version tags are candidates: a `nightly`
-     * or `last-known-good` tag elsewhere in the history must not become the
-     * name of an artifact. `--tags` so lightweight tags count, because that is
-     * what `git tag v0.1.0` makes by default.
-     *
      * Every failure -- no git binary, no `.git`, no matching tag, a timeout --
-     * is the same answer here: null, which `fromDescribe` turns into
+     * is the same answer here: null, which [fromDescribe] turns into
      * UNVERSIONED. Distinguishing them would only offer the build more ways to
-     * guess.
+     * guess, and the environments that cannot answer genuinely cannot.
      */
     fun describe(repoRoot: File): String? =
         try {
-            val process = ProcessBuilder(
-                "git", "describe", "--tags", "--match", "v[0-9]*",
-                "--abbrev=7", "--dirty=+dirty")
+            val process = ProcessBuilder(describeCommand())
                 .directory(repoRoot)
                 .redirectErrorStream(false)
                 .start()

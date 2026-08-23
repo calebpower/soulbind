@@ -18,6 +18,7 @@ import java.io.File
 import java.nio.file.Files
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -129,27 +130,61 @@ class SoulbindVersionTest {
     }
 
     @Test
-    @DisplayName("this checkout describes itself, and the plumbing is actually wired")
-    fun theRepositoryDescribesItself() {
-        // The one case that needs a real repository, and it is here to prove
-        // `describe` reaches git at all -- every assertion above would still
-        // pass if it returned null forever.
-        //
-        // Deliberately not asserting a NUMBER. The version of this checkout is
-        // whatever was last tagged, and a test that named it would have to be
-        // edited on every release, which is the maintenance burden this whole
-        // change removes.
-        val root = repoRoot()
-        val described = SoulbindVersion.describe(root)
+    @DisplayName("the command asks git the right question")
+    fun theCommandIsRight() {
+        // The half of the plumbing that can be checked ANYWHERE, which matters
+        // because the reaper guest builds in a JDK image with no git binary.
+        // Without this, every remaining assertion in this class would still
+        // pass if describe() had been wired to the wrong subcommand.
+        val argv = SoulbindVersion.describeCommand()
 
-        assertNotNull(described,
-            "git describe answered nothing for $root -- either the plumbing here is broken"
-                + " or this tree has no v* tag reachable from HEAD. Both mean every built"
-                + " artifact would be named " + SoulbindVersion.UNVERSIONED + ".")
-        assertTrue(SoulbindVersion.of(root) != SoulbindVersion.UNVERSIONED,
-            "git answered '" + described?.trim() + "' and the derivation refused it, so this"
-                + " checkout builds unversioned artifacts.")
+        assertEquals("git", argv[0])
+        assertEquals("describe", argv[1])
+        assertTrue(argv.contains("--tags"),
+            "lightweight tags are what `git tag v0.1.0` makes; without --tags they do"
+                + " not count and a release tag would be invisible: $argv")
+        assertEquals("v[0-9]*", argv[argv.indexOf("--match") + 1],
+            "without this match a `nightly` tag elsewhere in the history could name an"
+                + " artifact: $argv")
+        assertTrue(argv.any { it.startsWith("--dirty") },
+            "a jar built from an edited tree must not be able to claim a release's"
+                + " name: $argv")
     }
+
+    @Test
+    @DisplayName("with git it answers, without git it says so -- and never throws")
+    fun describeMatchesWhatTheEnvironmentCanDo() {
+        // NOT a skip. Both branches assert something the build depends on, and
+        // the second is the one the reaper guest exercises: a JDK image with no
+        // git must still CONFIGURE, reporting that it does not know its version
+        // rather than failing to build at all.
+        val root = repoRoot()
+
+        if (gitIsOnPath()) {
+            assertNotNull(SoulbindVersion.describe(root),
+                "git is on PATH and this checkout has a v* tag, so describe answering"
+                    + " nothing means the plumbing is broken.")
+            assertTrue(SoulbindVersion.of(root) != SoulbindVersion.UNVERSIONED,
+                "git answered but the derivation refused it, so this checkout builds"
+                    + " artifacts named " + SoulbindVersion.UNVERSIONED + ".")
+        } else {
+            assertNull(SoulbindVersion.describe(root),
+                "there is no git on PATH, so describe cannot have got an answer from it.")
+            assertEquals(SoulbindVersion.UNVERSIONED, SoulbindVersion.of(root))
+        }
+    }
+
+    /**
+     * Whether a git binary exists, decided without running one.
+     *
+     * Deliberately not `try { run git --version }`: that is the same call
+     * [SoulbindVersion.describe] makes, so a test using it to decide what to
+     * expect would be asking the code under test what its own answer should be.
+     */
+    private fun gitIsOnPath(): Boolean =
+        (System.getenv("PATH") ?: "").split(File.pathSeparator)
+            .filter { it.isNotBlank() }
+            .any { File(it, "git").canExecute() }
 
     /**
      * The working tree's root, found rather than assumed.

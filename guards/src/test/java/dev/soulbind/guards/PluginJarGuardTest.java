@@ -297,9 +297,18 @@ class PluginJarGuardTest {
                         + " so soulbind.plugin-jar's processResources substitution did not"
                         + " run. The host would report a plugin version of '@version@'.");
 
-        assertFalse(declared.startsWith("0.0.0-unversioned"),
-                module + " was built without a readable git tag, so it would ship announcing"
-                        + " itself as " + declared + ". See SoulbindVersion.");
+        // NOT asserted here: that the version is a release version rather than
+        // 0.0.0-unversioned. That was asserted here for one commit and it was
+        // the wrong place -- it is a property of a RELEASE, and this guard runs
+        // on every build in every environment. The reaper guest builds inside a
+        // digest-pinned JDK image with no `git` binary in it, so the derivation
+        // correctly answers "I do not know" and this failed the session before
+        // the battery ran.
+        //
+        // The release path keeps the stronger check: release.yml requires
+        // core-${tag}.tar.gz by NAME, which an unversioned build cannot
+        // produce, and which names the tag rather than merely rejecting one
+        // string. See DECISIONS 10.53.
 
         assertEquals(SourceTree.version(), declared,
                 module + "'s jar was built as " + SourceTree.version() + " and tells its host"
