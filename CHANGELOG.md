@@ -8,7 +8,7 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
-## Unreleased
+## 0.1.1 — 2026-08-23
 
 ### Changed
 
