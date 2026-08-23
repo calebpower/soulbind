@@ -44,6 +44,12 @@ per module in `mutation-baseline.txt`; `mutationRatchet` fails a module whose
 survivor or no-coverage count has gone up; it runs in `.reaper.toml`. Run 29 is
 the first battery green with it in, `reaper exit=0` on both storage axes.
 
+Run 30 is green on the re-measured `core` row (DECISIONS 10.46), and is the run
+that matters for it: this batch changed `Storage.open`, which configures the
+MariaDB pool, and nothing on the workstation runs MariaDB. All nine rows held
+in the session with the same numbers the workstation produced, which is the
+one-table claim in `mutation-baseline.txt` measured again rather than assumed.
+
 | Module | Killed | Survivors | Uncovered |
 |---|---|---|---|
 | `core` | 68% → **84%** | 131 → **42** | 173 → **113** |
