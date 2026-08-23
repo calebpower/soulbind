@@ -1003,6 +1003,7 @@ never be taken back.
 | Release-level coverage | Every module in `settings.gradle.kts` has a declared release level |
 | Protocol doc sync | `docs/protocol.md`'s operation and capability tables match the code, both directions |
 | Plugin jar version | The version a plugin reports to its host is the version it was built as |
+| Distribution archive | Every path in a `.tar.gz` or `.zip` lies under one root, and none carries an unexpanded `${` |
 | build-logic JUnit pin | The one version number written twice agrees with itself, and neither side floats |
 | Check-then-act | No unreviewed read-then-write in any storage write path |
 | Event doc sync | Every EventType appears in the document and vice versa |

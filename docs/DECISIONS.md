@@ -8518,3 +8518,52 @@ accept a string the unconditional strip produced and the conditional one did
 not, and it only accepts strings beginning with a digit — exactly the case where
 both behave identically. It read as covered and was not. The shape check is the
 arbiter; the strip needs no cleverness of its own.
+
+### 10.52 — The archive nobody had ever opened
+
+`connector-discord`'s `build.gradle.kts` placed the scripted driver into its
+distribution archives with
+
+```kotlin
+into("${'$'}{project.name}-${'$'}{project.version}/bin") { ... }
+```
+
+`${'$'}` is Kotlin's escape for a *literal* dollar — used correctly and
+deliberately in `soulbind.java-common.gradle.kts:188`, which is where the idiom
+was learned. Here interpolation was meant, so no interpolation happened. Both
+the `.tar.gz` and the `.zip` shipped a second top-level directory named,
+character for character, `${project.name}-${project.version}`, with
+`scripted-driver` inside it rather than in the distribution's `bin/`.
+
+It shipped in `v0.1.0`.
+
+**Why nothing caught it.** `ServiceDistGuardTest` reads `build/install` — the
+unpacked tree — and so does the whole battery, through `installDist`. Both were
+right about the thing they read. The archives are a different artifact, built by
+different tasks with a prefix `installDist` does not need, and no test had ever
+opened one. The two paths through the same build script had no shared witness.
+
+**What the guard asserts is the class, not the instance.**
+`DistributionArchiveGuardTest` opens both archives for both service modules and
+requires that every path lie under the one expected root, and that no path
+contain `${` at all. A guard written for this bug would have looked for
+`${project.version}` and caught nothing else. The specific
+scripted-driver assertion is kept as well, because it names the missing file
+instead of only reporting that a path looked wrong — but it is the second
+assertion, not the first.
+
+The tar is parsed here rather than through commons-compress: the JDK reads zip
+and gzip but not tar, and the format is a 512-byte header per entry. A
+dependency for one guard was the worse trade. The parser asserts it found a
+non-zero number of entries, because a parser that quietly stopped understanding
+the format would make every assertion above vacuous.
+
+**`build/distributions` now sweeps stale archives** the way `build/libs` does
+(10.51). Nothing globs it today — `release.yml` names what it means and this
+guard resolves by version — but all three globs 10.51 had to fix were written
+when there was only ever one file to find.
+
+Also in this commit, and unrelated except by file: `val x by
+tasks.registering(T::class)` became `tasks.register<T>("x")`. The delegate form
+is deprecated and Gradle 10 removes it. The task keeps its name, so nothing
+downstream moves; there is no test, because there is no behaviour to assert.

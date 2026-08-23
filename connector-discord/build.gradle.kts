@@ -16,7 +16,10 @@ application {
 // A start SCRIPT, not just a JavaExec task: the battery invokes it from a shell
 // in another process, and `gradle run` would rebuild, re-resolve and print its
 // own output onto the stream the driver's reply travels on.
-val scriptedDriverScripts by tasks.registering(CreateStartScripts::class) {
+// register<T>(name), not `by registering(T::class)`: the delegate form is
+// deprecated and Gradle 10 removes it. The task keeps the name the property gave
+// it, so nothing downstream moves.
+val scriptedDriverScripts = tasks.register<CreateStartScripts>("scriptedDriverScripts") {
     mainClass.set("dev.soulbind.connector.discord.ScriptedDriver")
     applicationName = "scripted-driver"
     outputDir = layout.buildDirectory.dir("scripts-scripted-driver").get().asFile
@@ -35,12 +38,24 @@ tasks.named<Sync>("installDist") {
     }
 }
 
+// The archives put everything under one top-level directory, so the scripted
+// driver has to be placed under it explicitly -- `installDist` above unpacks
+// into the distribution root and needs no such prefix.
+//
+// Both lines previously used Kotlin's escape for a LITERAL dollar -- the one
+// soulbind.java-common.gradle.kts:188 uses correctly and on purpose -- so the
+// interpolation never happened. Both archives carried a top-level directory
+// named, character for character, ${'$'}{project.name}-${'$'}{project.version},
+// with the scripted driver inside it rather than in the distribution's bin/.
+// Nothing noticed: every guard and the whole battery read `build/install`, and
+// no test had ever opened one of these archives. DistributionArchiveGuardTest
+// does now.
 tasks.named<org.gradle.api.tasks.bundling.Tar>("distTar") {
-    into("${'$'}{project.name}-${'$'}{project.version}/bin") { from(scriptedDriverScripts) }
+    into("${project.name}-${project.version}/bin") { from(scriptedDriverScripts) }
 }
 
 tasks.named<org.gradle.api.tasks.bundling.Zip>("distZip") {
-    into("${'$'}{project.name}-${'$'}{project.version}/bin") { from(scriptedDriverScripts) }
+    into("${project.name}-${project.version}/bin") { from(scriptedDriverScripts) }
 }
 
 dependencies {

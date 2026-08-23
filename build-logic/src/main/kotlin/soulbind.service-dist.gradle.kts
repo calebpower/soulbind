@@ -54,6 +54,36 @@ tasks.named<Tar>("distTar") {
     archiveExtension.set("tar.gz")
 }
 
+// Sweep archives this module built under a DIFFERENT version.
+//
+// build/distributions accumulates exactly as build/libs does, and for the same
+// reason: Gradle writes into it and never removes anything. Harmless while the
+// version was a literal that never moved; now that it comes from the git tag,
+// every commit leaves another pair behind for anything saying
+// `distributions/*.tar.gz` to pick up. Nothing globs them today -- release.yml
+// names what it means and DistributionArchiveGuardTest resolves by version --
+// but the last three places that did glob were all written when there was only
+// ever one file to find.
+//
+// Mirrors the sweep in soulbind.plugin-jar, with the same limit: doFirst runs
+// only when the archive is actually being written.
+listOf("distTar", "distZip").forEach { taskName ->
+    tasks.named<AbstractArchiveTask>(taskName) {
+        doFirst {
+            val current = archiveFile.get().asFile
+            val prefix = "${project.name}-"
+            val suffix = "." + archiveExtension.get()
+            current.parentFile?.listFiles()?.forEach { file ->
+                if (file.isFile && file != current
+                    && file.name.startsWith(prefix) && file.name.endsWith(suffix)) {
+                    logger.lifecycle("removing stale artifact ${file.name}")
+                    file.delete()
+                }
+            }
+        }
+    }
+}
+
 extensions.configure<org.gradle.api.distribution.DistributionContainer>("distributions") {
     named("main") {
         contents {

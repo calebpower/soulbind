@@ -43,10 +43,23 @@ val shadedModules = listOf(":connector-velocity", ":connector-plan")
 // before installDist.
 val distributedModules = listOf(":core", ":connector-discord")
 
+// Modules whose DISTRIBUTION ARCHIVES a guard inspects.
+//
+// DistributionArchiveGuardTest opens the .tar.gz and .zip an operator actually
+// downloads. Nothing did until now, and that gap had already cost something:
+// connector-discord's archives shipped a top-level directory named, character
+// for character, ${'$'}{project.name}-${'$'}{project.version} -- a Kotlin escape
+// for a literal dollar where interpolation was meant -- with the scripted
+// driver inside it instead of in bin/. Every existing guard and the whole
+// battery read build/install, which was correct, so nobody opened an archive.
+val archivedModules = listOf(":core", ":connector-discord")
+
 tasks.withType<Test>().configureEach {
     dependsOn(inspectedModules.map { "$it:classes" })
     dependsOn(shadedModules.map { "$it:shadowJar" })
     dependsOn(distributedModules.map { "$it:installDist" })
+    dependsOn(archivedModules.map { "$it:distTar" })
+    dependsOn(archivedModules.map { "$it:distZip" })
 
     // The repository root, because a guard's subject is the whole tree.
     systemProperty("soulbind.repoRoot", rootProject.projectDir.absolutePath)

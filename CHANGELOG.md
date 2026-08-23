@@ -27,6 +27,16 @@ for the other.
   whatever was true the last time someone remembered to change it. It is now
   stamped by the build, and a guard fails the build if the two disagree.
 
+### Fixed
+
+- **`connector-discord`'s distribution archives shipped a bogus top-level
+  directory.** Both `connector-discord-<v>.tar.gz` and its `.zip` contained a
+  second root named, literally, `${project.name}-${project.version}`, with the
+  `scripted-driver` script inside it rather than in the distribution's `bin/`.
+  A Kotlin escape for a literal dollar had been used where interpolation was
+  meant. Present in `0.1.0`. The unpacked install tree — what `installDist`
+  produces and what the test battery runs — was never affected.
+
 ### For anyone building from source
 
 - Building from a **git checkout** is unchanged. Building from a **source
