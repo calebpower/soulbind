@@ -1,0 +1,19 @@
+# DELIBERATELY BROKEN. This file exists so ActionPinGuardTest can watch itself
+# fire; a guard nobody has seen fail is a guard nobody knows works.
+#
+# Two of the three `uses:` lines below are floating tags. The third is pinned,
+# so the fixture also proves the guard distinguishes rather than simply
+# objecting to every workflow it is shown.
+name: a workflow that would let somebody else choose the bytes
+
+on: [push]
+
+jobs:
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: some-org/some-action@main
+      - name: a plain step, which has no action to pin
+        run: echo "this line must not be mistaken for a dependency"

@@ -987,6 +987,7 @@ never be taken back.
 | Event doc sync | Every EventType appears in the document and vice versa |
 | Audit immutability | Nothing in production source or any migration mutates the audit table, and the repository declares no mutating method |
 | Harness pins | Every `harness/*/pins.env` escapes the `*.env` rule, so a clone can still reproduce a stack run |
+| Action pins | Every workflow action is pinned to a 40-character commit, never to a tag — the same rule the container digests and `pins.env` checksums already state, applied where `contents: write` lives |
 | Copyleft packaging | No LGPL artifact the specification pins to a non-bundling scope is declared in a configuration that would bundle it |
 | Non-vacuous tiers | A tag-selected task whose module declares that tag must execute at least one test, so a tier cannot silently become zero coverage |
 | Plugin jar | Dependencies relocated (both directions), service files renamed to match, no host API or copyleft classes bundled, licence files inside, no stale signatures |

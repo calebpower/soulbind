@@ -39,14 +39,14 @@ jobs:
     name: build and publish the artifacts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
         with:
           java-version: '25'
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb  # gradle/actions v6.3.0
 
       # The full check, not just assemble. A tag that cannot pass the suite is
       # a tag nobody should be able to download an artifact from.
@@ -85,12 +85,30 @@ jobs:
           ( cd release && sha256sum ./* > SHA256SUMS )
           cat release/SHA256SUMS
 
-      - name: publish
-        uses: softprops/action-gh-release@v2
-        with:
-          # Marked a draft deliberately. Publishing is a person's decision, and
-          # a tag pushed by mistake should not become a download before anybody
-          # has looked at it. Review the draft, then hit publish.
-          draft: true
-          generate_release_notes: true
-          files: release/*
+      # `gh`, not a third-party action, and that is the point rather than a
+      # preference. This is the one step holding `contents: write`, so it is the
+      # one step where somebody else's code running here would be able to do the
+      # most -- and every other pin in this repository is a digest or a checksum
+      # for exactly that reason: container images by SHA-256, Paper and Velocity
+      # by SHA-256 in pins.env, the PHP PHAR by checksum. A floating action tag
+      # in the middle of that is a mutable third-party dependency in the most
+      # privileged place in the build.
+      #
+      # gh is preinstalled on GitHub-hosted runners and authenticates with the
+      # job's own GITHUB_TOKEN, so removing the dependency costs nothing. The
+      # remaining actions are pinned by commit SHA above; this one is simply not
+      # a dependency any more.
+      #
+      # DRAFT, deliberately. Publishing is a person's decision, and a tag pushed
+      # by mistake should not become a download before anybody has looked at it.
+      # Review the draft, then hit publish.
+      - name: publish a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME" \
+            release/*

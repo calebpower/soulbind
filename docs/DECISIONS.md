@@ -8372,3 +8372,56 @@ The YAML parses, the Gradle invocations and artifact paths are the ones this
 repository actually produces -- checked against a real `0.1.0` build -- and the
 version guard was reasoned through rather than run. The first genuine proof is
 the first push, and if something is wrong it will be wrong there.
+
+### 10.50 — The workflow pins, and why the instance fix was not the fix
+
+An automated review flagged `softprops/action-gh-release@v2` as unpinned. It
+was right, and in this repository the finding is sharper than its generic
+wording: **every** other third-party artefact here is pinned by digest or
+checksum -- container images by SHA-256, Paper and Velocity by SHA-256 in
+`pins.env`, the PHP PHAR by checksum -- always with the same one-line argument,
+that a tag is a name and a name can be repointed at different bytes by whoever
+owns it. The workflows had been written as the one exception, and the exception
+was sitting in the step that holds `contents: write`.
+
+**The third-party action was removed rather than pinned.** `gh` is preinstalled
+on GitHub-hosted runners and authenticates with the job's own token, so
+`gh release create --draft --generate-notes` does the same work with no
+third-party code in the most privileged step of the build. Pinning it would
+have been the smaller fix; not depending on it is the better one, and it costs
+nothing.
+
+**The rest were pinned to commits, and pinning them was worth doing carefully.**
+The workflows had been written against the `@v4`/`@v2` aliases, which on three
+of the five were already several majors behind what upstream ships. Resolving a
+tag to a commit forces the question "which bytes is this actually" -- so the
+pins landed on current versions rather than freezing a stale default in place.
+
+#### The part that needed a second pass
+
+The first commit said "no test: workflow definitions are configuration". That
+was too quick, and the argument against it is already written down in this
+repository, in `HarnessPinsGuardTest`: *the fix had been written to cover the
+instance rather than the class, which is the failure this guard exists to stop
+happening a third time.* Three files were fixed; nothing stopped the next
+`uses:` line, in a new workflow or added to an existing one next year, from
+floating again.
+
+`ActionPinGuardTest` is that guard. Every `uses:` in `.github/workflows` must
+name a 40-character commit; local (`./`) and Docker (`docker://`) references
+are not tag references and are left alone; an abbreviated SHA is refused
+because a short ref is ambiguous by design.
+
+Its broken fixture holds three references -- two floating, one pinned -- and
+the assertion is on the exact list rather than on "not empty". That distinction
+is the whole value: a guard that objected to every `uses:` line it saw would
+satisfy a not-empty check while being useless. Watched firing five ways: a real
+workflow made to float, an abbreviated SHA, a reference with no `@` at all, the
+fixture's pinned line made to float, and one of the fixture's floating lines
+removed.
+
+The lesson generalises past workflows. "Configuration, therefore untestable" is
+true of a *value* and false of a *rule*. Pinning `actions/checkout` to a
+particular commit is a value and there is nothing to assert about it. "Every
+action is pinned" is a rule, and a rule that only lives in somebody's memory of
+having fixed it once is exactly what this project builds guards for.
