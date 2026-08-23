@@ -1,7 +1,7 @@
 {
   "id": "soulbind-plan",
   "name": "soulbind-plan",
-  "version": "0.1.0",
+  "version": "@version@",
   "description": "Puts soulbind link state on Plan's pages",
   "authors": ["Caleb L. Power"],
   "dependencies": [

@@ -8,6 +8,32 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
+## Unreleased
+
+### Changed
+
+- **A version tag now releases by itself.** Pushing `vX.Y.Z` builds, runs the
+  full suite and the guards, and publishes the release with its four artifacts
+  and `SHA256SUMS`. It used to create a draft for a person to publish, and it
+  used to require the version to have been bumped in the build first — that
+  second step is gone entirely.
+- **The version is derived from the git tag** rather than declared in
+  `build-logic`. Nothing in the tree names a version any more. A build off a tag
+  reports `X.Y.Z-<n>-g<sha>`, with `+dirty` if the tree has uncommitted edits;
+  a build with no tag reachable reports `0.0.0-unversioned`.
+- **Both plugin jars now report the version they were built as.**
+  `velocity-plugin.json` — the file a proxy actually reads — carried a
+  hand-edited literal, so the version shown in a proxy's plugin list was
+  whatever was true the last time someone remembered to change it. It is now
+  stamped by the build, and a guard fails the build if the two disagree.
+
+### For anyone building from source
+
+- Building from a **git checkout** is unchanged. Building from a **source
+  archive with no `.git`** now produces artifacts named `0.0.0-unversioned`,
+  because there is no tag to read. Use a checkout if the name matters.
+- `./gradlew guards` now also runs `build-logic`'s own tests.
+
 ## 0.1.0 — 2026-08-23
 
 The first release. Everything below is new, so this entry describes what

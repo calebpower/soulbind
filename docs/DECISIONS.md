@@ -8425,3 +8425,96 @@ true of a *value* and false of a *rule*. Pinning `actions/checkout` to a
 particular commit is a value and there is nothing to assert about it. "Every
 action is pinned" is a rule, and a rule that only lives in somebody's memory of
 having fixed it once is exactly what this project builds guards for.
+
+### 10.51 — The tag is the version, and the five places it used to live
+
+The version was a literal in `soulbind.java-common.gradle.kts`, and `release.yml`
+refused to publish when it and the pushed tag disagreed. That guard worked. It
+also made every release two acts in a required order — bump the literal, then
+tag — with a failed release run as the punishment for getting the order wrong,
+and nothing at all to stop a tag being pushed against a version nobody had
+touched.
+
+`SoulbindVersion` derives it from `git describe` instead. The disagreement is
+removed rather than detected: there is no second number left to be wrong.
+
+**Not `GITHUB_REF_NAME`.** That variable exists only on the runner, so
+`git checkout v0.1.1 && ./gradlew build` would produce an artifact named
+differently from the one on the release page. This repository re-runs the full
+build on the tag precisely because "it built on somebody's laptop" is not a
+claim it makes anywhere else; handing the version to something a laptop cannot
+see would have given that claim up to save one commit. `git describe` answers
+identically in both places, from the checkout alone.
+
+Off a tag the answer is deliberately not release-shaped — `0.1.1-3-gabc1234`,
+with `+dirty` when the tree has edits. A jar built from an uncommitted tree
+should not be able to claim a release's name, and the suffix is what makes an
+artifact found later on a disk self-describing. With no tag reachable at all the
+answer is `0.0.0-unversioned`, chosen so that it cannot be mistaken for a
+release by anybody reading a filename. A plausible fallback would outlive the
+build that produced it.
+
+**The comment said one place. There were five.** The other four were the two
+`velocity-plugin.json` files and the two `@Plugin` annotations. That file is
+what a proxy actually reads a plugin's version from — not the jar's filename,
+and not the annotation, which is inert here because no annotation processor is
+on the classpath. Deriving only the Gradle version would have shipped a
+`connector-velocity-0.1.1.jar` announcing itself to operators as `0.1.0`: the
+same silent, permanent mislabelling the old guard existed to prevent, relocated
+rather than fixed. `soulbind.plugin-jar` now stamps that file from the build,
+and the annotations no longer carry a version at all — an annotation member
+takes a compile-time constant, so a version living there could only ever be a
+literal.
+
+**What the change surfaced.** `PluginJarGuardTest.jarFor` took the first jar
+`Files.list` returned. That was correct only while the version was a literal
+nobody changed: `build/libs` is not cleaned between builds, so once the version
+moves with every commit the directory holds several jars in no defined order,
+and every assertion in that class becomes an assertion about whichever one the
+filesystem handed back. It would have passed on a stale artifact while the one
+just built was broken. This is 10.46 and 10.48 a third time — a check whose
+verdict was settled by something other than the thing it was checking — and it
+was invisible for the same reason both of those were: the coin only had one
+face until now. The jar is now resolved by name from a version the build
+supplies, and an absent one is a loud failure that lists what it found instead.
+
+The same glob was in two more places, and the worst of them was
+`harness/fullstack/stack.sh`: `cp .../build/libs/*.jar "$RUN/proxy/plugins/"`,
+which with a moving version copies *every* jar the module has ever built into a
+running proxy. Velocity loading two plugins with the same id does not start,
+and this script would have reported that as a stack failure three stages from
+its cause -- or, worse, started with the stale one. `release.yml`'s copy step
+had the same shape and was saved only by runners being fresh.
+
+Both now name what they mean, and `soulbind.plugin-jar` sweeps stale jars when
+it writes a new one so the ordinary case is simply clean. The sweep is
+`doFirst`, so it does nothing when shadowJar is up to date -- a tree checked
+back out at an older, already-built version still holds two. That is why the
+harness asserts uniqueness rather than trusting the sweep: it distinguishes no
+jar from several, because the two want opposite things done about them.
+
+**One number is still written twice.** `build-logic` is a separate included
+build with its own `settings.gradle.kts`, so it cannot read
+`gradle/libs.versions.toml`, and its new test source set has to name a JUnit
+version literally. Not solvable by deleting one of them, so
+`BuildLogicJunitPinGuardTest` asserts the two agree — and refuses a floating
+coordinate separately from a disagreeing one, because a plain equality check
+would happily compare against a version it never found.
+
+**Publishing is no longer a draft**, at the owner's instruction: pushing a
+version tag is the decision to release, and a draft made it two decisions with
+the second easy to forget. What that gives up is stated rather than glossed — a
+mistaken tag becomes a download immediately. What stands in its place is that
+the full suite, the guards and the version check all run before the publish
+step, so a bad tag fails the run instead of reaching a draft nobody reads. What
+is left uncovered is a tag that is wrong about *which commit* should ship, and
+no automated check was ever going to have an opinion on that.
+
+**A branch was removed for having no possible witness.** The prefix strip was
+first written to take the `v` only ahead of a digit, so that a tag named
+`velocity-1.0` could not become `elocity-1.0`. No input distinguishes that from
+an unconditional strip: for the guard to matter the shape check would have to
+accept a string the unconditional strip produced and the conditional one did
+not, and it only accepts strings beginning with a digit — exactly the case where
+both behave identically. It read as covered and was not. The shape check is the
+arbiter; the strip needs no cleverness of its own.

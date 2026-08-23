@@ -66,6 +66,43 @@ esac
 . "$HERE/pins.env"
 log() { echo "[stack] $*"; }
 
+# Copy THE plugin jar a module built, and refuse if the answer is ambiguous.
+#
+# This used to be `cp .../build/libs/*.jar`, which was right only while the
+# version was a literal nobody changed. The version is now derived from the git
+# tag, so it moves with every commit -- and build/libs is never cleaned, so a
+# tree built twice offers this glob several jars. Copying them all puts two
+# soulbind plugins in the proxy's plugins/ directory, and Velocity loading two
+# plugins with the same id is a failure this script would have reported as a
+# stack that would not start, three stages away from its cause.
+#
+# soulbind.plugin-jar sweeps stale jars when it writes a new one, so this
+# normally sees exactly one. It is asserted anyway: that sweep runs only when
+# shadowJar is not up to date, which is almost always and not always.
+copy_the_plugin_jar() {
+    _dir="$1"
+    _dest="$2"
+    # shellcheck disable=SC2231  # a glob is the point; the count is checked below
+    set -- "$_dir"/*.jar
+    if [ ! -f "$1" ]; then
+        # An unmatched glob comes back as the pattern itself, so this is the
+        # NOTHING case rather than one strangely-named jar. Distinguished from
+        # the case below because the two want opposite things done about them.
+        log "no jar in $_dir. The build step above was supposed to produce one;"
+        log "either it did not run or it wrote somewhere else."
+        exit 1
+    fi
+    if [ "$#" -ne 1 ]; then
+        log "expected exactly one jar in $_dir, found $#:"
+        for _j in "$@"; do log "  $(basename "$_j")"; done
+        log "these are leftovers from builds at different versions. ./gradlew clean, or"
+        log "delete the ones that are not the current version, then run this again."
+        exit 1
+    fi
+    log "plugin jar: $(basename "$1")"
+    cp "$1" "$_dest"
+}
+
 
 
 
@@ -520,7 +557,7 @@ wait_for_port paper "$PAPER_PORT" 240
 
 # --- velocity ---------------------------------------------------------------
 log "starting velocity"
-cp "$REPO/connector-velocity/build/libs"/*.jar "$RUN/proxy/plugins/"
+copy_the_plugin_jar "$REPO/connector-velocity/build/libs" "$RUN/proxy/plugins/"
 
 # LuckPerms, so the group effector has something real to act on.
 #
@@ -561,7 +598,7 @@ LPCONF
 if [ -n "${SOULBIND_PLAN_DB_HOST:-}" ]; then
     log "installing Plan and the soulbind-plan connector"
     cp "$CACHE/plan-$PLAN_VERSION.jar" "$RUN/proxy/plugins/"
-    cp "$REPO/connector-plan/build/libs"/*.jar "$RUN/proxy/plugins/"
+    copy_the_plugin_jar "$REPO/connector-plan/build/libs" "$RUN/proxy/plugins/"
 
     # Plan's config, written BEFORE first start.
     #

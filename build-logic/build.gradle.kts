@@ -21,4 +21,24 @@ dependencies {
     //
     // Pinned. The version is a decision, not whatever the portal serves today.
     implementation("com.gradleup.shadow:shadow-gradle-plugin:9.6.1")
+
+    // The convention plugins are mostly wiring, and wiring is asserted by the
+    // guards module against the build's OUTPUT. SoulbindVersion is the
+    // exception: it is a decision with edge cases -- a tag that is not a
+    // version, a tree with no tags, a source archive with no .git -- and every
+    // one of those is unreachable from a test that can only look at whatever
+    // this checkout happens to be. So build-logic has a test source set for
+    // exactly that one pure function.
+    //
+    // Pinned to the same JUnit the rest of the tree uses (gradle/libs.versions
+    // .toml, `junit`). It cannot read that catalog -- build-logic is a separate
+    // included build with its own settings -- so this is the one place the
+    // number is repeated, and BuildLogicJunitPinGuardTest asserts the two agree
+    // rather than trusting that anybody noticed.
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.named<Test>("test") {
+    useJUnitPlatform()
 }

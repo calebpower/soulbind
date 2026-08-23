@@ -66,6 +66,25 @@ final class SourceTree {
         return root;
     }
 
+    /**
+     * The version this build produced, supplied by the build.
+     *
+     * <p>Same contract as {@link #repoRoot()} and for the same reason: a guard
+     * that inferred the version -- by globbing {@code build/libs} and taking
+     * what it found, say -- would be reading the answer off the thing it is
+     * checking, and would silently start inspecting a stale artifact the moment
+     * two builds' outputs sat side by side.
+     */
+    static String version() {
+        String configured = System.getProperty("soulbind.version");
+        if (configured == null || configured.isBlank()) {
+            throw new IllegalStateException(
+                    "soulbind.version system property is not set. A guard that reads a built "
+                            + "artifact has to be told which one; see guards/build.gradle.kts.");
+        }
+        return configured;
+    }
+
     /** Every {@code .java} file under the given directory, or empty if it does not exist. */
     static List<Path> javaSourcesUnder(Path dir) {
         if (!Files.isDirectory(dir)) {

@@ -40,6 +40,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # FULL history and tags, because the version is derived from `git
+          # describe` rather than written down (see SoulbindVersion). The
+          # default shallow fetch brings no tags, every artifact would be named
+          # 0.0.0-unversioned, and PluginJarGuardTest would fail the run --
+          # loudly, which is the intended failure, but the fix is here.
+          fetch-depth: 0
 
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
         with:
@@ -53,11 +60,17 @@ jobs:
       - name: build, test and guards
         run: ./gradlew --no-daemon build guards
 
-      # The tag is the source of truth for what this release is called, and the
-      # artifacts are named from the Gradle version. If they disagree, somebody
-      # tagged without setting the version and the archives on the release page
-      # would carry a name that is not the release's -- silently, and forever,
-      # because a published artifact is not something you quietly rename.
+      # The tag IS the version now -- SoulbindVersion derives it from `git
+      # describe` -- so this can no longer catch somebody forgetting to bump a
+      # literal. It is kept because what it checks changed rather than went
+      # away: the derivation is code, code is wrong sometimes, and the failure
+      # mode is an artifact on a release page carrying a name that is not the
+      # release's. A published artifact is not something you quietly rename.
+      #
+      # It now fails for exactly two reasons, and both are worth stopping for:
+      # the checkout had no tags (a shallow fetch -- see fetch-depth above), or
+      # the derivation refused the tag and fell back to 0.0.0-unversioned, which
+      # happens when a tag is not release-shaped. `v1.0` would do it.
       - name: the tag and the built version must agree
         run: |
           set -euo pipefail
@@ -67,19 +80,28 @@ jobs:
             echo "What is in core/build/distributions:" >&2
             ls -1 core/build/distributions >&2
             echo >&2
-            echo "The version lives in build-logic/src/main/kotlin/soulbind.java-common.gradle.kts." >&2
-            echo "Tagging without setting it there is what this check exists to catch." >&2
+            echo "The version is derived from the tag by build-logic/src/main/kotlin/SoulbindVersion.kt." >&2
+            echo "A name of 0.0.0-unversioned means it saw no v[0-9]* tag, or refused this one" >&2
+            echo "as not release-shaped: it wants three numeric components, as in v1.2.3." >&2
             exit 1
           fi
 
+      # Named exactly, not globbed. A glob is right only while there is exactly
+      # one candidate, and the version now moves with every commit: `build/libs`
+      # is never cleaned, so any tree that had been built before would offer
+      # `cp` two jars and the release would carry both -- one of them stale, and
+      # the wrong one indistinguishable from the right one on a download page.
+      # A fresh runner has no earlier build, which is precisely why a glob here
+      # would keep working until the day something reused a workspace.
       - name: gather the artifacts
         run: |
           set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
           mkdir -p release
-          cp core/build/distributions/core-*.tar.gz release/
-          cp connector-discord/build/distributions/connector-discord-*.tar.gz release/
-          cp connector-velocity/build/libs/connector-velocity-*.jar release/
-          cp connector-plan/build/libs/connector-plan-*.jar release/
+          cp "core/build/distributions/core-${v}.tar.gz" release/
+          cp "connector-discord/build/distributions/connector-discord-${v}.tar.gz" release/
+          cp "connector-velocity/build/libs/connector-velocity-${v}.jar" release/
+          cp "connector-plan/build/libs/connector-plan-${v}.jar" release/
           # Checksums, because an operator downloading a jar over the internet
           # has no other way to know they got the bytes this build produced.
           ( cd release && sha256sum ./* > SHA256SUMS )
@@ -99,16 +121,23 @@ jobs:
       # remaining actions are pinned by commit SHA above; this one is simply not
       # a dependency any more.
       #
-      # DRAFT, deliberately. Publishing is a person's decision, and a tag pushed
-      # by mistake should not become a download before anybody has looked at it.
-      # Review the draft, then hit publish.
-      - name: publish a draft release
+      # PUBLISHED, not drafted, at the owner's instruction: pushing a version
+      # tag is the decision to release, and a draft made it two decisions with
+      # the second easy to forget.
+      #
+      # What that gives up, stated rather than glossed: a mistaken tag becomes a
+      # download immediately. What stands in its place is everything above --
+      # the full suite and the guards run BEFORE this step, and the version
+      # check refuses a tag the build did not produce artifacts for. A bad tag
+      # now fails the run instead of reaching a draft nobody reads. What is left
+      # uncovered is a tag that is genuinely wrong about WHICH commit should
+      # ship, and no automated check was ever going to have an opinion on that.
+      - name: publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" \
-            --draft \
             --generate-notes \
             --title "$GITHUB_REF_NAME" \
             release/*

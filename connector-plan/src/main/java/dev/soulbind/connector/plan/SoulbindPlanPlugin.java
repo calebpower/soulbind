@@ -78,7 +78,13 @@ import org.slf4j.Logger;
 @Plugin(
         id = "soulbind-plan",
         name = "soulbind-plan",
-        version = "0.1.0",
+        // NO version here, deliberately. An annotation member takes a
+        // compile-time constant, so a version in this file could only ever be a
+        // literal somebody has to remember to change -- and it would sit next to
+        // velocity-plugin.json, which the proxy actually reads, saying something
+        // different. Velocity defaults this member to empty and takes the
+        // version from that file, which soulbind.plugin-jar stamps from the git
+        // tag. One number, one source.
         description = "Puts soulbind link state on Plan's pages",
         authors = {"Caleb L. Power"},
         // Declared, so Velocity loads this after Plan. Without it

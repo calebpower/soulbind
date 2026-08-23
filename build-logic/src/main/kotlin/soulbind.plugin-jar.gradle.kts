@@ -63,6 +63,41 @@ val relocatedPackages = listOf(
     "org.checkerframework",
 )
 
+/**
+ * The placeholder velocity-plugin.json carries in the source tree.
+ *
+ * A token rather than a plausible number, so that a stamping step which
+ * silently stops running produces a jar the host refuses and PluginJarGuardTest
+ * names, instead of a jar that quietly claims whatever release was current when
+ * somebody last edited the file by hand.
+ */
+val versionToken = "@version@"
+
+/*
+ * Stamp the version the host will report.
+ *
+ * A Velocity plugin's metadata is velocity-plugin.json, and the proxy reads the
+ * version from there -- not from the jar's filename and not from the @Plugin
+ * annotation, which is inert here because no annotation processor is on the
+ * classpath. Before this, that file held a literal, so the number an operator
+ * saw in `/velocity plugins` was whatever was true the last time anyone
+ * remembered to change it. It had already drifted from nothing only because
+ * there had been exactly one release.
+ *
+ * inputs.property, and it is load-bearing: the substitution captures a value
+ * that is not one of this task's declared inputs, so without it Gradle would
+ * call the task up to date across a new tag and ship the previous version's
+ * metadata inside the new version's jar. That is the same class of bug as the
+ * literal, arriving by a different route.
+ */
+tasks.named<ProcessResources>("processResources") {
+    val stamped = project.version.toString()
+    inputs.property("soulbindVersion", stamped)
+    filesMatching("velocity-plugin.json") {
+        filter { line -> line.replace(versionToken, stamped) }
+    }
+}
+
 tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
     archiveClassifier.set("")
 
@@ -84,6 +119,34 @@ tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJ
     from(tasks.named("licenceInventory")) { into("META-INF/soulbind") }
 
     mergeServiceFiles()
+
+    // Sweep jars this module built under a DIFFERENT version.
+    //
+    // build/libs is not a synced directory -- Gradle writes into it and never
+    // removes anything -- which was invisible while the version was a literal
+    // that never moved, because there was only ever one filename. Now that it
+    // is derived from the git tag, every commit leaves another jar behind, and
+    // anything downstream that says `build/libs/*.jar` gets a pile: the
+    // full-stack harness copying them all into a proxy's plugins/ directory
+    // was the case that made this urgent, since two plugins sharing an id is a
+    // stack that will not start, reported three stages from its cause.
+    //
+    // doFirst, so it runs only when the jar is actually being written. That is
+    // also its limit: a shadowJar that is up to date sweeps nothing, so a tree
+    // checked back out at an older already-built version still holds both. The
+    // consumers assert their own uniqueness for that reason -- this makes the
+    // ordinary case clean, it does not make the check unnecessary.
+    doFirst {
+        val current = archiveFile.get().asFile
+        val prefix = "${project.name}-"
+        current.parentFile?.listFiles()?.forEach { file ->
+            if (file.isFile && file != current
+                && file.name.startsWith(prefix) && file.name.endsWith(".jar")) {
+                logger.lifecycle("removing stale artifact ${file.name}")
+                file.delete()
+            }
+        }
+    }
 }
 
 // `build` produces the artifact an operator installs, rather than a thin jar

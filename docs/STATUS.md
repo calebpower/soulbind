@@ -929,11 +929,20 @@ test can reach.
 
 ### Release mechanics — landed
 
-`0.1.0`, tagged `v0.1.0`. The version lives in exactly one place —
-`soulbind.java-common.gradle.kts` — so every Java module moves together and
-there is no second copy to drift. `connector-flarum/composer.json` deliberately
-carries no `version`: it is a Composer package installed from this repository's
-VCS tag, and Composer takes the version from the tag.
+`0.1.0`, tagged `v0.1.0`. **The version is not written down anywhere.**
+`SoulbindVersion` derives it from `git describe`, so every Java module moves
+together because none of them carries a number of its own — see DECISIONS 10.51,
+which also records that the previous claim of "exactly one place" was wrong by
+four. `connector-flarum/composer.json` deliberately carries no `version` either:
+it is a Composer package installed from this repository's VCS tag, and Composer
+takes the version from the tag — the same source of truth, reached a different
+way.
+
+Off a tag the answer is deliberately not release-shaped (`0.1.1-3-gabc1234`,
+`+dirty` if the tree has edits); with no tag reachable it is
+`0.0.0-unversioned`, which no reader can mistake for a release. Both plugin
+jars stamp that number into `velocity-plugin.json`, which is what a proxy
+actually reports, and `PluginJarGuardTest` asserts the two agree.
 
 Four artifacts ship: the `core` and `connector-discord` distributions, and the
 `connector-velocity` and `connector-plan` shaded jars. That closes the hole
@@ -947,15 +956,25 @@ produced the archives and they had no destination.
 |---|---|---|
 | `build` | every push and PR | `./gradlew build guards`, plus the cross-language vectors through their PHPUnit-free entry point, ordinary and hostile |
 | `mutation ratchet` | weekly, and on demand | every module against `mutation-baseline.txt`, with `--continue` so one regression does not hide the other eight |
-| `release` | a `v*` tag | rebuilds, refuses to publish if the tag and the built version disagree, and attaches the four artifacts with `SHA256SUMS` as a **draft** |
+| `release` | a `v*` tag | rebuilds, refuses to publish if the tag and the built version disagree, and **publishes** the four artifacts with `SHA256SUMS` |
 
 **CI is the cheap half arriving faster, and is not the gate.** It runs what
 needs only a JDK and a PHP. The full-stack battery, the MariaDB axis and the
 install gate need a real machine with a container engine, a database server, a
 Paper world and a browser — they stay in a reaper session, and a green session
-remains what a release is judged on. The release workflow drafts rather than
-publishes for the same reason: a tag pushed by mistake should not become a
-download before a person has looked at it.
+remains what a release is judged on.
+
+The release workflow **publishes rather than drafts**, at the owner's
+instruction: pushing a version tag is the decision to release, and a draft made
+it two decisions with the second easy to forget. The trade is stated in
+DECISIONS 10.51 — a mistaken tag becomes a download immediately, against which
+the full suite, the guards and the version check all run first, so a bad tag
+fails the run rather than reaching a draft nobody reads.
+
+All three workflows check out with `fetch-depth: 0`, because a shallow fetch
+brings no tags and every artifact would then be named `0.0.0-unversioned`. The
+cross-language vectors job stays shallow on purpose: it builds no versioned
+artifact.
 
 **Not published to Maven Central or Packagist.** Those need signing keys and
 namespace ownership, and they are a separate decision rather than a bigger
@@ -983,6 +1002,8 @@ never be taken back.
 | TOML entry point | Exactly one module declares a TOML parser |
 | Release-level coverage | Every module in `settings.gradle.kts` has a declared release level |
 | Protocol doc sync | `docs/protocol.md`'s operation and capability tables match the code, both directions |
+| Plugin jar version | The version a plugin reports to its host is the version it was built as |
+| build-logic JUnit pin | The one version number written twice agrees with itself, and neither side floats |
 | Check-then-act | No unreviewed read-then-write in any storage write path |
 | Event doc sync | Every EventType appears in the document and vice versa |
 | Audit immutability | Nothing in production source or any migration mutates the audit table, and the repository declares no mutating method |

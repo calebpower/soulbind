@@ -58,7 +58,13 @@ import org.slf4j.Logger;
 @Plugin(
         id = "soulbind",
         name = "soulbind",
-        version = "0.1.0",
+        // NO version here, deliberately. An annotation member takes a
+        // compile-time constant, so a version in this file could only ever be a
+        // literal somebody has to remember to change -- and it would sit next to
+        // velocity-plugin.json, which the proxy actually reads, saying something
+        // different. Velocity defaults this member to empty and takes the
+        // version from that file, which soulbind.plugin-jar stamps from the git
+        // tag. One number, one source.
         description = "Cross-platform account linking",
         authors = {"Caleb L. Power"},
         // OPTIONAL, and load-bearing twice over.

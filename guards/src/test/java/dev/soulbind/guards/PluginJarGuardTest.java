@@ -16,15 +16,19 @@
 
 package dev.soulbind.guards;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.junit.jupiter.api.DisplayName;
@@ -87,18 +91,40 @@ class PluginJarGuardTest {
             "gnu/trove/",
             "com/sun/jna/");
 
+    /**
+     * The jar this build produced, named rather than discovered.
+     *
+     * <p>This used to take the first jar {@code Files.list} returned. That was
+     * correct only for as long as the version was a literal nobody changed:
+     * {@code build/libs} is not cleaned between builds, the version now moves
+     * with every commit, and after two builds the directory holds two jars in
+     * no defined order. Every assertion in this class would then have been
+     * about whichever one the filesystem happened to hand back — passing on a
+     * stale artifact while the one just built was broken.
+     *
+     * <p>So the version comes from the build (see {@link SourceTree#version()})
+     * and the file is resolved exactly. A missing file is a loud failure; a
+     * stale one beside it is now irrelevant.
+     */
     private static Path jarFor(String module) throws IOException {
         Path libs = SourceTree.repoRoot().resolve(module).resolve("build/libs");
         assertTrue(Files.isDirectory(libs),
                 module + " has no build/libs; the guards' test task is supposed to depend"
                         + " on its shadowJar, so this means that wiring is gone");
-        try (var files = Files.list(libs)) {
-            return files.filter(p -> p.getFileName().toString().endsWith(".jar"))
-                    .filter(p -> !p.getFileName().toString().contains("-sources"))
-                    .filter(p -> !p.getFileName().toString().contains("-javadoc"))
-                    .findFirst()
-                    .orElseThrow(() -> new AssertionError("no jar in " + libs));
+
+        Path jar = libs.resolve(module + "-" + SourceTree.version() + ".jar");
+        if (!Files.isRegularFile(jar)) {
+            try (var files = Files.list(libs)) {
+                throw new AssertionError(
+                        "this build produced no " + jar.getFileName() + ". What is in "
+                                + libs + ": " + files.map(p -> p.getFileName().toString())
+                                .sorted().toList()
+                                + ". A jar there under a DIFFERENT version is left over from"
+                                + " an earlier build and is deliberately not accepted as a"
+                                + " substitute.");
+            }
         }
+        return jar;
     }
 
     private static List<String> entriesOf(Path jar) throws IOException {
@@ -219,5 +245,66 @@ class PluginJarGuardTest {
                 .toList();
         assertFalse(!signatures.isEmpty(),
                 module + " carries signature files over rewritten classes: " + signatures);
+    }
+    /**
+     * The version a plugin reports to its host, read out of the built jar.
+     *
+     * <p>Velocity takes a plugin's version from {@code velocity-plugin.json},
+     * not from the jar's filename and not from the {@code @Plugin} annotation,
+     * which is inert here because no annotation processor is on the classpath.
+     * That file used to hold a literal, so the number an operator saw in
+     * {@code /velocity plugins} was whatever was true the last time somebody
+     * remembered to edit it. It is now stamped from the git tag by
+     * {@code soulbind.plugin-jar}, and this is what makes the stamping
+     * observable: a substitution that stops running leaves the token behind,
+     * and Gradle calling the task up to date across a new tag leaves the
+     * PREVIOUS version behind. The second is the quiet one, and only comparing
+     * against the filename catches it.
+     */
+    private static final Pattern JSON_VERSION =
+            Pattern.compile("\"version\"\\s*:\\s*\"([^\"]+)\"");
+
+    private static String metadataVersion(Path jar) throws IOException {
+        try (ZipFile zip = new ZipFile(jar.toFile())) {
+            ZipEntry entry = zip.getEntry("velocity-plugin.json");
+            assertTrue(entry != null,
+                    jar.getFileName() + " has no velocity-plugin.json. A host reads a"
+                            + " plugin's identity from that file; without it the jar does"
+                            + " not load at all.");
+            String json;
+            try (var in = zip.getInputStream(entry)) {
+                json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            Matcher m = JSON_VERSION.matcher(json);
+            assertTrue(m.find(), jar.getFileName() + "'s velocity-plugin.json declares no version");
+            return m.group(1);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"connector-velocity", "connector-plan"})
+    @DisplayName("the version the host will report is the version the jar was built as")
+    void metadataVersionMatchesTheArtifact(String module) throws IOException {
+        Path jar = jarFor(module);
+        String declared = metadataVersion(jar);
+
+        // The token, named explicitly. If stamping stops happening this is what
+        // is left, and the equality assertion below would report it as a
+        // mismatch without saying why -- which sends the next person looking at
+        // the git tag rather than at processResources.
+        assertFalse("@version@".equals(declared),
+                module + "'s velocity-plugin.json still contains the @version@ placeholder,"
+                        + " so soulbind.plugin-jar's processResources substitution did not"
+                        + " run. The host would report a plugin version of '@version@'.");
+
+        assertFalse(declared.startsWith("0.0.0-unversioned"),
+                module + " was built without a readable git tag, so it would ship announcing"
+                        + " itself as " + declared + ". See SoulbindVersion.");
+
+        assertEquals(SourceTree.version(), declared,
+                module + "'s jar was built as " + SourceTree.version() + " and tells its host"
+                        + " it is " + declared + ". Nothing at runtime reads the filename, so"
+                        + " an operator comparing the two would be told the file is wrong when"
+                        + " it is the metadata that is.");
     }
 }

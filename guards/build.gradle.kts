@@ -51,6 +51,16 @@ tasks.withType<Test>().configureEach {
     // The repository root, because a guard's subject is the whole tree.
     systemProperty("soulbind.repoRoot", rootProject.projectDir.absolutePath)
 
+    // The version this build produced, so a guard reading a built artifact can
+    // name the file it means instead of taking whatever it finds.
+    //
+    // build/libs is not cleaned between builds, and the version now changes
+    // with every commit -- so after two builds there are two jars in there and
+    // "the first one Files.list returns" is a coin. It was invisible while the
+    // version was a literal that never moved, which is the only reason the old
+    // guard was reliable. See DECISIONS 10.51.
+    systemProperty("soulbind.version", project.version.toString())
+
     // NEVER up-to-date, and this is load-bearing rather than cautious.
     //
     // A guard's inputs are "most of the repository": every module's build file,

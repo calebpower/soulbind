@@ -1,7 +1,7 @@
 {
   "id": "soulbind",
   "name": "soulbind",
-  "version": "0.1.0",
+  "version": "@version@",
   "description": "Cross-platform account linking",
   "authors": ["Caleb L. Power"],
   "dependencies": [

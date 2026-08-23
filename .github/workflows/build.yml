@@ -47,6 +47,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # FULL history and tags, because the version is derived from `git
+          # describe` rather than written down (see SoulbindVersion). The
+          # default shallow fetch brings no tags, every artifact would be named
+          # 0.0.0-unversioned, and PluginJarGuardTest would fail the run --
+          # loudly, which is the intended failure, but the fix is here.
+          fetch-depth: 0
 
       # Java 25, DECLARED rather than inherited -- the same rule
       # gradle.properties states for the workstation. The toolchain paths in
@@ -84,6 +91,10 @@ jobs:
     name: cross-language vectors
     runs-on: ubuntu-latest
     steps:
+      # Shallow, unlike the gradle job above, and deliberately so rather than
+      # forgotten: nothing here builds a versioned artifact. This runs PHP
+      # against checked-in vectors, so the tags `git describe` needs would be
+      # history fetched for no reader.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240  # 2.37.2

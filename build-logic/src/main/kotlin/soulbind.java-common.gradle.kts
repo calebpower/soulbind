@@ -27,17 +27,26 @@ plugins {
 
 group = "dev.soulbind"
 
-// THE version, in one place, so every module moves together and there is no
-// second copy to drift. The release workflow refuses to publish when this and
-// the tag disagree -- tagging without setting it here would put archives on a
-// release page under a name that is not the release's, silently and
-// permanently, because a published artifact is not something you quietly
-// rename.
+// THE version, and it is not written down anywhere -- see SoulbindVersion, which
+// derives it from the git tag. Every module moves together because none of them
+// carries a number of its own, rather than because somebody remembered to change
+// them all.
+//
+// Read once per project rather than cached across them. It is a `git describe`
+// per module, some tens of milliseconds over the whole tree, and the alternative
+// is a subproject reaching into rootProject.extra to mutate shared state during
+// configuration. That trade is not close.
+//
+// The two PLUGIN modules also publish this number to their host in
+// velocity-plugin.json, which is stamped from here by soulbind.plugin-jar. It is
+// deliberately not repeated in their @Plugin annotations: an annotation takes a
+// compile-time constant, so a version living there could only ever be a literal,
+// which is the drift this removed.
 //
 // connector-flarum deliberately carries no version of its own: it is a Composer
 // package installed from this repository's VCS tag, and Composer takes the
-// version from the tag.
-version = "0.1.0"
+// version from the tag -- the same source of truth, reached a different way.
+version = SoulbindVersion.of(rootDir)
 
 java {
     toolchain {
