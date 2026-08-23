@@ -368,22 +368,8 @@ budget would be the easy mistake.
 
 ## Outstanding, and needing the owner
 
-Two items in the whole build cannot be done from here, and two more are
-decisions rather than blockers.
-
-**The provenance columns.** Five columns are written and no query selects them,
-and they are three different situations rather than one. `rule.updated_via`,
-`policy_override.created_by` and `runtime_config.updated_via` each duplicate an
-audit row written on the next statement, so dropping them loses nothing
-`audit.query` cannot answer -- what they buy is the last-writer answer without
-scanning a log designed to be prunable. `gate.registered_by` has no second copy:
-`gateSeen` runs on the `decide` hot path and appends no audit row, so it is the
-only record of which connector first named a gate, and `gate.list` is
-`SELECT name FROM gate ORDER BY name`. `gate.description` is not written at
-all -- both production call sites pass `null` and no wire message carries a
-description, so the column, the repository parameter and the interface
-signature are unreachable from any caller but a test. Expose, keep, or drop is
-the owner's call per column; the measurement is in `DECISIONS.md` 10.45.
+Two items in the whole build cannot be done from here, and one is a decision
+rather than a blocker.
 
 **Release mechanics.** Nothing is tagged and nothing is published. The version
 is `0.1.0-SNAPSHOT` in exactly one place -- `soulbind.java-common.gradle.kts`
@@ -879,6 +865,41 @@ coincidence: **a branch whose only witness is a race has no witness, it has a
 coin.** It reads as covered and counts as covered, and the mutation report
 cannot say otherwise because the report is the thing that keeps changing. The
 tell is a mutant whose status moves without the tree moving. DECISIONS 10.46.
+
+### The gate description, made reachable — landed
+
+`gate.description` had been in the schema since the first policy migration and
+in the specification's §8 table, and nothing could write to it: both production
+call sites passed `null`, and no wire message carried one. Not a column written
+and never read — a column, a repository parameter and an interface signature no
+caller could reach.
+
+`rule.set` now carries an optional `description`, and `rule.get` returns it
+alongside `registeredBy`. No new operation: the moment somebody writes a rule
+is the moment they know what the gate is for, and release-hardening is the
+wrong week to widen the authorization matrix. The cost, stated rather than
+hidden, is that a gate no rule governs cannot be documented.
+
+The care went into one hazard with two opposite failures, because a gate is
+re-declared on **every** `decide`. Insert-only — which is what `gateSeen` was —
+accepts a description for an existing gate and stores nothing, and by the time
+an operator documents a gate the row has been there a while, so that is the
+normal case rather than an edge one. An unconditional update fails the other
+way: the next permission check, milliseconds later, overwrites the note with
+the `null` that `decide` passes, and the operator concludes the save did not
+work. The update therefore runs only when a description was supplied, and
+`registered_by` is deliberately not in that statement — it means who declared
+the gate *first*.
+
+`registeredBy` is response-only and asserted to be: provenance a caller can
+assert is not provenance. Ten mutants confirmed killed by hand, including both
+halves of the hazard. DECISIONS 10.47.
+
+The remaining ten never-read columns are settled and need nothing: five are
+forensic timestamps you would read with a SQL client, three duplicate an audit
+row written on the next statement, and two are `registered_by` on `gate` and
+`platform_kind`, which have no second copy because neither registration path
+writes an audit row. DECISIONS 10.45.
 
 ## Narrowing in force from 10.26
 

@@ -8184,3 +8184,61 @@ mutation report cannot tell you otherwise because the report itself is what
 keeps changing. The tell is a mutant whose status moves without the tree
 moving, and the fix has been the same every time: construct the state the race
 was being used to produce.
+
+### 10.47 — The gate description, made reachable
+
+`gate.description` has been in the schema since the first policy migration and
+in the specification's §8 table since before that. Nothing could write to it:
+both production call sites passed `null`, and no wire message carried one. It
+was not a column written and never read -- it was a column, a repository
+parameter and an interface signature that no caller could reach. 10.45 has the
+measurement; this is what was done about it.
+
+**Why add the pipe rather than drop the column.** The specification asks for
+it, so removing it is a departure, and the departure entry would have been
+longer than the change. A description is also the one thing in that table an
+operator writes for another human: `registered_by` and the timestamps are
+facts the system knows, and this is the only field that answers "what *is*
+this gate".
+
+**It rides on `RuleView`, and no new operation was added.** The moment somebody
+writes a rule is the moment they know what the gate is for, and a dedicated
+operation for one optional string is an operation nobody calls. The cost is
+that a gate no rule governs cannot be documented -- which is worth stating
+plainly rather than hiding, and the answer if it bites is a gate-listing
+operation, not a second way to write this field. A new operation also means a
+new row in the authorization matrix, and release-hardening is the wrong week
+to widen that surface.
+
+**The hazard, which is the whole reason this needed care.** A gate is
+re-declared on *every* `decide`. `gateSeen` was insert-only, so two failures
+were available and they pull in opposite directions:
+
+* Insert-only means a description sent for a gate that already exists is
+  accepted and stored nowhere -- and by the time an operator documents a gate,
+  the row has been there for a while. That is the *normal* case, not an edge
+  one.
+* An unconditional update means the next permission check -- milliseconds later
+  -- overwrites the note with the `null` that `decide` passes. The operator
+  sees their description vanish and concludes the save did not work.
+
+So the update runs only when a description was actually supplied. `registered_by`
+is deliberately not in that statement: it means who declared the gate *first*,
+and rewriting it on each declaration would redefine it as who asked most
+recently, which every enforcement point overwrites on startup.
+
+**Blank is absent, not delete.** There is no way to blank a description, only
+to replace one. Supporting deletion means an empty field in a request erases
+documentation, and "clear the note" is not a thing anybody has asked for.
+
+**`registeredBy` is response-only.** Provenance a caller can assert is not
+provenance. It is ignored on the way in, and asserted to be -- "the repository
+ignores it downstream" is exactly the kind of reasoning that stops being true
+when the downstream changes.
+
+**`rule.set` answers with what is stored, not with what it was sent.** They
+differ for `registeredBy` on any gate another connector declared first, which
+is the case an operator would most want to see.
+
+Ten mutants confirmed killed by hand, including both halves of the hazard: the
+guard removed (so `decide` erases) and the update removed (so nothing lands).

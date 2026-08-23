@@ -28,6 +28,7 @@ import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.identity.RedeemThrottle;
 import dev.soulbind.core.policy.GateEvaluator;
 import dev.soulbind.core.policy.GateTransitions;
+import dev.soulbind.core.storage.GateRecord;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.ConnectorRepository;
 import dev.soulbind.core.storage.IdentityRepository;
@@ -512,14 +513,27 @@ public final class CoreHandlers {
             if (blank(request.get().gate())) {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, "rule.get names a gate");
             }
+            // The gate row is read whether or not a rule governs it: clearing
+            // a rule leaves the gate, so an unconfigured gate can still carry a
+            // description somebody wrote, and dropping it here would make the
+            // documentation disappear the moment a rule was withdrawn.
+            GateRecord gate = policy.gate(request.get().gate()).orElse(null);
             return policy.rule(request.get().gate())
-                    .map(r -> WireResponse.ok(toView(r)))
+                    .map(r -> WireResponse.ok(toView(r, gate)))
                     // No rule is not an error: a gate nobody configured is a
                     // gate nobody asked for, and reporting that as a failure
                     // would make "is this gate governed?" unanswerable without
                     // catching something.
-                    .orElseGet(() -> WireResponse.ok(Map.of("gate", request.get().gate(),
-                            "configured", false)));
+                    .orElseGet(() -> {
+                        Map<String, Object> body = new LinkedHashMap<>();
+                        body.put("gate", request.get().gate());
+                        body.put("configured", false);
+                        if (gate != null) {
+                            body.put("description", gate.description());
+                            body.put("registeredBy", gate.registeredBy());
+                        }
+                        return WireResponse.ok(body);
+                    });
         });
 
         handlers.put(Operation.RULE_SET, (connector, payload) -> {
@@ -551,7 +565,12 @@ public final class CoreHandlers {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, e.getMessage());
             }
 
-            policy.gateSeen(view.gate(), connector.id(), null);
+            // The description comes from the request; `registeredBy` never
+            // does. A caller stating who introduced a gate could state somebody
+            // else, and the repository ignores it on an existing row anyway --
+            // asserted, because "it is ignored downstream" is the kind of
+            // reasoning that stops being true when the downstream changes.
+            policy.gateSeen(view.gate(), connector.id(), view.description());
             policy.setRule(rule, clock.instant(), "connector:" + connector.id());
 
             audit.append(new AuditEntry(
@@ -570,7 +589,11 @@ public final class CoreHandlers {
                     EventType.RULE_CHANGED, null, null, view.gate(), Map.of(),
                     clock.instant()));
 
-            return WireResponse.ok(toView(rule));
+            // Read back rather than echoed. What the caller sent is what they
+            // asked for; what this returns is what is now stored -- and the two
+            // differ for `registeredBy` on any gate somebody else declared
+            // first, which is exactly the case an operator would want to see.
+            return WireResponse.ok(toView(rule, policy.gate(view.gate()).orElse(null)));
         });
 
         handlers.put(Operation.OVERRIDE_GET, (connector, payload) -> {
@@ -790,13 +813,15 @@ public final class CoreHandlers {
                 event.createdAt().getEpochSecond());
     }
 
-    private static RuleView toView(Rule rule) {
+    private static RuleView toView(Rule rule, GateRecord gate) {
         return new RuleView(
                 rule.gateName(),
                 List.copyOf(rule.requiredKinds()),
                 rule.requireLinked(),
                 rule.graceSeconds(),
-                rule.defaultEffect().wireName());
+                rule.defaultEffect().wireName(),
+                gate == null ? null : gate.description(),
+                gate == null ? null : gate.registeredBy());
     }
 
     private static OverrideView toView(PolicyOverride override) {

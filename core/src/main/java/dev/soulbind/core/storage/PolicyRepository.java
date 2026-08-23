@@ -24,10 +24,35 @@ import java.util.Optional;
 /** Rules, overrides and the gates they govern. */
 public interface PolicyRepository {
 
-    /** Records a gate the first time a connector declares one. Idempotent. */
+    /**
+     * Records a gate the first time a connector declares one. Idempotent.
+     *
+     * <p><b>{@code description} is applied only when one is supplied.</b> This
+     * is called on the {@code decide} path, on every permission check, with no
+     * description -- because a connector asking about a gate knows the gate's
+     * name and nothing about what an operator wants written down. If a null
+     * were allowed to overwrite, the first check after somebody documented a
+     * gate would erase it, and the erasure would look like the note was never
+     * saved.
+     *
+     * <p><b>{@code registeredByConnectorId} is never updated either</b>, for a
+     * different reason: it means "who first declared this", and rewriting it on
+     * each later declaration would quietly redefine it as "who asked most
+     * recently".
+     */
     void gateSeen(String gateName, String registeredByConnectorId, String description);
 
     List<String> gates();
+
+    /**
+     * A gate's own row -- who declared it and what it is for -- or empty when
+     * no connector has ever named it.
+     *
+     * <p>Separate from {@link #rule(String)} because a gate and its rule are
+     * different things with different lifetimes: clearing a rule leaves the
+     * gate, and its description, exactly where they were.
+     */
+    Optional<GateRecord> gate(String gateName);
 
     /** The rule governing a gate, or empty when none does. */
     Optional<Rule> rule(String gateName);

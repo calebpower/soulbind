@@ -49,13 +49,18 @@ final class JdbcPolicyRepository implements PolicyRepository {
             // multi-writer backend turned that race into a 500.
             Jdbc.ensureExists(
                     conn -> {
+                        // No description here, deliberately. The statement
+                        // below is the only writer of that column, and a second
+                        // one would be a second place to get the null rule
+                        // wrong. It also showed up as a surviving mutant the
+                        // moment the update landed -- setting it here changes
+                        // nothing that the update does not immediately redo.
                         try (PreparedStatement ps = conn.prepareStatement(
-                                "INSERT INTO gate (name, registered_by, description,"
-                                        + " first_seen_at) VALUES (?, ?, ?, ?)")) {
+                                "INSERT INTO gate (name, registered_by, first_seen_at)"
+                                        + " VALUES (?, ?, ?)")) {
                             ps.setString(1, gateName);
                             ps.setString(2, registeredBy);
-                            ps.setString(3, description);
-                            ps.setLong(4, Instant.now().toEpochMilli());
+                            ps.setLong(3, Instant.now().toEpochMilli());
                             ps.executeUpdate();
                         }
                         return null;
@@ -70,7 +75,50 @@ final class JdbcPolicyRepository implements PolicyRepository {
                         }
                     },
                     c);
+
+            // Applied as its own statement, and ONLY when a description was
+            // supplied. Two reasons it is not folded into the insert above.
+            //
+            // First, the insert usually does not run: a gate is declared on
+            // every `decide`, so by the time an operator documents one the row
+            // has been there for a while, and an insert-only path would accept
+            // the description and store nothing.
+            //
+            // Second, the null guard. `decide` calls this on every permission
+            // check with no description; without the guard the first check
+            // after somebody wrote one would erase it, which reads as the note
+            // never having saved. `registered_by` is deliberately NOT in this
+            // statement -- it means who declared the gate FIRST.
+            if (description != null) {
+                try (PreparedStatement ps = c.prepareStatement(
+                        "UPDATE gate SET description = ? WHERE name = ?")) {
+                    ps.setString(1, description);
+                    ps.setString(2, gateName);
+                    ps.executeUpdate();
+                }
+            }
             return null;
+        });
+    }
+
+    @Override
+    public Optional<GateRecord> gate(String gateName) {
+        return jdbc.read("gate.get", c -> {
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT name, registered_by, description, first_seen_at"
+                            + " FROM gate WHERE name = ?")) {
+                ps.setString(1, gateName);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        return Optional.empty();
+                    }
+                    return Optional.of(new GateRecord(
+                            rs.getString("name"),
+                            rs.getString("registered_by"),
+                            rs.getString("description"),
+                            Instant.ofEpochMilli(rs.getLong("first_seen_at"))));
+                }
+            }
         });
     }
 

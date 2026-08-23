@@ -435,6 +435,54 @@ client**, not a management command: it holds an admin credential and is
 authorized by the same capability table as everything else, rather than reading
 the database behind core's back.
 
+## Rules, and what a gate is for
+
+`rule.set` and `rule.get` carry a gate and the rule applied at it in one shape,
+because the moment somebody writes a rule is the moment they know what the gate
+is for. They are different things with different lifetimes, though, and the
+difference shows: **withdrawing a rule leaves the gate**, and everything
+recorded about it.
+
+| Field | Direction | Means |
+|---|---|---|
+| `gate` | both | the gate's name |
+| `requiredKinds` | both | platform kinds that must be present *and* verified |
+| `requireLinked` | both | whether the subject must hold more than one identity |
+| `graceSeconds` | both | how long an unmet requirement is tolerated |
+| `defaultEffect` | both | `allow` or `deny` when the requirements are unmet |
+| `description` | both, optional | what this gate is for, in a sentence |
+| `registeredBy` | **response only** | the connector that first declared this gate |
+
+### `description`
+
+Optional in both directions, and **absent means "leave whatever is there"**.
+That is not politeness: a gate is re-declared on *every* `decide`, by
+connectors that know the gate's name and nothing about what an operator wrote
+down. If a missing description overwrote, documentation would vanish within
+seconds of being written, and the erasure would look exactly like the note
+never having saved.
+
+An empty string is treated as absent rather than as an instruction to delete,
+so **there is no way to blank a description** — only to replace it. Wiping one
+is not something anybody has needed, and the version that supports it is a
+request that erases a note by omitting a field.
+
+A description can only be attached where a rule is set. A gate that no rule
+governs cannot be documented; if that becomes a problem, the answer is a
+gate-listing operation rather than a second way to write this field.
+
+### `registeredBy`
+
+Response only. It is **ignored** on the way in — a caller does not get to state
+who introduced a gate, least of all somebody else — and it is never rewritten
+once set. It means *who declared this first*; updating it on each later
+declaration would quietly redefine it as *who asked most recently*, which every
+enforcement point overwrites within seconds of starting up.
+
+`rule.set` answers with what is now stored rather than echoing what was sent.
+The two differ for `registeredBy` on any gate another connector declared first,
+which is precisely the case worth seeing.
+
 ## Decisions
 
 `decide` asks whether an identity may pass a gate. The **identity**, not the
