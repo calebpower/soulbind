@@ -927,6 +927,41 @@ description landed — run 31 died at the sqlite `migrate` stage, so the second
 backend never ran at all that session, and 10.47 added an `UPDATE` no workstation
 test can reach.
 
+### Runs 33 and 34 — the version derivation, on hardware
+
+**Run 33 failed**, `reaper exit=1`, 1m26s into the build half and before the
+battery started. `PluginJarGuardTest` refused a jar built as
+`0.0.0-unversioned`. The derivation was right and the guard was in the wrong
+place: the guest builds inside a digest-pinned Temurin image with no `git`
+binary — a probe against a live guest returned `PROBE_GIT_BIN=none` — so it
+correctly answered that it did not know its version, and a release-time
+assertion failed the session for it. DECISIONS 10.53.
+
+**Run 34 is green**, `reaper exit=0`: both storage axes, every stage, the
+install gate, the Infection run, the browser evidence and the ratchet.
+
+What it was run for was `stack.sh`: `copy_the_plugin_jar` replaced two
+`cp .../build/libs/*.jar` lines, and it reported exactly one jar on each of its
+three calls. **The stale-jar case it exists for was not exercised here** — run
+33 had already swept the guest's `0.1.0` jars before it failed, so the directory
+was clean by the time run 34 looked. That path is verified on the workstation at
+zero, one and two jars; on the guest, only the no-false-positive half is.
+
+Two asymmetries, both pre-existing and neither caused by this work:
+
+- `sqlite` runs eight stages, `mariadb` nine. The extra is `plan`, which needs
+  MySQL and cannot run on the SQLite axis — departure 10.
+- `PlanCheckWalkerGuardTest`'s six tests SKIP in a session and run on the
+  workstation: they `assumeTrue(pythonAvailable())` and the JDK image has no
+  Python. Those guards do not fire on hardware. `DoctorFilesystemTest` skips one
+  for a comparable reason (root can write anywhere), identically in run 32 and
+  run 34 — verified by comparing the two sessions' collected results.
+
+The guest builds artifacts named `0.0.0-unversioned`, which is now correct
+rather than a defect. If the battery should exercise jars named as they would
+ship, the mechanism is a `SOULBIND_VERSION` override passed in by the manifest;
+nothing needs it today, because the names do not affect what the battery tests.
+
 ### Release mechanics — landed
 
 `0.1.0`, tagged `v0.1.0`. **The version is not written down anywhere.**
