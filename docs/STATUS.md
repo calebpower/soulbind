@@ -21,7 +21,7 @@ Last updated: 2026-08-16, Phase 8 in progress.
 | 7 | connector-flarum | **Complete** — gate passed: vectors green in both languages, the T5 injection suite green cross-engine (five specs against core on each backend), and a forum account linked by code entry against a real core, confirmed by asking core rather than the page |
 | 8 | connector-plan + full-stack battery | **Complete — gate passed.** `reaper test` green on both backends in one session (run 13), and Plan renders link data for a player linked through the real flow. Battery covers: the latin1 axis asserted rather than assumed, astral-plane text round-tripped and compared, T7 fuzz against a populated deployment, T8 concurrency re-run in-session on both backends, T11 transcripts for `first-time-player` and `forum-first-user`, and the T5 browser suite with the 5xx watchdog armed on every non-injection pass. `bedrock-player` declined on the plan's own conditional — departure 10 |
 | 9 | Simulated users | **Trimmed tier complete; gate met and now meaningful.** Run 12 green on both backends: three seeds × 400 actions, each reporting real work (6–8 links made, ~100 correctly refused), identical counts on both axes. Four-byte UTF-8 survives a round trip through a latin1 server. Shrinker and two nemesis classes deferred (departure 9). **One open lead:** `decisions-follow-the-rules` excluded pending diagnosis — DECISIONS 9.10 |
-| 10 | Hardening and release | **Gate met — run 17 green.** Clean install on a fresh guest following only `docs/install.md`, ending in a real cross-platform link core confirmed after a restart, evidence in `out/install-gate/`. Full battery green on both backends in one session, with `t10` reading 1200 audit rows over 5 pages on each axis. Every accumulated narrowing listed below with its reason. Deliverables: credential rotation, audit export, the generated licence inventory, packaging, install docs, `doctor` final checks, `docs/threat-model.md`, Tier 10. **Outstanding: the Phase 6 Discord manual smoke**, which needs the owner's bot token |
+| 10 | Hardening and release | **Gate met — run 17 green.** Clean install on a fresh guest following only `docs/install.md`, ending in a real cross-platform link core confirmed after a restart, evidence in `out/install-gate/`. Full battery green on both backends in one session, with `t10` reading 1200 audit rows over 5 pages on each axis. Every accumulated narrowing listed below with its reason. Deliverables: credential rotation, audit export, the generated licence inventory, packaging, install docs, `doctor` final checks, `docs/threat-model.md`, Tier 10. The Phase 6 Discord manual smoke is **done** — see the Phase 6 row and DECISIONS 10.18; this row said otherwise for longer than it was true |
 
 ## Mutation coverage
 
@@ -382,25 +382,20 @@ pinned container inside `reaper test`, ordinary and hostile. Installing the
 extension adds the PHPUnit entry point to the same checks; it does not add
 coverage that is currently missing.
 
-**The Phase 6 manual smoke.** The specification asks for one run against a real
-chat platform in a throwaway server, recorded here — and names it as **evidence,
-not a tier**, because a check that needs somebody to create an account and click
-through a consent screen is not a check that runs.
+**The Phase 6 manual smoke is NOT outstanding.** It ran, against a real bot and
+a real server: `/link` typed by a person, the code redeemed on another platform,
+core confirming the link, `/whoami` reading it back, and the role grant and
+revoke proven live afterwards. It found three defects — a documented capability
+grant missing `link-state-reader`, commands registering globally while a guild
+was named, and `subject.requirements-met` being emitted by nothing at all, which
+meant the effector half of the product could not fire in any deployment. All
+three are fixed. DECISIONS 10.18.
 
-It needs a bot token and a server, which means a human with an account. Nothing
-else is blocked by it: the connector's logic, its refusal wording, its privacy
-rule and its role effector are all covered against the scripted surface, and the
-full link flow game↔chat runs green in the stack on every invocation.
-
-What the manual run would add is the one thing a scripted surface cannot: that
-the client library is wired to the seam correctly — command registration
-reaching the platform, an interaction arriving as an invocation, a role actually
-appearing on a member.
-
-To run it: register a bot, invite it to a throwaway server with role-management
-permission, put the token in `SOULBIND_PLATFORM_TOKEN`, point
-`soulbind-discord.toml` at a core, and run `/link` and `/whoami`. Record what
-happened here.
+This paragraph described it as pending for some time after it had been done,
+while the Phase 6 row and narrowing 12 both recorded it as complete. A document
+that contradicts itself is worse than one that is merely out of date: each half
+looks authoritative on its own, and a reader who finds this half first stops
+looking. What remains here is only the token — see below.
 
 ## Phase 7 — the gate, met
 

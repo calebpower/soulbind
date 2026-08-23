@@ -183,7 +183,7 @@ Both tags are public and neither may be moved.
 | # | Item | Whose |
 |---|---|---|
 | **76** | Regenerate the Discord bot token. Still at `<scratchpad>/dsmoke/discord.env`, mode 0600. **Blocks the Discord connector going live.** | owner |
-| — | **The Phase 6 manual smoke.** The specification names it *evidence, not a tier*, because it needs a human with an account. Not yet run. | owner |
+| — | ~~The Phase 6 manual smoke~~ — **done**, against a real bot and server; DECISIONS 10.18. Listed as outstanding here in error. | — |
 | — | `ext-xmlwriter` for PHP — needs touching system PHP, outside "everything stays inside the repo". Blocks nothing. | owner |
 | — | `PlanCheckWalkerGuardTest`'s six guards **skip in a reaper session** and run only on the workstation: `assumeTrue(pythonAvailable())`, and the JDK image has no Python. Pre-existing, unrelated to the release work, and the wrong shape by DECISIONS 7.2's own argument. | either |
 | — | Maven Central / Packagist — deliberately not done. Separate decision. | owner |
@@ -208,13 +208,26 @@ name it in anything you commit.**
 after a restart. The full game↔chat link flow. Group effects reaching a real
 LuckPerms. Migrations on both backends. Hostile input never producing a 5xx.
 
-**Not proven, and it is one specific thing:** that the Discord client library
-is wired to its seam correctly — command registration reaching the platform, an
-interaction arriving as an invocation, a role actually appearing on a member.
-Everything *around* that is covered against a scripted surface. This is the
-Phase 6 manual smoke, and **it is the single largest unknown going into a live
-deployment.** Do that first, on a throwaway guild, before anything touches the
-real one.
+**Also proven, once, by hand:** that the Discord client library is wired to its
+seam correctly — command registration reaching the platform, an interaction
+arriving as an invocation, a role actually appearing on and disappearing from a
+member. That is the Phase 6 manual smoke, and it ran against a real bot in a
+real server. It found three defects, the third being that
+`subject.requirements-met` was emitted by nothing at all, so the effector half
+of the product could not fire in any deployment. All three are fixed.
+DECISIONS 10.18.
+
+Earlier versions of this file called that smoke the single largest unknown
+going into deployment. That was wrong, and it was wrong because
+`docs/STATUS.md` contradicted itself — the Phase 6 row and narrowing 12 both
+said "done", while the Phase 10 row and a later paragraph still said
+"outstanding". Both halves of STATUS are corrected now.
+
+**What is genuinely unproven** is narrower: the smoke ran against a bot token
+that is being retired (#76), and it was one run in a throwaway guild rather
+than a rehearsal of the real estate. Nothing about the client library's wiring
+is in doubt; what has never been exercised is *this* estate's own guild, roles
+and permissions.
 
 ### Order of operations
 
