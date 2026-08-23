@@ -316,6 +316,14 @@ public final class Invariants {
                             continue; // linkage-mirrors-model reports this
                         }
                         for (CoreView.Identity identity : subject.get().identities()) {
+                            // Dedupe across the outer loop: every identity is
+                            // reachable from every other, so a subject of three
+                            // is described three times. The negation of this is
+                            // an EQUIVALENT mutant rather than a survivor --
+                            // with the graph fully connected, an identity
+                            // skipped on its first encounter is checked on its
+                            // second, and the complaints come out the same.
+                            // DECISIONS 10.44.
                             if (!checked.add(identity.ref())) {
                                 continue;
                             }
@@ -365,6 +373,14 @@ public final class Invariants {
 
     // --- plumbing ------------------------------------------------------------
 
+    /**
+     * Splits a {@code kind:id} reference.
+     *
+     * <p>The `<= 0` mutant of the `colon < 0` below is EQUIVALENT: a colon at
+     * position zero yields either an empty kind with the rest as the id, or the
+     * whole string as the kind with an empty id, and core matches neither to
+     * anything. Recorded so a sweep skips it. DECISIONS 10.44.
+     */
     private static String[] split(String ref) {
         int colon = ref.indexOf(':');
         return colon < 0

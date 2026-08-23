@@ -146,4 +146,53 @@ class RedeemThrottleTest {
                 "merely asking about an account created a record for it, so reading the"
                         + " throttle would fill it");
     }
+
+    @Test
+    @DisplayName("recording a guess expires the old ones first, or the cap freezes the record")
+    void recordingExpiresBeforeItCaps() {
+        // The per-account cap and the sliding window interact. Without expiring
+        // on the way in, a record that filled up hours ago is still "full", the
+        // new guess is dropped on the floor, and the account is neither counted
+        // nor blocked -- an attacker who trips the limit once is invisible from
+        // then on.
+        RedeemThrottle t = throttle();
+        for (int i = 0; i < 3; i++) {
+            t.recordGuess(REF, T0);
+        }
+
+        Instant later = T0.plus(t.window()).plusSeconds(1);
+        t.recordGuess(REF, later);
+
+        assertEquals(1, t.recentFailures(REF, later),
+                "the guess made after the window lapsed was not recorded, because the record"
+                        + " was still full of expired ones");
+    }
+
+    @Test
+    @DisplayName("asking for the count expires first, so a lapsed record reads as zero")
+    void countingExpiresFirst() {
+        RedeemThrottle t = throttle();
+        t.recordGuess(REF, T0);
+        assertEquals(1, t.recentFailures(REF, T0));
+
+        assertEquals(
+                0, t.recentFailures(REF, T0.plus(t.window()).plusSeconds(1)),
+                "a failure older than the window was still counted against the account");
+    }
+
+    @Test
+    @DisplayName("remembered() counts the accounts held, not zero")
+    void rememberedCountsWhatIsHeld() {
+        // The doctor reads this to report how much the throttle is holding.
+        // Answering zero unconditionally makes a throttle at capacity look
+        // idle, which is the one moment somebody would want the number.
+        RedeemThrottle t = throttle();
+        assertEquals(0, t.remembered());
+
+        t.recordGuess("kind-a:one", T0);
+        t.recordGuess("kind-a:two", T0);
+
+        assertEquals(2, t.remembered(),
+                "the throttle holds two accounts and reports holding none");
+    }
 }

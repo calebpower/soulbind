@@ -188,6 +188,14 @@ class SimulationTest {
         Simulation.Outcome outcome = Simulation.run(20260820L, world(), core, core, 300, 100);
 
         int accepted = outcome.actionsTaken() - outcome.refusals();
+        // A SMALL minority, not merely fewer. Most accepted actions are reads
+        // -- describe, decide -- and a counter that treated every acceptance as
+        // a link would still be "fewer than accepted" while being wrong about
+        // almost all of them.
+        assertTrue(outcome.linksMade() * 4 < accepted,
+                () -> "links (" + outcome.linksMade() + ") are not a small minority of the "
+                        + accepted + " accepted actions, so the counter is counting"
+                        + " acceptances rather than links");
         assertTrue(outcome.linksMade() < accepted,
                 () -> "every accepted action was counted as a link (" + outcome.linksMade()
                         + " of " + accepted + "), so the link count is really an acceptance"

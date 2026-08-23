@@ -144,6 +144,11 @@ public final class Runner {
         for (int i = 0; i < budget; i++) {
             long seed = source.getAsLong();
             tried.add(seed);
+            // Progress, deliberately on stdout rather than through a logger:
+            // a hunt is a long silence otherwise, and somebody watching one
+            // needs to see it moving. Deleting this line is a surviving mutant
+            // nothing kills, because no test captures stdout and building that
+            // machinery to assert one println is not worth it. DECISIONS 10.44.
             System.out.println("[sim] hunting seed " + seed);
             Simulation.Outcome outcome = run.apply(seed);
             if (!outcome.clean()) {
@@ -162,7 +167,11 @@ public final class Runner {
                 continue;
             }
             int equals = trimmed.indexOf('=');
-            if (equals < 0) {
+            // `<= 0`, not `< 0`. A line reading `=secret` has no name at all,
+            // and accepting it files a credential under the empty string --
+            // which then matches no actor, so the run is quietly one principal
+            // short and nothing says so. DECISIONS 10.44.
+            if (equals <= 0) {
                 throw new IllegalStateException(
                         "credential file line is not name=value: " + trimmed);
             }

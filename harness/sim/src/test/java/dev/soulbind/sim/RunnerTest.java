@@ -216,6 +216,41 @@ class RunnerTest {
     }
 
     @Test
+    @DisplayName("the two reserved names alone are not a usable cast")
+    void reservedNamesAloneAreRefused(@TempDir java.nio.file.Path dir) throws Exception {
+        // `size() <= 2`, and the boundary is the point: a file holding exactly
+        // admin and retired has both reserved credentials and no actors, so
+        // every action would be performed by nobody. The run would complete and
+        // report clean.
+        java.nio.file.Path file = dir.resolve("two.env");
+        java.nio.file.Files.writeString(file, "admin=a\nretired=b\n");
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class, () -> Runner.readCredentials(file));
+        assertTrue(thrown.getMessage().contains("no actor credentials"),
+                () -> "a file with the two reserved names and nobody to act was accepted, or "
+                        + "refused for the wrong reason: " + thrown.getMessage());
+
+        // One more and it is a cast.
+        java.nio.file.Path three = dir.resolve("three.env");
+        java.nio.file.Files.writeString(three, "admin=a\nretired=b\nalex=c\n");
+        assertEquals(3, Runner.readCredentials(three).size());
+    }
+
+    @Test
+    @DisplayName("a line with no name before the separator is refused")
+    void credentialWithNoName(@TempDir java.nio.file.Path dir) throws Exception {
+        // `=secret` has no name. Filing it under the empty string leaves a
+        // credential that matches no actor, so the run is one principal short
+        // and reports clean about a cast it never assembled.
+        java.nio.file.Path file = dir.resolve("noname.env");
+        java.nio.file.Files.writeString(file, "admin=a\nretired=b\nalex=c\n=orphan\n");
+
+        assertThrows(IllegalStateException.class, () -> Runner.readCredentials(file),
+                "a credential line with no name was accepted");
+    }
+
+    @Test
     @DisplayName("an equals sign inside the value is part of the value")
     void valueMayContainAnEquals() {
         // `indexOf` rather than a split: a credential is base64 and can end in
@@ -247,5 +282,48 @@ class RunnerTest {
         assertDoesNotThrow(
                 () -> Runner.hunt(() -> 1L, 1,
                         seed -> new Simulation.Outcome(seed, 1, 1, 0, List.of(), List.of())));
+    }
+
+    // --- the report a person reads --------------------------------------------
+
+    @Test
+    @DisplayName("the tally counts seeds that failed, and both kinds of failure count")
+    void reportTalliesBothFailureKinds() {
+        // `failed++` in two arms and one subtraction at the end. A seed that
+        // linked nothing is a HARNESS fault and a seed with violations is a
+        // PRODUCT fault, and both must come off the clean count -- otherwise
+        // "3 of 3 seeds clean" is printed above three paragraphs explaining
+        // what went wrong.
+        String report = Runner.report(
+                List.of(
+                        new Simulation.Outcome(1L, 400, 5, 10, List.of(), List.of()),
+                        new Simulation.Outcome(2L, 400, 0, 400, List.of(), List.of()),
+                        new Simulation.Outcome(3L, 400, 5, 10,
+                                List.of(new Checker.Violation("linkage", "gone", 12)),
+                                List.of())),
+                new FakeCore());
+
+        assertTrue(report.contains("1 of 3 seeds clean"),
+                "the tally disagrees with the failures printed above it:\n" + report);
+        assertTrue(report.contains("HARNESS FAULT"),
+                "the seed that linked nothing was not called out:\n" + report);
+        assertTrue(report.contains("promote this seed"),
+                "the seed that found a violation was not offered for promotion:\n" + report);
+        assertTrue(report.contains("linkage"),
+                "the promotion line does not name the invariant that fired:\n" + report);
+    }
+
+    @Test
+    @DisplayName("a run of nothing but clean seeds says so")
+    void reportOnAllClean() {
+        String report = Runner.report(
+                List.of(
+                        new Simulation.Outcome(1L, 400, 5, 10, List.of(), List.of()),
+                        new Simulation.Outcome(2L, 400, 7, 12, List.of(), List.of())),
+                new FakeCore());
+
+        assertTrue(report.contains("2 of 2 seeds clean"), report);
+        assertFalse(report.contains("HARNESS FAULT"), report);
+        assertFalse(report.contains("promote this seed"), report);
     }
 }

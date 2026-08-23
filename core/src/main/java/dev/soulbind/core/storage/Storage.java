@@ -103,7 +103,24 @@ public final class Storage implements AutoCloseable {
         return open(backend, jdbcUrl, user, password, false);
     }
 
-    private static Storage open(
+    /**
+     * Everything {@code open} decides before it opens anything.
+     *
+     * <p>Extracted so those decisions can be asserted without a live backend,
+     * because they could not be. Negating the conditionals below changes only
+     * how SQLite behaves under concurrent writers, so the sole witness was a
+     * racing concurrency test that noticed <b>sometimes</b>: across three
+     * mutation runs of an unchanged tree the same four mutants landed in
+     * SURVIVED, TIMED_OUT and KILLED in different combinations, and the whole
+     * of core's run-to-run movement was these lines. A guard that fires on a
+     * coin flip is not a guard, and a ratchet cannot hold a number that moves
+     * on its own. DECISIONS 10.46.
+     *
+     * <p>A {@code HikariConfig} is an inert value object until a pool is built
+     * from it, so a test reads these back directly -- no server, no connection,
+     * no race.
+     */
+    static HikariConfig poolConfig(
             Backend backend,
             String jdbcUrl,
             String user,
@@ -119,7 +136,6 @@ public final class Storage implements AutoCloseable {
         }
         cfg.setPoolName("soulbind-" + backend.configName());
 
-        ExecutorService writeExecutor;
         switch (backend) {
             case SQLITE -> {
                 // SQLite permits exactly one writer. A pool of them does not make
@@ -134,14 +150,6 @@ public final class Storage implements AutoCloseable {
                 cfg.addDataSourceProperty("journal_mode", "WAL");
                 cfg.addDataSourceProperty("busy_timeout", "5000");
                 cfg.addDataSourceProperty("foreign_keys", "true");
-                writeExecutor = serialiseWrites
-                        ? Executors.newSingleThreadExecutor(
-                                r -> {
-                                    Thread t = new Thread(r, "soulbind-sqlite-writer");
-                                    t.setDaemon(true);
-                                    return t;
-                                })
-                        : null;
             }
             case MARIADB -> {
                 cfg.setMaximumPoolSize(10);
@@ -161,12 +169,44 @@ public final class Storage implements AutoCloseable {
                 // alternative, and offering the choice would only let a
                 // deployment get it wrong.
                 cfg.addDataSourceProperty("connectionCollation", "utf8mb4_unicode_ci");
-                // No serialising executor: the backend handles concurrent writers,
-                // and forcing them through one thread would throw that away.
-                writeExecutor = null;
             }
             default -> throw new IllegalStateException("unhandled backend: " + backend);
         }
+        return cfg;
+    }
+
+    /**
+     * Whether writes are funnelled through a single thread.
+     *
+     * <p>True for SQLite when asked, and never for MariaDB -- which handles
+     * concurrent writers, and forcing them through one thread would throw that
+     * away. Stated as a decision rather than an assignment inside the switch, so
+     * that getting it wrong is a failing assertion rather than a race somebody
+     * has to lose in order to notice.
+     */
+    static boolean serialisesWrites(Backend backend, boolean serialiseWrites) {
+        return backend == Backend.SQLITE && serialiseWrites;
+    }
+
+    private static Storage open(
+            Backend backend,
+            String jdbcUrl,
+            String user,
+            String password,
+            boolean serialiseWrites) {
+        HikariConfig cfg = poolConfig(backend, jdbcUrl, user, password, serialiseWrites);
+
+        // Daemon, or a CLI that forgets to close hangs at exit rather than
+        // reporting anything -- which is how a one-line omission becomes a
+        // support question.
+        ExecutorService writeExecutor = serialisesWrites(backend, serialiseWrites)
+                ? Executors.newSingleThreadExecutor(
+                        r -> {
+                            Thread t = new Thread(r, "soulbind-sqlite-writer");
+                            t.setDaemon(true);
+                            return t;
+                        })
+                : null;
 
         HikariDataSource ds = new HikariDataSource(cfg);
         migrate(backend, ds);
@@ -212,9 +252,9 @@ public final class Storage implements AutoCloseable {
      * and it does <b>not</b> repair tables an earlier boot created latin1,
      * because only {@code CONVERT} does that and {@code CONVERT} is what cannot
      * be made to work. No such database exists.
-     */
-    /**
-     * Package-private, not private, and only so a test can be truthful.
+     *
+     * <p><b>Package-private, not private</b>, and only so a test can be
+     * truthful.
      *
      * <p>{@code UpgradePathTest} builds a database "the way an older release
      * would have" and then upgrades it. Its first version built that old
@@ -331,6 +371,19 @@ public final class Storage implements AutoCloseable {
 
     public Backend backend() {
         return backend;
+    }
+
+    /**
+     * Whether this store's writes go through the single serialising thread.
+     *
+     * <p>Package-private, and here because {@code serialisesWrites} deciding
+     * correctly is worth nothing if {@code open} then wires the answer up
+     * backwards -- and that wiring was observable only by racing a real SQLite
+     * database and hoping to lose. Reading the resulting store is deterministic;
+     * the race is not. DECISIONS 10.46.
+     */
+    boolean writesAreSerialised() {
+        return writeExecutor != null;
     }
 
     /**

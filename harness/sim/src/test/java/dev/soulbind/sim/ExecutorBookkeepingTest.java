@@ -242,6 +242,18 @@ class ExecutorBookkeepingTest {
         assertTrue(refusedModel.displayFor(CHAT).isEmpty(),
                 "a display core refused to accept was recorded as sent");
 
+        // And the case that must record: accepted, with a target named. Only
+        // asserting the two refusals leaves "records nothing, ever" passing.
+        World both = world();
+        ShadowModel bothModel = new ShadowModel();
+        Simulation.execute(
+                new Action(ActionKind.REDEEM_CODE, ALEX, "BCDFGHJK", CHAT),
+                new ScriptedDriver(CoreDriver.Result.ok(null)), both, bothModel);
+        assertEquals("alex-display", bothModel.displayFor(CHAT).orElse(null),
+                "an accepted redeem that named its target recorded no display, so the"
+                        + " invariant comparing what core shows against what was sent has"
+                        + " nothing to compare");
+
         World noTarget = world();
         ShadowModel noTargetModel = new ShadowModel();
         Simulation.execute(

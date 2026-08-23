@@ -316,5 +316,141 @@ class StorageColumnsTest {
                 RuntimeException.class,
                 () -> storage.identities().createSubject(CREATED),
                 "a closed store still served a write, so nothing was actually released");
+
+        // And a READ. Writes go through the executor and would fail on its
+        // shutdown alone; only a read proves the connection pool itself was
+        // closed. Without that, every open leaks a pool -- and on the backend
+        // with real connections, its file handles and sockets with it.
+        assertThrows(
+                RuntimeException.class,
+                () -> storage.identities().findIdentity("game", "player-1"),
+                "a closed store still served a read, so the connection pool is still open");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("SQLite runs in WAL, which is what lets a reader work while a writer writes")
+    void sqliteUsesWriteAheadLogging(Backend backend) {
+        // One `addDataSourceProperty` line, deletable with nothing failing.
+        // Without WAL, SQLite takes a whole-database lock for every write and
+        // the doctor, an audit export and a live connector cannot read while
+        // anything is being written -- which surfaces as SQLITE_BUSY under load
+        // rather than as a clear constraint.
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            storage.identities().createSubject(CREATED);
+
+            java.io.File[] siblings = tempDir.toFile().listFiles();
+            boolean walPresent = siblings != null && java.util.Arrays.stream(siblings)
+                    .anyMatch(f -> f.getName().endsWith("-wal"));
+
+            if (backend == Backend.SQLITE) {
+                assertTrue(walPresent,
+                        () -> "no write-ahead log beside the database, so SQLite is in its"
+                                + " default rollback-journal mode and every write locks out"
+                                + " every reader: "
+                                + java.util.Arrays.toString(siblings));
+            }
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("the write thread is a daemon, and it is gone once the store is closed")
+    void writeThreadIsADaemonAndIsReleased(Backend backend) {
+        // SQLite writes are serialised through one thread this class creates.
+        // Two things about it are load-bearing and neither was asserted: it must
+        // be a DAEMON, or a CLI that forgets to close hangs at exit instead of
+        // returning; and close() must shut it down, or a connector that opens a
+        // store per command accumulates one thread per command.
+        Storage storage = StorageBackends.open(backend, tempDir);
+        storage.identities().createSubject(CREATED);
+
+        java.util.List<Thread> writers = writeThreads();
+        if (!writers.isEmpty()) {
+            for (Thread writer : writers) {
+                assertTrue(writer.isDaemon(),
+                        () -> "the write thread '" + writer.getName() + "' is not a daemon,"
+                                + " so a process that does not close its store never exits");
+            }
+        }
+
+        storage.close();
+
+        // Shutdown is not instantaneous; the thread finishes its queue first.
+        // Waiting bounded rather than asserting immediately, because the claim
+        // is "released", not "released synchronously".
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!writeThreads().isEmpty() && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertTrue(writeThreads().isEmpty(),
+                () -> "a write thread survived close(), so every open leaks one: "
+                        + writeThreads().stream().map(Thread::getName).toList());
+    }
+
+    /** Live threads this class names for its serialised writer. */
+    private static java.util.List<Thread> writeThreads() {
+        return Thread.getAllStackTraces().keySet().stream()
+                .filter(Thread::isAlive)
+                .filter(t -> t.getName().contains("soulbind-") && t.getName().contains("writer"))
+                .toList();
+    }
+
+    // --- insert-then-check, and the failure it must NOT swallow ---------------
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("a write that failed for a reason other than a race is re-thrown")
+    void ensureExistsDoesNotSwallowRealFailures(Backend backend) {
+        // Jdbc.ensureExists inserts first and, if that throws, asks whether the
+        // row is there anyway -- because two connectors naming the same gate at
+        // once is a race with a desired end state, not an error.
+        //
+        // The check answering TRUE unconditionally turns every failed insert
+        // into a silent success. A gate that could not be written would be
+        // reported as written, and every later decision about it would be made
+        // against a row that does not exist.
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            assertThrows(
+                    RuntimeException.class,
+                    () -> storage.policy().gateSeen(null, "conn-1", null),
+                    "a gate that cannot be written was reported as written");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("naming the same gate twice is a race with a desired end state, not an error")
+    void ensureExistsToleratesTheRace(Backend backend) {
+        // The other half, and the reason the swallow exists at all: two
+        // connectors naming one gate is ordinary, and the second must not fail.
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            storage.policy().gateSeen("game.join", "conn-1", "the join gate");
+            storage.policy().gateSeen("game.join", "conn-2", null);
+
+            assertEquals(java.util.List.of("game.join"), storage.policy().gates());
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("rotating a credential reports whether it found the connector")
+    void rotateReportsWhetherItFoundAnything(Backend backend) {
+        // `executeUpdate() == 1`. Reporting true for a connector that is not
+        // there tells an operator their credential was replaced when nothing
+        // happened -- and the old credential, which is the one they were
+        // rotating away from, is still live.
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            var connector = storage.connectors().register(
+                    "proxy", "hash-1", java.util.Set.of(dev.soulbind.protocol.Capability.ENFORCEMENT_POINT));
+
+            assertTrue(storage.connectors().rotateCredential(connector.id(), "hash-2"),
+                    "rotating a connector that exists reported finding nothing");
+            assertFalse(
+                    storage.connectors().rotateCredential("no-such-connector", "hash-3"),
+                    "rotating a connector that does not exist reported success, so an operator"
+                            + " believes a credential was replaced when the old one is still"
+                            + " live");
+        }
     }
 }

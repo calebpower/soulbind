@@ -480,6 +480,65 @@ class CliTest {
                 "the report has no tally line: " + run.out());
     }
 
+    @Test
+    @DisplayName("binding :: warns as well as 0.0.0.0, because both mean every interface")
+    void wildcardBindOnIpv6() throws Exception {
+        // Both halves of `host.equals("0.0.0.0") || host.equals("::")`. Warning
+        // about one and not the other leaves the IPv6 wildcard silently
+        // exposed, which is the same deployment and the same risk.
+        Run run = invoke("doctor", "--config",
+                writeConfig(healthyConfig().replace("127.0.0.1", "::")).toString());
+
+        assertEquals(Doctor.EXIT_HEALTHY, run.exit(), run.out());
+        assertTrue(run.out().contains("every interface"),
+                "binding :: exposes the transport on every interface and nothing said so: "
+                        + run.out());
+    }
+
+    @Test
+    @DisplayName("a config file nobody else can read is reported as fine, not silently")
+    void permissionsOkIsReported() throws Exception {
+        // The OK finding, not only the WARN. A doctor silent about a healthy
+        // component leaves an operator unable to tell "checked and fine" from
+        // "not checked" -- and this is the check about a file that may hold the
+        // storage password.
+        Path config = writeConfig(healthyConfig());
+        Files.setPosixFilePermissions(
+                config, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+
+        assertTrue(invoke("doctor", "--config", config.toString()).out()
+                        .contains("is not world-readable"),
+                "the doctor said nothing about a config file whose permissions it had just"
+                        + " checked and found correct");
+
+        Files.setPosixFilePermissions(
+                config, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+
+        assertTrue(invoke("doctor", "--config", config.toString()).out()
+                        .contains("readable by any user"),
+                "a config file readable by every user on the machine drew no warning, and it"
+                        + " may hold the storage password");
+    }
+
+    @Test
+    @DisplayName("a storage user the backend DOES need, missing, is reported")
+    void missingStorageUserIsReported() throws Exception {
+        // The second half of examineUnusedSettings, and it fires only on a
+        // backend that takes credentials. On a backend that does not, this
+        // asserts the absence -- so the test says something either way rather
+        // than passing by not applying.
+        Backend backend = StorageBackends.any();
+        String out = invoke("doctor", "--config", writeConfig(healthyConfig()).toString()).out();
+
+        if (backend.usesCredentials()) {
+            assertTrue(out.contains("is not set, and the configured backend needs one"),
+                    "a backend needing a user was not told that none was set: " + out);
+        } else {
+            assertFalse(out.contains("backend needs one"),
+                    "a backend that needs no user was told to set one: " + out);
+        }
+    }
+
     // --- what registering tells the operator ----------------------------------
 
     @Test
@@ -507,6 +566,22 @@ class CliTest {
                         + out);
         assertTrue(out.contains("only time the credential is shown"),
                 "nothing warned that the credential cannot be recovered: " + out);
+
+        // The warning is three printlns and each is deletable on its own. All
+        // three, because the sentence only means anything whole: it says the
+        // plaintext no longer exists, that this is a property of the storage
+        // rather than a policy, and what to do instead.
+        assertTrue(out.contains("Only its hash is stored"), out);
+        assertTrue(out.contains("not by policy"),
+                "the warning no longer says WHY it cannot be recovered, which is the part that"
+                        + " stops somebody asking for it back: " + out);
+        assertTrue(out.contains("Losing it means registering again"),
+                "the warning does not say what to do if it is lost: " + out);
+
+        // And the blank lines that set the credential apart from the rest. It
+        // is the one line somebody has to copy.
+        assertEquals(3, out.split("\n\n").length,
+                "the credential is no longer set apart from the surrounding output: " + out);
     }
 
     @Test
@@ -637,11 +712,22 @@ class CliTest {
                         + " operation under the same capability table rather than a second"
                         + " management surface: " + usage);
 
-        // Blank lines between the entries. A wall of text is a usage screen
-        // people stop reading, and each separator is its own deletable
-        // println.
-        assertTrue(usage.split("\n\n").length >= 5,
-                "the usage runs the verbs together with no spacing: " + usage);
+        // EXACTLY the blocks, not "at least". Each separator is its own
+        // deletable println, and `>= 5` was satisfied by four of the five
+        // surviving -- a wall of text is a usage screen people stop reading,
+        // and the assertion has to notice one going missing.
+        assertEquals(6, usage.split("\n\n").length,
+                "the usage's spacing changed; each blank line between entries is deletable on"
+                        + " its own, so this counts them:\n" + usage);
+
+        // The closing paragraph runs across three printlns and says one thing:
+        // there is no second management surface. Any one of them can go and the
+        // sentence still half-reads.
+        assertTrue(usage.contains("Everything else an operator can do"), usage);
+        assertTrue(usage.contains("under the same capability table"), usage);
+        assertTrue(usage.contains("rules that drift from the first"),
+                "the last line of the closing paragraph is gone, so the sentence stops mid"
+                        + " explanation: " + usage);
     }
 
     @Test
@@ -665,8 +751,17 @@ class CliTest {
                 writeConfig("this is not toml at all [[[").toString());
 
         assertNotEquals(Doctor.EXIT_HEALTHY, run.exit());
-        assertFalse(run.out().isEmpty() && run.err().isEmpty(),
-                "an unparseable configuration was refused with no explanation anywhere");
+
+        // On STDERR specifically, and through a verb that writes nothing to
+        // stdout. `doctor` prints its findings either way, so asserting "some
+        // stream has something" passed with the error message deleted.
+        Run served = invoke("serve", "--config",
+                writeConfig("this is not toml at all [[[").toString());
+        assertNotEquals(Doctor.EXIT_HEALTHY, served.exit());
+        assertFalse(served.err().isBlank(),
+                "a configuration this build cannot parse was refused with nothing on stderr,"
+                        + " so the loader's explanation -- every problem at once -- was thrown"
+                        + " away");
     }
 
     @Test

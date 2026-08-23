@@ -270,6 +270,14 @@ public final class Simulation {
         return world.gates().isEmpty() ? "gate.unknown" : world.gates().get(0);
     }
 
+    /**
+     * Splits a {@code kind:id} reference.
+     *
+     * <p>The `<= 0` mutant of the `colon < 0` below is EQUIVALENT: a colon at
+     * position zero yields either an empty kind with the rest as the id, or the
+     * whole string as the kind with an empty id, and core matches neither to
+     * anything. Recorded so a sweep skips it. DECISIONS 10.44.
+     */
     private static String[] split(String ref) {
         if (ref == null) {
             return new String[] {"game", "nobody"};

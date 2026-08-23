@@ -7990,3 +7990,197 @@ The keying is not a wasted detour in one respect: it forced the question "are
 these two things comparable" to be answered with a measurement instead of a
 sentence, and the answer is now in the file where somebody would otherwise
 re-derive it from the same wrong hunch.
+
+### 10.44 — Finishing the tail, and two more defects in it
+
+Continuing #67, #69 and #78 rather than declaring them not worth it. Three real
+defects, and the rest is boundaries and equivalents recorded at the line.
+
+#### The defects
+
+**A credential line with no name was accepted.** `Runner.readCredentials`
+tested `equals < 0` for "not `name=value`", so `=secret` parsed as a credential
+filed under the empty string. It matches no actor, so the run assembles a cast
+one principal short and reports clean about work it never did. Now `<= 0`.
+
+**`whyNotMine` and its siblings** — recorded in 10.37; the same `< 0` against
+`<= 0` shape turned up again here, in two `split` helpers where it genuinely is
+equivalent, and the difference is worth stating: in `Runner` the two branches
+produce *different* behaviour and one of them is wrong; in `split` they produce
+two equally unmatchable references. One is a defect, one is a note.
+
+**A closed store still served reads.** `Storage.close()` shuts the write
+executor and closes the pool, and the test asserted only that a *write* failed
+afterwards — which the executor's shutdown alone produces. Only a read proves
+the pool itself closed, and without that every open leaks one.
+
+#### What was covered
+
+* **Foreign keys, WAL, and the write thread.** Three single lines in
+  `Storage.open` and `close`, each deletable with nothing failing. Without the
+  foreign-key line every constraint in the schema is decorative; without WAL,
+  SQLite locks out every reader for every write, surfacing as `SQLITE_BUSY`
+  under load rather than as a clear constraint; and the write thread must be a
+  daemon or a CLI that forgets to close hangs at exit.
+* **`ensureExists` must not swallow a real failure.** It inserts and, on
+  failure, asks whether the row is there anyway — because two connectors naming
+  one gate is a race with a desired end state. The check answering true
+  unconditionally turns every failed insert into a silent success.
+* **`rotateCredential` reports whether it found the connector.** Reporting true
+  for one that is not there tells an operator their credential was replaced
+  when the old one is still live.
+* **The throttle's expiry, both ways.** Expiring on the way *in* matters
+  because the per-account cap and the sliding window interact: without it a
+  record that filled hours ago is still "full", the new guess is dropped, and
+  an attacker who trips the limit once is invisible from then on.
+* **`subject.inspect` on an unproven identity.** Every wire path marks an
+  identity proven, so this is reachable only through the repository — which is
+  not a reason to leave it, because the column is nullable, `PolicyEngine`
+  reads `isVerified()`, and the page exists to answer which accounts still need
+  proving.
+* **The operator-facing text nobody had read back**: the usage screen's exact
+  spacing and closing paragraph, and the three lines of the credential warning
+  that say the plaintext no longer exists, why, and what to do instead.
+
+#### Recorded as unkillable rather than chased
+
+* `Invariants`' dedupe across the outer loop. Every identity is reachable from
+  every other, so a subject of three is described three times; an identity
+  skipped on its first encounter is checked on its second and the complaints
+  come out the same.
+* Both `split` helpers' colon boundary.
+* `Runner.hunt`'s progress `println`. A hunt is a long silence otherwise, and
+  building stdout capture to assert one line is not worth it.
+* `Storage.open`'s username and password branches, which only a backend taking
+  credentials can distinguish — and the ratchet deliberately runs without one.
+
+### 10.45 — The provenance columns, measured rather than lumped together
+
+Five columns were written and never read. Listed as one item, they are three
+different situations, and the difference decides what to do with each.
+
+**`rule.updated_via`, `policy_override.created_by`, `runtime_config.updated_via`
+duplicate an audit row written beside them.** `override.set` calls
+`addOverride(override, now, "connector:" + id)` and, on the next statement,
+appends an `override.set` audit entry naming the same actor; `rule.changed` is
+the same shape. So the column is not the only record of who did it, and
+dropping it loses nothing an operator cannot get from `audit.query`. What it
+buys is the *current* answer without scanning a log that is designed to be
+prunable — cheap, already written, and the reason to keep it is that reason and
+not "provenance", which the audit trail already provides.
+
+**`gate.registered_by` is the only record of which connector first named a
+gate.** `gateSeen` is called on the `decide` hot path and deliberately appends
+no audit row, so unlike the three above there is no second copy. Dropping this
+one *would* lose information. It is unread today only because `gate.list` is
+`SELECT name FROM gate ORDER BY name`.
+
+**`gate.description` is never written at all.** Both production call sites --
+`CoreHandlers` on the `decide` path and on `policy.set` -- pass `null`, and no
+wire message carries a description for a connector to supply. It is not a
+column written and never read; it is a column, a repository parameter and an
+interface signature that nothing can populate. Only the tests pass a non-null
+value, which is why the column looked live.
+
+That last one is the finding worth having: a summary that said "written and
+never read" would have had somebody go looking for the write.
+
+Which of the three situations gets exposed, kept quietly, or dropped is the
+owner's call and is recorded in STATUS under the items needing them. The
+analysis is not, and it is here so the decision is made on this rather than on
+the original one-line framing.
+
+### 10.46 — The four mutants that changed status on their own
+
+Tightening `core`'s baseline row after the tail work turned up a number that
+would not hold still. Three full runs of an unchanged tree:
+
+| Run | KILLED | SURVIVED | NO_COVERAGE | TIMED_OUT |
+|---|---|---|---|---|
+| A | 821 | 47 | 117 | 7 |
+| B | 825 | 43 | 117 | 7 |
+| C | 819 | 46 | 117 | 10 |
+
+Diffing survivor identities rather than counts -- which is the only way to see
+this -- every one of the mutants that moved was in `Storage.open`, and nowhere
+else in the module moved at all: the `user != null` and `password != null`
+branches, the SQLite pool size, and the write-executor ternary.
+
+**Why those four.** Each one changes only how SQLite behaves under concurrent
+writers. A pool of four where one was meant, or no serialising writer at all,
+produces `SQLITE_BUSY` *if the race goes the wrong way inside the window
+`StorageConcurrencyContractTest` gives it* -- and otherwise produces nothing,
+or hangs on the five-second `busy_timeout` and lands in TIMED_OUT. So the sole
+witness to four load-bearing decisions was a race, and its verdict was
+effectively a coin flip.
+
+**Why that mattered more than the count.** The baseline header already warns
+about movement between SURVIVED and TIMED_OUT and calls it timing noise. This
+was not that: A and B have identical TIMED_OUT counts and still differ by four.
+Encoding either number would have given the ratchet something it cannot
+reproduce -- a guard that fires on a coin flip reads as a guard, which is worse
+than not having one. Raising the row to the worst observed value would have
+been the same mistake wearing a safer hat: it buys stability by making the
+guard blind to a genuine four-mutant regression.
+
+**The fix is the seam, not the number.** `Storage.open` now takes its decisions
+in `poolConfig` and `serialisesWrites`, both static and both returning
+something inert -- a `HikariConfig` is a value object until a pool is built
+from it. `PoolConfigurationTest` reads them back directly: no server, no
+connection, no race, and no backend this workstation does not have. Fourteen
+mutants of those decisions were confirmed killed by hand, including both
+credential branches.
+
+That last part retires a claim made one entry earlier. 10.44 recorded
+`Storage.open`'s username and password branches as unkillable because "only a
+backend taking credentials can distinguish them". That was wrong, and wrong in
+a way worth naming: the *connection* needs a backend, but the *decision* --
+whether a credential is passed through at all -- is a pure function of its
+arguments, and was only entangled with a live server because it had never been
+separated from one. "Untestable without X" is worth re-reading as "not yet
+separated from X" every time it is written down.
+
+`StorageConcurrencyContractTest` stays exactly as it was. It tests something
+these do not -- that the serialisation actually prevents the contention -- and
+the point here is that it should not have been the only thing that did.
+
+**One seam was not enough, and the second is the interesting one.** With the
+decisions extracted, two more runs gave 44 and 42, and the mover was
+`open`'s ternary -- the line that *applies* `serialisesWrites`. Deciding
+correctly is worth nothing if `open` then wires the answer up backwards, and
+that wiring was still observable only by racing a real database and hoping to
+lose. `Storage.writesAreSerialised()` reads it off the built store instead, and
+the assertion covers both directions: a store that quietly serialises when
+`openWithoutWriteSerialisation` was called would make every test that relies on
+reaching the races vacuous.
+
+The general shape, since it caught the same class of thing twice in one method:
+extracting a decision leaves a second, smaller decision behind -- whether the
+extracted answer is used. That one is usually one accessor away from being
+deterministic too.
+
+**The last mover was the same thing a third time, in another file.**
+`LinkingService.redeem`'s ALREADY_REDEEMED return kept changing status, and the
+first reading of it was wrong: `secondRedeemRefused` looked like a
+deterministic witness, so the movement was written off as PIT's coverage
+attribution being imprecise. Applying the mutant by hand and running the whole
+of `core` three times settled it -- **survived every time**. `secondRedeemRefused`
+is answered by the friendly pre-check further up, which finds a code already
+marked redeemed. The line PIT was mutating is the *other* one: the atomic claim
+losing, which happens only when a second redeem gets past the pre-check before
+the first commits. `oneRacerWins` reaches it when it happens to hit that window
+and not otherwise.
+
+`LosesTheClaim` constructs that state instead of racing for it -- a repository
+that delegates everything and returns false from `claim` alone, which is
+exactly what a lost race leaves behind. The test also asserts that nothing was
+written on the way past, because everything before the claim ran: a loser that
+half-linked an account it was refused would be a worse defect than the null.
+
+Three instances in one sitting, in two files, is enough to call it a pattern
+rather than a coincidence. **A branch whose only witness is a race has no
+witness; it has a coin.** It reads as covered, it counts as covered, and the
+mutation report cannot tell you otherwise because the report itself is what
+keeps changing. The tell is a mutant whose status moves without the tree
+moving, and the fix has been the same every time: construct the state the race
+was being used to produce.

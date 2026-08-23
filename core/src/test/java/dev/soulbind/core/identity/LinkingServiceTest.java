@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.soulbind.core.audit.AuditQuery;
 import dev.soulbind.core.events.EventEmitter;
 import dev.soulbind.core.storage.Backend;
+import dev.soulbind.core.storage.LinkCodeRepository;
 import dev.soulbind.core.storage.Storage;
 import dev.soulbind.core.storage.StorageBackends;
 import java.nio.file.Path;
@@ -374,6 +375,78 @@ class LinkingServiceTest {
                     2, graph.size(),
                     () -> "the graph read back holds " + graph.size() + " identities, so more "
                             + "than one redeem took effect");
+        }
+    }
+
+    /**
+     * A repository that reports the code as live and then refuses the claim.
+     *
+     * <p>Exactly the state a lost race leaves behind: the pre-check reads a
+     * code nobody has redeemed, and by the time the atomic claim runs somebody
+     * has. Constructed rather than raced, because racing for it is unreliable
+     * -- {@code oneRacerWins} reaches this branch only when a loser gets past
+     * the pre-check before the winner commits, which is a window it does not
+     * always hit. That made this the last mutant in {@code core} whose status
+     * moved between runs of an unchanged tree, and the reason is the same one
+     * {@code Storage.open} had. DECISIONS 10.46.
+     */
+    private record LosesTheClaim(LinkCodeRepository delegate) implements LinkCodeRepository {
+        @Override
+        public void issue(LinkCodeRecord code) {
+            delegate.issue(code);
+        }
+
+        @Override
+        public java.util.Optional<LinkCodeRecord> find(String normalisedCode) {
+            return delegate.find(normalisedCode);
+        }
+
+        @Override
+        public boolean claim(String normalisedCode, String redeemedByConnector, Instant at) {
+            return false;
+        }
+
+        @Override
+        public int purgeExpired(Instant before) {
+            return delegate.purgeExpired(before);
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("losing the atomic claim is refused as already-redeemed, not returned as null")
+    void losingTheClaimIsRefused(Backend backend) {
+        try (Fixture f = fixture(backend)) {
+            LinkCodeRecord code = f.linking().issue("conn-a", "kind-a", "acct-1", null);
+
+            MovableClock clock = new MovableClock();
+            LinkingService racingLoser = new LinkingService(
+                    new EventEmitter(f.storage().events(), clock),
+                    f.storage().identities(),
+                    new LosesTheClaim(f.storage().linkCodes()),
+                    f.storage().platformKinds(),
+                    f.storage().audit(),
+                    new dev.soulbind.core.policy.GateEvaluator(
+                            f.storage().identities(), f.storage().policy(), clock),
+                    clock,
+                    TTL);
+
+            LinkingService.Result.Denied denied = assertInstanceOf(
+                    LinkingService.Result.Denied.class,
+                    racingLoser.redeem("conn-b", code.code(), "kind-b", "acct-2", null),
+                    "the loser of the atomic claim must get an answer; a null here is a "
+                            + "NullPointerException in whichever connector asked");
+            assertEquals(
+                    LinkingService.Refusal.ALREADY_REDEEMED,
+                    denied.refusal(),
+                    "a loser must be told the code was used, not sent to fix something else");
+
+            // And nothing was written on the way past. The pre-check passed, so
+            // everything before the claim ran; if any of it committed, the loser
+            // has half-linked an account it was refused.
+            assertTrue(
+                    f.linking().graphOf("kind-b", "acct-2").isEmpty(),
+                    "a refused redeem must leave no identity behind");
         }
     }
 

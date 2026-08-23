@@ -334,4 +334,39 @@ class OracleSelfTest {
                         + " periodically during a simulation, so a checker this slow gets run"
                         + " less often and stops being periodic.");
     }
+
+    @Test
+    @DisplayName("a mangled display is quoted with its code points, so the difference is visible")
+    void mangledTextIsShownByCodePoint() {
+        // The whole point of `textSurvivesTheRoundTrip` failing usefully. Two
+        // strings that differ only in an astral-plane character look identical
+        // in a terminal; printing "Alex 😀🤖" against "Alex " tells nobody
+        // anything. The complaint has to carry the code points.
+        ShadowModel model = linkedModel();
+        model.displaySent(GAME, "Alex \uD83D\uDE00");
+
+        FakeCore core = new FakeCore().linked(GAME, CHAT).displays(GAME, "Alex ");
+
+        List<String> complaints =
+                check(Invariants.textSurvivesTheRoundTrip(), model, core);
+
+        assertFalse(complaints.isEmpty(), "a truncated display was not noticed");
+        assertTrue(complaints.stream().anyMatch(c -> c.contains("U+1F600")),
+                () -> "the complaint does not show the code points, so the two strings look"
+                        + " the same to whoever reads it: " + complaints);
+    }
+
+    @Test
+    @DisplayName("a display that survived intact draws no complaint")
+    void intactTextIsSilent() {
+        // The control for the above. An invariant that fires on every display
+        // catches every mangling and is worth nothing.
+        ShadowModel model = linkedModel();
+        model.displaySent(GAME, "Alex \uD83D\uDE00");
+
+        FakeCore core = new FakeCore().linked(GAME, CHAT)
+                .displays(GAME, "Alex \uD83D\uDE00");
+
+        assertEquals(List.of(), check(Invariants.textSurvivesTheRoundTrip(), model, core));
+    }
 }

@@ -54,6 +54,20 @@ final class FakeCore implements CoreView {
         return this;
     }
 
+    private final Map<String, String> displays = new LinkedHashMap<>();
+
+    /**
+     * What core reports as an identity's display name.
+     *
+     * <p>Null by default, which the text invariant reads as "core has nothing
+     * to compare" and skips. Scripting one is how a test asks whether a
+     * mangled round trip is noticed.
+     */
+    FakeCore displays(String ref, String display) {
+        displays.put(ref, display);
+        return this;
+    }
+
     /** Appends an audit row with the next sequence number. */
     FakeCore audited(String action) {
         audit.add(new AuditRow(nextSequence++, "connector:a", action, "subject-1"));
@@ -109,7 +123,8 @@ final class FakeCore implements CoreView {
         for (String member : group) {
             int colon = member.indexOf(':');
             identities.add(new Identity(
-                    member.substring(0, colon), member.substring(colon + 1), true, null));
+                    member.substring(0, colon), member.substring(colon + 1), true,
+                    displays.get(member)));
         }
         return Optional.of(new Subject(subjectIds.get(ref), identities));
     }

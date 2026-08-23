@@ -46,19 +46,19 @@ the first battery green with it in, `reaper exit=0` on both storage axes.
 
 | Module | Killed | Survivors | Uncovered |
 |---|---|---|---|
-| `core` | 68% → **79%** | 131 → **78** | 173 → **121** |
+| `core` | 68% → **84%** | 131 → **42** | 173 → **113** |
 | `connector-discord` | 48% → **76%** | 28 → **1** | 114 → 71 |
 | `connector-velocity` | 63% → **77%** | 16 → **3** | 63 → 47 |
 | `connector-plan` | 70% → **92%** | 10 → **1** | 20 → **7** |
-| `sim` | 53% → **71%** | 69 → **15** | 79 → 75 |
+| `sim` | 53% → **74%** | 69 → **6** | 79 → 74 |
 | `config` | 88% → **95%** | 6 → **3** | 6 → **2** |
 | `connector-sdk` | 88% → **90%** | 3 → **2** | 9 → 8 |
 | `policy` | 98% | 2 | 0 |
 | `protocol` | 98% | 1 | 0 |
 
-Survivors across the tree went from roughly 250 to **106**, and a growing share
+Survivors across the tree went from roughly 250 to **61**, and a growing share
 of what remains is equivalent mutants recorded at the line rather than gaps.
-DECISIONS 10.28 through 10.43.
+DECISIONS 10.28 through 10.45.
 
 **`connector-discord` swept in Phase 10: 48% to 76%, and test strength 82% to
 99%** — 28 survivors to one equivalent mutant, reasoned about at the line so a
@@ -362,7 +362,31 @@ budget would be the easy mistake.
 
 ## Outstanding, and needing the owner
 
-Two items in the whole build cannot be done from here.
+Two items in the whole build cannot be done from here, and two more are
+decisions rather than blockers.
+
+**The provenance columns.** Five columns are written and no query selects them,
+and they are three different situations rather than one. `rule.updated_via`,
+`policy_override.created_by` and `runtime_config.updated_via` each duplicate an
+audit row written on the next statement, so dropping them loses nothing
+`audit.query` cannot answer -- what they buy is the last-writer answer without
+scanning a log designed to be prunable. `gate.registered_by` has no second copy:
+`gateSeen` runs on the `decide` hot path and appends no audit row, so it is the
+only record of which connector first named a gate, and `gate.list` is
+`SELECT name FROM gate ORDER BY name`. `gate.description` is not written at
+all -- both production call sites pass `null` and no wire message carries a
+description, so the column, the repository parameter and the interface
+signature are unreachable from any caller but a test. Expose, keep, or drop is
+the owner's call per column; the measurement is in `DECISIONS.md` 10.45.
+
+**Release mechanics.** Nothing is tagged and nothing is published. The version
+is `0.1.0-SNAPSHOT` in exactly one place -- `soulbind.java-common.gradle.kts`
+-- so every Java module moves together and there is no second copy to drift.
+`connector-flarum/composer.json` deliberately carries no `version`, which is
+correct for a Composer package installed from a VCS tag and wrong only if the
+extension is ever shipped as a zip. There is no CHANGELOG. What to tag, whether
+to publish, and to where, is the owner's call; nothing in the tree blocks it,
+and tagging is not something this session does without being asked each time.
 
 **`ext-xmlwriter` for PHP.** `composer install` in `connector-flarum` fails:
 PHPUnit 11 requires `ext-xmlwriter`, and this PHP 8.4.24 does not have it. The
@@ -778,6 +802,77 @@ recorded LuckPerms file as its control and seven mutants of it. DECISIONS 10.27.
 Overrides now emit gate transitions on both set and remove; `override.remove`
 exists at all for the first time; and an override that *expires* is deliberately
 excluded from what effectors are told, for the reason grace already is.
+
+### The mutation tail — closed as far as the fixed configuration allows
+
+`core` 131 survivors to **47**, `sim` 69 to **6**. Three real defects came out
+of the last of it, all of which report success while doing less than they claim:
+
+- **A credential line with no name was accepted.** `Runner.readCredentials`
+  tested `equals < 0`, so `=secret` parsed as a credential filed under the
+  empty string, matching no actor. The run assembles a cast one principal short
+  and reports clean about work it never did.
+- **A closed store still served reads.** `Storage.close()` shuts the write
+  executor and closes the pool; the only test asserted a *write* failed
+  afterwards, which the executor's shutdown alone produces. Nothing proved the
+  pool closed, so every open leaked one.
+- **`subject.inspect` could report an unproven identity as proven.** Reachable
+  only through the repository, because every wire path marks an identity
+  proven — which is not a reason to leave it: the column is nullable,
+  `PolicyEngine` reads `isVerified()`, and the page exists to answer which
+  accounts still need proving.
+
+Three single lines in `Storage` were each deletable with nothing failing:
+foreign keys, without which every constraint in the schema is decorative; WAL,
+without which SQLite locks out every reader for every write; and the write
+thread's daemon flag, without which a CLI that forgets to close hangs at exit.
+
+What remains is recorded at the line as equivalent or unkillable rather than
+chased. DECISIONS 10.44.
+
+**And then the count would not hold still.** Tightening `core`'s baseline row
+gave 47, 43 and 46 survivors across three runs of an unchanged tree, with
+TIMED_OUT at 7, 7 and 10 — so not the SURVIVED/TIMED_OUT drift the baseline
+header already warns about. Diffing mutant *identities* rather than counts,
+which is the only way to see it, every mutant that moved was in `Storage.open`
+and nothing else in the module moved at all: the two credential branches, the
+SQLite pool size, and the write-executor ternary. Each changes only how SQLite
+behaves under concurrent writers, so the sole witness to four load-bearing
+decisions was a race, and its verdict was a coin flip.
+
+The fix is a seam rather than a number. `Storage.open` now takes those
+decisions in `poolConfig` and `serialisesWrites`, both static and both
+returning something inert — a `HikariConfig` is a value object until a pool is
+built from it — and `PoolConfigurationTest` reads them back with no server, no
+connection and no race. Fourteen mutants confirmed killed by hand.
+
+One seam was not enough. Two further runs gave 44 and 42, and the mover was
+`open`'s ternary — the line that *applies* the decision. Deciding correctly is
+worth nothing if `open` wires the answer up backwards, and that was still only
+observable by racing a real database and hoping to lose;
+`Storage.writesAreSerialised()` reads it off the built store instead. The shape
+generalises: extracting a decision leaves a smaller one behind — whether the
+extracted answer is used — and that one is usually an accessor away from being
+deterministic too.
+
+That retires a claim made one entry earlier: 10.44 recorded those credential
+branches as needing "a backend taking credentials" to distinguish. The
+*connection* needs one; the *decision* is a pure function of its arguments, and
+was entangled with a live server only because nobody had separated them.
+
+A third instance turned up in another file. `LinkingService.redeem`'s
+already-redeemed return kept changing status; applying the mutant by hand and
+running the whole of `core` three times showed it **surviving every time**. The
+deterministic-looking test that appeared to cover it is answered by a friendly
+pre-check further up — the line PIT mutates is the atomic claim losing, which
+happens only when a second redeem gets past that pre-check before the first
+commits. `LosesTheClaim` constructs that state instead of racing for it.
+
+Three instances in one sitting, in two files, is a pattern rather than a
+coincidence: **a branch whose only witness is a race has no witness, it has a
+coin.** It reads as covered and counts as covered, and the mutation report
+cannot say otherwise because the report is the thing that keeps changing. The
+tell is a mutant whose status moves without the tree moving. DECISIONS 10.46.
 
 ## Narrowing in force from 10.26
 

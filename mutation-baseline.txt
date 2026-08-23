@@ -35,6 +35,15 @@
 # stated in .reaper.toml at the invocation. Two identical tables drift, and
 # drift makes the guard protect less without saying so.
 #
+# WHEN A ROW MOVES, DIFF THE MUTANT IDENTITIES, NOT THE COUNTS. Counts say
+# something changed; only identities say what, and the answer has twice been
+# "one method, and nothing else in the module". Three runs of an unchanged tree
+# gave `core` 47, 43 and 46 survivors with TIMED_OUT at 7, 7 and 10 -- so not
+# the timing noise described above -- and every mutant that moved was in
+# Storage.open, whose decisions were then only observable through a race. The
+# fix was a seam, not a number: a row raised to the worst observed value buys
+# stability by making the guard blind. DECISIONS 10.46.
+#
 # ONE FIXED CONFIGURATION is what keeps that true: the fuzz tier excluded, no
 # MariaDB, one Gradle command in the manifest. Change any of those and the
 # numbers move for a reason that is not a regression.
@@ -45,7 +54,10 @@
 # that matters about it is being readable in a diff. Reading it also needs no
 # parser, and build-logic ships no dependencies.
 #
-# Recorded 2026-08-21, after DECISIONS 10.28 and 10.29.
+# Recorded 2026-08-21, after DECISIONS 10.28 and 10.29. The `core` row was
+# re-measured 2026-08-23 after 10.46, and set from three consecutive runs whose
+# survivor sets were identical -- not from one sample, which is what produced
+# the wrong answer the first three times.
 
 # module              total killed surv nocov  t/o
 config                  99     94    3     2    0
@@ -53,7 +65,7 @@ connector-discord      303    231    1    71    0
 connector-plan         102     94    1     7    0
 connector-sdk          104     94    2     8    0
 connector-velocity     214    164    3    47    0
-core                   992    785   78   121    8
+core                   998    836   42   113    7
 policy                  84     82    2     0    0
 protocol                98     96    1     0    1
-sim                    312    222   15    75    0
+sim                    312    232    6    74    0

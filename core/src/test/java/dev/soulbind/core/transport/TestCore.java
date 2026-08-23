@@ -57,6 +57,17 @@ final class TestCore implements AutoCloseable {
     final String credential;
     final ConnectorRecord connector;
 
+    /**
+     * The redeem throttle this core is using.
+     *
+     * <p>Exposed so a test can read what a handler did to it. The clearing of
+     * an account's failures on a successful redeem is a handler decision with
+     * no other observable effect -- somebody who mistypes twice and then gets
+     * it right must not stay counted as guessing -- and there was no way to
+     * assert it from outside.
+     */
+    final dev.soulbind.core.identity.RedeemThrottle throttle;
+
     private final HttpClient http = HttpClient.newHttpClient();
 
     TestCore(Backend backend, Path tempDir, Set<Capability> capabilities, Clock clock) {
@@ -66,6 +77,7 @@ final class TestCore implements AutoCloseable {
         this.credential = minted.plaintext();
         this.connector = storage.connectors()
                 .register("test-connector", minted.hash(), capabilities);
+        this.throttle = new dev.soulbind.core.identity.RedeemThrottle();
 
         this.codec = new Codec();
         Authenticator authenticator = new Authenticator(storage.connectors());
@@ -90,7 +102,7 @@ final class TestCore implements AutoCloseable {
                                 Duration.ofMinutes(10)),
                         new dev.soulbind.core.policy.GateEvaluator(
                                 storage.identities(), storage.policy(), clock),
-                        new dev.soulbind.core.identity.RedeemThrottle(),
+                        this.throttle,
                         codec,
                         clock,
                         (int) window.toSeconds()));
