@@ -930,6 +930,13 @@ control, an absent database, and a database under continuous write, verified
 green against the fix and failing against the previous fingerprint with run
 31's exact wrong verdict. DECISIONS 10.48.
 
+**Run 32 is green with it in**, `reaper exit=0`: both storage axes, every stage,
+the install gate, all nine ratchet rows, and the self-test running as a stage of
+its own. It is also the first run to exercise the MariaDB axis since the gate
+description landed — run 31 died at the sqlite `migrate` stage, so the second
+backend never ran at all that session, and 10.47 added an `UPDATE` no workstation
+test can reach.
+
 ## Narrowing in force from 10.26
 
 An override carrying an `expiresAt` is not counted by
