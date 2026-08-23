@@ -8242,3 +8242,71 @@ is the case an operator would most want to see.
 
 Ten mutants confirmed killed by hand, including both halves of the hazard: the
 guard removed (so `decide` erases) and the update removed (so nothing lands).
+
+### 10.48 — The migrate check was deciding by coin flip
+
+Run 31 reported `MIGRATIONS ARE NOT IDEMPOTENT on sqlite` against a commit that
+touched neither migrations nor the harness. It was right that the database
+changed and wrong about what changed it.
+
+**What the fingerprint compares.** `MigrationFingerprint` dumps Flyway's
+history, the schema, row counts, and -- for every table at or under 200 rows --
+the row **contents**. That last part is deliberate and well argued in the file:
+a repeatable migration or an `afterMigrate` callback that rewrote operational
+rows would otherwise be invisible, and an earlier version that dumped a
+hand-written list of two sequence tables missed exactly that.
+
+**What nobody noticed.** The check runs against a LIVE deployment, on purpose --
+"a database that has already been migrated AND used, which is the state the
+stack leaves". Core is still serving while it runs, and connectors are still
+draining the event outbox, which moves `event_cursor.position` and adds
+`event_outbox` rows. So the two fingerprints, taken about three seconds apart,
+were being compared across a window in which the application was writing.
+
+The diff proves it without ambiguity: the only difference was
+`event_cursor.position` 4 → 7, with `updated_at` five seconds later than the
+first sample. Flyway does not write `event_cursor`. The drain does.
+
+**The verdict was a race, and had been for fifteen sessions.** It passed every
+time the drain happened to be idle for three seconds, which was every time
+until it was not. That is the pattern 10.46 named one entry earlier, arriving
+from the opposite direction: there a race produced false passes, here it
+produced a false failure. **A check whose answer is decided by a race is not a
+check**, whichever way it happens to land.
+
+**The fix does not reduce what is compared**, because what is compared is
+right. Two changes, both about establishing that the question can be asked:
+
+* **Quiesce first.** Sample until two consecutive fingerprints agree, up to a
+  bound. That is the database holding still, observed rather than assumed, and
+  it needs no process management -- an earlier plan to stop core mid-battery
+  would have introduced a restart the battery then depended on.
+* **A distinct verdict.** Exit 4 means "the database would not hold still", and
+  is reported as *not* an idempotence failure. On the failure path one further
+  sample is taken: a database that has moved again since `after` was never
+  quiescent, and blaming the migration for that sends whoever reads it to
+  Flyway for a row Flyway cannot write. The script already had this vocabulary
+  -- statuses 1, 2 and 3 exist because the first session run reported "not a
+  no-op" when nothing had been migrated at all. This is the fourth thing that
+  was being reported as the first.
+
+**The test that would have caught it** is `mutation/migrate-selftest.sh`, built
+the way `group-selftest.sh` is: a control that must pass, and a case that must
+fail against the code being replaced. Three cases -- a settled database reads
+as idempotent, an absent one reads as absent, and a database under continuous
+write reads as unquiescent rather than as non-idempotent. `Churn.java` supplies
+the writing, through `Storage` rather than raw SQL so it holds the database the
+way the server does. The busy case is checked to be genuinely busy before the
+fingerprint runs: a writer that failed to start would leave the database
+quiescent, the case would pass for the wrong reason, and the regression it
+exists to catch would walk straight through it. That is not hypothetical -- the
+first version of the writer did not compile, the case reported success, and the
+success meant nothing.
+
+Verified in both directions: green against the fix, and against
+`HEAD~`'s fingerprint it fails with run 31's exact wrong verdict.
+
+**Where it runs.** After the sqlite full-stack tier rather than beside the other
+self-tests, because it needs core installed and the checksum-pinned JDK in the
+cache, and the tier's `up` stage is what puts both there. The guest ships no
+toolchains.

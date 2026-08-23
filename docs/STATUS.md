@@ -901,6 +901,35 @@ row written on the next statement, and two are `registered_by` on `gate` and
 `platform_kind`, which have no second copy because neither registration path
 writes an audit row. DECISIONS 10.45.
 
+### The migrate check was deciding by coin flip — fixed
+
+Run 31 reported `MIGRATIONS ARE NOT IDEMPOTENT on sqlite` against a commit that
+touched neither migrations nor the harness. It was right that the database
+changed and wrong about what changed it: the only difference was
+`event_cursor.position` 4 → 7, with `updated_at` five seconds after the first
+sample. Flyway does not write `event_cursor`. The event drain does.
+
+The check runs against a live deployment on purpose, and fingerprints the row
+contents of every table under 200 rows — also on purpose, since a repeatable
+migration that rewrote operational rows would otherwise be invisible. Nobody
+had noticed the consequence: the two fingerprints are taken about three seconds
+apart while core is serving, so the verdict depended on whether the drain
+happened to pause. It passed for fifteen sessions because it always did, until
+it did not. That is 10.46's pattern arriving from the other direction — there a
+race produced false passes, here a false failure.
+
+The fix reduces nothing that is compared. The check now samples until two
+consecutive fingerprints agree before it starts, takes one more sample on the
+failure path, and reports **exit 4 — "would not hold still"** as explicitly not
+an idempotence failure. The script already had this vocabulary: statuses 1, 2
+and 3 exist because the first session run reported "not a no-op" when nothing
+had been migrated at all.
+
+`mutation/migrate-selftest.sh` is the test that would have caught it — a
+control, an absent database, and a database under continuous write, verified
+green against the fix and failing against the previous fingerprint with run
+31's exact wrong verdict. DECISIONS 10.48.
+
 ## Narrowing in force from 10.26
 
 An override carrying an `expiresAt` is not counted by

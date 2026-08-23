@@ -500,6 +500,25 @@ cp -r core/build/test-results/. out/test-results/ 2>/dev/null || {
 echo "run: full-stack tier (core on sqlite)"
 SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys sim groups t10 fuzz down
 
+# The migrate stage's own control and mutants.
+#
+# AFTER the tier, not before, and that is the whole reason it sits here rather
+# than beside the other self-tests two hundred lines up: it needs core installed
+# and the checksum-pinned JDK in the cache, and the tier's up stage is what puts
+# both there. The guest ships no toolchains, so running it earlier would resolve
+# a `java` that is not present at all.
+#
+# It earns its place the same way group-selftest.sh does -- by having a CONTROL,
+# and a case that fails against the code it replaced. The migrate stage compares
+# two fingerprints of a LIVE database seconds apart, so for fifteen sessions its
+# verdict depended on whether the event drain happened to pause. Run 31 lost
+# that race and reported MIGRATIONS ARE NOT IDEMPOTENT for a moved event_cursor
+# row, which Flyway cannot write. The busy case here reproduces that in seconds,
+# on a database of its own, and asserts the answer is "would not hold still"
+# rather than a verdict about Flyway.
+echo "run: migrate-check control and mutants"
+sh harness/fullstack/mutation/migrate-selftest.sh
+
 podman exec -i soulbind-mariadb \
   mariadb -h 127.0.0.1 -uroot -psoulbind-test <<'SQL'
 -- No CHARACTER SET clause, deliberately: this database inherits the server's

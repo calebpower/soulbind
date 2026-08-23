@@ -21,6 +21,7 @@ set -eu
 #   1  a second apply changed the database -- migrations are not idempotent
 #   2  the fingerprint measured too little for the comparison to mean anything
 #   3  a PRECONDITION failed: no core, no JVM, no config, no migrated database
+#   4  the database would not hold still, so the comparison means nothing
 #
 # The first session run reported "re-applying migrations was not a no-op" when
 # the truth was that no JVM existed and nothing had been applied at all. run.sh

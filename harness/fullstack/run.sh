@@ -317,12 +317,16 @@ stage_migrate() {
     #   1 = a second apply changed the database
     #   2 = the fingerprint measured too little to mean anything
     #   3 = there is no migrated database to test (usually: up failed)
+    #   4 = the database would not hold still, so the comparison means nothing
     # Reporting all three as "not a no-op" is what the first real run did, and it
     # pointed the reader at idempotence when the stack had simply never come up.
+    # 4 arrived the same way: run 31 reported an idempotence failure for a moved
+    # `event_cursor` row, which Flyway cannot write and the event drain does.
     if "$HERE/migrate-check.sh" "$RUN" "$DB"; then
         result_pass migrate "migrations are idempotent: a second apply changes nothing"
     else
         case $? in
+            4) reason="the database would not hold still, so a second apply cannot be told apart from ordinary traffic -- NOT an idempotence failure; see the log" ;;
             3) reason="there is no migrated database -- the up stage did not complete" ;;
             2) reason="the fingerprint measured too little to compare; see the log" ;;
             *) reason="re-applying migrations to an already-migrated database was not a no-op" ;;

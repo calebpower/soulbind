@@ -74,6 +74,19 @@ public final class MigrationFingerprint {
      */
     private static final int SMALL_TABLE_ROWS = 200;
 
+    /**
+     * How many times to re-sample while waiting for the database to hold still.
+     *
+     * <p>Bounded, and a bound that is reached is reported as its own failure
+     * rather than as an idempotence verdict. An unbounded wait would turn "the
+     * drain is wedged" into "the stage hangs", which is the same information
+     * arriving hours later with the reason lost.
+     */
+    private static final int QUIESCE_ATTEMPTS = 8;
+
+    /** How long to leave between samples. Long enough for a poll cycle to land. */
+    private static final long QUIESCE_PAUSE_MILLIS = 750L;
+
     /** A floor on how much the fingerprint must have measured to mean anything. */
     // 12, not 20: the schema has 16 tables today, and this is a floor against
     // measuring nothing, not an assertion about how many migrations exist.
@@ -105,7 +118,36 @@ public final class MigrationFingerprint {
             System.exit(3);
         }
 
-        String before = fingerprint(url, user, password);
+        // QUIESCE FIRST, because this runs against a LIVE deployment.
+        //
+        // The stack is still up while this check runs: core is serving, and
+        // connectors are draining the event outbox, which moves
+        // `event_cursor.position` and `event_outbox` rows. Those are rows the
+        // APPLICATION writes, and the fingerprint deliberately covers every
+        // small table's contents -- for good reason, since a repeatable
+        // migration that rewrote operational rows would otherwise be invisible.
+        //
+        // The consequence went unnoticed for fifteen sessions: the two
+        // fingerprints are taken about three seconds apart, so the verdict
+        // depended on whether the drain happened to be idle in that window. It
+        // passed every time until it did not, and the failure it then reported
+        // was `MIGRATIONS ARE NOT IDEMPOTENT` -- pointing at Flyway for a row
+        // Flyway cannot write. A check whose answer is decided by a race is not
+        // a check.
+        //
+        // So: sample until two consecutive fingerprints agree. That is the
+        // database holding still, observed rather than assumed, and it needs no
+        // process management and no reduction in what is compared.
+        String before = quiesce(url, user, password);
+        if (before == null) {
+            System.err.println("the database would not hold still: " + QUIESCE_ATTEMPTS
+                    + " consecutive fingerprints all differed from the one before.");
+            System.err.println("Something is writing to it continuously, so a second apply");
+            System.err.println("cannot be distinguished from ordinary traffic. This is NOT an");
+            System.err.println("idempotence failure -- it is this check being unable to ask the");
+            System.err.println("question. Is the stack under load, or a drain wedged in a retry?");
+            System.exit(4);
+        }
 
         // A FLOOR. Two empty fingerprints compare equal, so a metadata call that
         // silently returned nothing -- a driver quirk, a catalog-scoping
@@ -134,6 +176,21 @@ public final class MigrationFingerprint {
 
         String after = fingerprint(url, user, password);
 
+        // The second half of the same argument. If they differ, the difference
+        // is either the migration's doing or the application's, and one more
+        // sample separates them: a database that has moved AGAIN since `after`
+        // was taken was never quiescent, and blaming the migration for that
+        // sends whoever reads this to Flyway for a row Flyway cannot write.
+        //
+        // Checked only on the failure path, so the cost is paid once and only
+        // when there is something to explain.
+        if (!before.equals(after) && !fingerprint(url, user, password).equals(after)) {
+            System.err.println("the database moved again after the second apply, so it was not");
+            System.err.println("quiescent and the comparison means nothing. This is NOT an");
+            System.err.println("idempotence failure. Something wrote to it mid-check.");
+            System.exit(4);
+        }
+
         if (before.equals(after)) {
             System.out.println("migrations are idempotent on " + backend.configName());
             System.out.println(before);
@@ -151,6 +208,28 @@ public final class MigrationFingerprint {
         System.err.println("--- after ---");
         System.err.println(after);
         System.exit(1);
+    }
+
+    /**
+     * A fingerprint the database has been observed to hold still at, or
+     * {@code null} if it never did.
+     *
+     * <p>Two consecutive identical samples, which is the weakest claim that is
+     * still worth anything: it does not prove nothing will write during the
+     * migration, and nothing can, so the failure path samples once more before
+     * blaming the migration for a difference.
+     */
+    private static String quiesce(String url, String user, String password) throws Exception {
+        String previous = fingerprint(url, user, password);
+        for (int attempt = 0; attempt < QUIESCE_ATTEMPTS; attempt++) {
+            Thread.sleep(QUIESCE_PAUSE_MILLIS);
+            String current = fingerprint(url, user, password);
+            if (current.equals(previous)) {
+                return current;
+            }
+            previous = current;
+        }
+        return null;
     }
 
     private static boolean hasMigrationHistory(String url, String user, String password) {
