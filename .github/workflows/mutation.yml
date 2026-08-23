@@ -1,0 +1,68 @@
+# The mutation ratchet, on its own schedule.
+#
+# NOT on every push, and the reason is arithmetic rather than taste: a full
+# sweep of `core` alone is roughly twenty minutes, and the tree is nine modules.
+# A guard that adds half an hour to every push is a guard somebody turns off.
+#
+# It already runs in every reaper session, which is the pre-push loop and the
+# gate that matters. This is a second place it runs, so that a long gap between
+# sessions does not mean a long gap between sweeps.
+#
+# WHAT IT ASSERTS is a ratchet, never a threshold: mutation-baseline.txt holds
+# one row per module and this fails a module whose SURVIVED or NO_COVERAGE count
+# has gone UP. Nobody has to defend a number and nobody can drift past one. Read
+# that file's header before touching a row.
+name: mutation ratchet
+
+on:
+  schedule:
+    # Weekly. Frequent enough that a regression is found while the change is
+    # still recent, rare enough that it is never the reason a push waits.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two sweeps at once. PIT's coverage minion does not survive being run
+  # in parallel with itself -- the workstation build serialises them through a
+  # Gradle BuildService for exactly this reason, and two runners would put the
+  # same race back by another route.
+  group: mutation
+  cancel-in-progress: false
+
+jobs:
+  ratchet:
+    name: every module against its baseline
+    runs-on: ubuntu-latest
+    # A full sweep is long. The default six-hour cap would let a wedged run sit
+    # there all morning; this fails it while somebody is still looking.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # --continue, and it is load-bearing. Gradle fails fast across modules, so
+      # without it a regression in the first module alphabetically hides the
+      # state of the other eight -- and a guard that reports one module per run
+      # takes nine runs to tell you where you stand.
+      - name: mutationRatchet
+        run: ./gradlew --no-daemon --continue mutationRatchet
+
+      # ALWAYS, not on failure. A passing sweep's reports are what the next
+      # person diffs when a row moves, and DECISIONS 10.46 is the entry that
+      # exists because counts alone could not say WHAT had changed.
+      - name: pitest reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pitest-reports
+          path: '**/build/reports/pitest/'
+          retention-days: 30

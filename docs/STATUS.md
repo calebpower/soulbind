@@ -368,17 +368,7 @@ budget would be the easy mistake.
 
 ## Outstanding, and needing the owner
 
-Two items in the whole build cannot be done from here, and one is a decision
-rather than a blocker.
-
-**Release mechanics.** Nothing is tagged and nothing is published. The version
-is `0.1.0-SNAPSHOT` in exactly one place -- `soulbind.java-common.gradle.kts`
--- so every Java module moves together and there is no second copy to drift.
-`connector-flarum/composer.json` deliberately carries no `version`, which is
-correct for a Composer package installed from a VCS tag and wrong only if the
-extension is ever shipped as a zip. There is no CHANGELOG. What to tag, whether
-to publish, and to where, is the owner's call; nothing in the tree blocks it,
-and tagging is not something this session does without being asked each time.
+Two items in the whole build cannot be done from here.
 
 **`ext-xmlwriter` for PHP.** `composer install` in `connector-flarum` fails:
 PHPUnit 11 requires `ext-xmlwriter`, and this PHP 8.4.24 does not have it. The
@@ -936,6 +926,40 @@ its own. It is also the first run to exercise the MariaDB axis since the gate
 description landed — run 31 died at the sqlite `migrate` stage, so the second
 backend never ran at all that session, and 10.47 added an `UPDATE` no workstation
 test can reach.
+
+### Release mechanics — landed
+
+`0.1.0`, tagged `v0.1.0`. The version lives in exactly one place —
+`soulbind.java-common.gradle.kts` — so every Java module moves together and
+there is no second copy to drift. `connector-flarum/composer.json` deliberately
+carries no `version`: it is a Composer package installed from this repository's
+VCS tag, and Composer takes the version from the tag.
+
+Four artifacts ship: the `core` and `connector-discord` distributions, and the
+`connector-velocity` and `connector-plan` shaded jars. That closes the hole
+`docs/install.md` had from the beginning — it told an operator to "take the
+`core` distribution archive" and never said where from, because the build
+produced the archives and they had no destination.
+
+**Three GitHub Actions workflows**, in `.github/workflows/`:
+
+| Workflow | When | What |
+|---|---|---|
+| `build` | every push and PR | `./gradlew build guards`, plus the cross-language vectors through their PHPUnit-free entry point, ordinary and hostile |
+| `mutation ratchet` | weekly, and on demand | every module against `mutation-baseline.txt`, with `--continue` so one regression does not hide the other eight |
+| `release` | a `v*` tag | rebuilds, refuses to publish if the tag and the built version disagree, and attaches the four artifacts with `SHA256SUMS` as a **draft** |
+
+**CI is the cheap half arriving faster, and is not the gate.** It runs what
+needs only a JDK and a PHP. The full-stack battery, the MariaDB axis and the
+install gate need a real machine with a container engine, a database server, a
+Paper world and a browser — they stay in a reaper session, and a green session
+remains what a release is judged on. The release workflow drafts rather than
+publishes for the same reason: a tag pushed by mistake should not become a
+download before a person has looked at it.
+
+**Not published to Maven Central or Packagist.** Those need signing keys and
+namespace ownership, and they are a separate decision rather than a bigger
+version of this one. Depend on the SDK by building it.
 
 ## Narrowing in force from 10.26
 

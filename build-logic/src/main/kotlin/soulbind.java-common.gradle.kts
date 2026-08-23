@@ -26,7 +26,18 @@ plugins {
 }
 
 group = "dev.soulbind"
-version = "0.1.0-SNAPSHOT"
+
+// THE version, in one place, so every module moves together and there is no
+// second copy to drift. The release workflow refuses to publish when this and
+// the tag disagree -- tagging without setting it here would put archives on a
+// release page under a name that is not the release's, silently and
+// permanently, because a published artifact is not something you quietly
+// rename.
+//
+// connector-flarum deliberately carries no version of its own: it is a Composer
+// package installed from this repository's VCS tag, and Composer takes the
+// version from the tag.
+version = "0.1.0"
 
 java {
     toolchain {

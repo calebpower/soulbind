@@ -1,0 +1,93 @@
+# What a workstation build proves, on every push.
+#
+# SCOPE, stated because the gap matters more than the coverage. This runs the
+# checks that need nothing but a JDK and a PHP: the Gradle suites, every seam
+# guard, and the cross-language vector corpus through its PHPUnit-free entry
+# point. It does NOT run the full-stack battery, the MariaDB axis, or the
+# mutation ratchet. Those need a real machine with a container engine, a
+# database server, a Paper world and a browser, and they run in a reaper
+# session driven by .reaper.toml -- which stays the pre-push loop. CI is the
+# cheap half arriving faster, never a replacement for the session.
+#
+# So a green tick here means "nothing cheap is broken", and the release gate is
+# still a green session. docs/STATUS.md records which runs proved what.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per ref. A push that lands while an older commit is still building
+  # makes that older result irrelevant, and paying for it anyway is how a queue
+  # becomes the reason nobody waits for CI.
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gradle:
+    name: gradle build and guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Java 25, DECLARED rather than inherited -- the same rule
+      # gradle.properties states for the workstation. The toolchain paths in
+      # that file are FreeBSD-specific and simply will not resolve here; what
+      # makes this work is auto-detect finding the JDK this step installs.
+      # auto-download stays off, so a missing toolchain is a loud failure
+      # rather than a silent fetch of something nobody pinned.
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # `build` already runs every guard through :guards:test. `guards` is
+      # named as well so that a change which detaches them from `build` fails
+      # here rather than going quiet -- the guards are the seam enforcement and
+      # a guard nobody runs is a guard that is not there.
+      - name: build, test and guards
+        run: ./gradlew --no-daemon build guards
+
+      # Uploaded on failure only. A green run's reports are noise; a red run's
+      # are the first thing anybody asks for.
+      - name: test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          retention-days: 14
+
+  vectors:
+    name: cross-language vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+
+      # The PHPUnit-free entry point, deliberately. PHPUnit needs
+      # ext-xmlwriter, and a check that only runs where a particular extension
+      # is installed is a check that stops being run -- DECISIONS 7.2. The
+      # PHPUnit suite covers the same VectorChecks through a second entry point
+      # and runs in the session, in a container that has the extension.
+      - name: vectors, ordinary
+        run: php connector-flarum/tests/run-checks.php
+
+      # The hostile pass sets a non-UTF-8 internal encoding and refuses to pass
+      # unless it actually took effect. A hostile run that quietly stayed UTF-8
+      # proves nothing the ordinary run did not.
+      - name: vectors, hostile
+        run: php connector-flarum/tests/run-checks.php --hostile

@@ -8310,3 +8310,65 @@ Verified in both directions: green against the fix, and against
 self-tests, because it needs core installed and the checksum-pinned JDK in the
 cache, and the tier's `up` stage is what puts both there. The guest ships no
 toolchains.
+
+### 10.49 — Release mechanics: what ships, what runs it, and what it is not
+
+`0.1.0`, tagged `v0.1.0`, with three workflows behind it.
+
+**Why a release at all, and why this one is small.** `docs/install.md` has told
+operators to "take the `core` distribution archive" since Phase 10 began, and
+never said where from: the build produced the archives and they had no
+destination. That is the hole this closes, and closing it needs a tag and four
+files -- not a package registry.
+
+**Maven Central and Packagist are deliberately not done.** They need signing
+keys and namespace ownership, which is a different decision rather than a
+larger version of this one, and nothing needs them yet: the SDK has no external
+consumer, and the Flarum connector installs from the VCS tag by design. Doing
+them "while we are here" would be committing the project to publishing
+infrastructure nobody has asked for.
+
+**The version stays in one place, and the release workflow enforces it.**
+Tagging without setting `version` in `soulbind.java-common.gradle.kts` would
+attach `core-0.1.0-SNAPSHOT.tar.gz` to a release called `v0.1.0` -- a name that
+is wrong, silently, and permanently, because a published artifact is not
+something you quietly rename. So the workflow compares the tag to the built
+filename and refuses.
+
+**The release is drafted, not published.** A tag pushed by mistake should not
+become a download before somebody has looked at it. The cost is one click; the
+alternative is a mistake that is public before it is noticed.
+
+#### What CI is, and what it is not
+
+The three workflows split by what they need, not by what would be nice:
+
+* `build` runs on every push and PR: the Gradle suites, every guard, and the
+  cross-language vectors through their PHPUnit-free entry point, ordinary and
+  hostile. All of that needs a JDK and a PHP and nothing else.
+* `mutation ratchet` runs weekly and on demand. Not per-push, and the reason is
+  arithmetic: a sweep of `core` alone is about twenty minutes and there are
+  nine modules. A guard that adds half an hour to every push is a guard
+  somebody turns off. It already runs in every session; this is a second place,
+  so a long gap between sessions is not a long gap between sweeps.
+* `release` runs on a `v*` tag.
+
+**What CI does NOT run is the important half of this entry.** The full-stack
+battery, the MariaDB axis, the install gate, the browser evidence and the PHP
+mutation tier all need a real machine with a container engine, a database
+server, a Paper world and a browser. They stay in `.reaper.toml`, and **a green
+session remains what a release is judged on**. A green tick on GitHub means
+"nothing cheap is broken" and nothing more.
+
+Saying that here rather than leaving it implied, because the failure mode is
+specific and well known: CI appears, it is green, and over a few months it
+quietly becomes what people mean by "the tests pass" -- while the half that
+catches the real defects runs less and less often. Every red battery this
+project has had was caught by the session, not by anything a workstation or a
+runner could execute.
+
+**Verification, stated honestly.** The workflows cannot be executed from here.
+The YAML parses, the Gradle invocations and artifact paths are the ones this
+repository actually produces -- checked against a real `0.1.0` build -- and the
+version guard was reasoned through rather than run. The first genuine proof is
+the first push, and if something is wrong it will be wrong there.
