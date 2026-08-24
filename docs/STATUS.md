@@ -1077,6 +1077,7 @@ never be taken back.
 | Distribution archive | Every path in a `.tar.gz` or `.zip` lies under one root, and none carries an unexpanded `${` |
 | Jar manifest | Every shipped jar declares the version and module it was built as, read from the jar |
 | Unit exit status | Every shipped systemd unit counts SIGTERM (143) as success, so a normal stop is not reported as a failure |
+| Admin command | `/soulbind` is restricted to ADMINISTRATOR at the platform, the ordinary commands are not, and the connector's own check survives |
 | build-logic JUnit pin | The one version number written twice agrees with itself, and neither side floats |
 | Check-then-act | No unreviewed read-then-write in any storage write path |
 | Event doc sync | Every EventType appears in the document and vice versa |

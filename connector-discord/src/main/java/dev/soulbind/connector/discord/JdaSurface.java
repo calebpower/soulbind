@@ -29,6 +29,7 @@ import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 
 /**
@@ -322,6 +323,22 @@ public final class JdaSurface implements ChatSurface {
                         "a code issued on the other platform; omit to get one", false));
         var whoami = Commands.slash("whoami", "Show what this account is linked to");
         var admin = Commands.slash("soulbind", "Administrative commands")
+                // The PLATFORM's own gate, and the third of three.
+                //
+                // ChatConnector already refuses a non-administrator before core
+                // is asked, and this connector's credential does not hold
+                // config-management, so core would refuse too. Both were true
+                // before this line existed and the command was still listed in
+                // every member's picker as "Administrative commands", inviting
+                // a try that could only end in a refusal.
+                //
+                // Discord will deny it for us, so the application-level check
+                // stops being the only thing between a member and that path.
+                // It is not a replacement for either other gate: a server can
+                // override a default permission per-role, which is the server
+                // owner's business, and the other two hold regardless.
+                .setDefaultPermissions(
+                        DefaultMemberPermissions.enabledFor(Permission.ADMINISTRATOR))
                 .addOptions(new OptionData(
                         OptionType.STRING, "subcommand",
                         // Describes the OPTION, not one of its values. It read

@@ -16,6 +16,11 @@ for the other.
   by SIGTERM exits 143, which is not in systemd's default success set, so every
   routine stop, restart and reboot left `Failed with result 'exit-code'` behind.
   Both shipped units now declare `SuccessExitStatus=143`.
+- **`/soulbind` was listed to every Discord member.** The administrative command
+  set no default member permission, so it appeared in everyone's command picker
+  as "Administrative commands" — refused on use, but advertised. It is now
+  restricted to ADMINISTRATOR by Discord itself, in addition to the connector's
+  own check and the capability core enforces.
 
 ## 0.1.2 — 2026-08-24
 

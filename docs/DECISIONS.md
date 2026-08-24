@@ -8726,3 +8726,52 @@ That host's `/etc/systemd/system/soulbind-core.service` therefore differs from
 the `packaging/` copy in the `0.1.2` tarball it was installed from, until the
 next release is deployed. Recorded here rather than discovered later as a
 mystery, which is the whole reason this file exists.
+
+### 10.56 — Three gates on the administrative command, and the one that was missing
+
+Asked during the first live deployment whether ordinary members could use the
+admin command. They could not — and the answer was one gate thinner than it
+should have been.
+
+**What already held.** `ChatConnector.handleAdmin` refuses a non-administrator
+before core is asked, deliberately in that order: asking first and refusing on
+the answer would let an unprivileged member probe policy by reading refusals.
+And the connector's credential does not hold `config-management`, so core
+refuses the administrative operations regardless of who asked. Capability and
+platform permission are different questions — what this connector may ask core
+for, versus which humans may ask this connector — and the class comment has said
+so since it was written.
+
+**What was missing.** Discord's own `default_member_permissions` was unset, so
+`/soulbind` appeared in every member's command picker described as
+"Administrative commands". Nothing leaked and nothing happened: the reply is an
+ephemeral refusal. But the platform offers a gate for free, and not taking it
+left an application-level check as the only thing between a member and that
+path — while advertising the path.
+
+`setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.ADMINISTRATOR))`
+on that command, and only that command.
+
+**Why the guard scans source.** `JdaSurface` is platform wiring and deliberately
+not unit-tested — the module's own rule is that a behaviour worth asserting in
+that file is in the wrong file. The declaration cannot be exercised without a
+live Discord, so the alternative to a source scan was nothing at all. The
+failure it guards against is silent: the command simply reappears in every
+member's picker and only somebody trying it would find out.
+
+The scan is scoped to the chained declaration between `Commands.slash("soulbind"`
+and its terminating `;`, rather than to the file. A file-level search for
+`setDefaultPermissions` would pass with the restriction attached to `/link`,
+which restricts the wrong command, leaves the administrative one open, and reads
+as protection. That exact mutation was tried and is caught — by the test
+asserting the ORDINARY commands stay open, which exists so that "restrict
+everything" cannot satisfy "restrict the admin command".
+
+The third test asserts the connector's own check survives. A server owner can
+override a default permission per-role, so the platform gate is a layer and not
+a floor; deleting the application check because "Discord handles it" is the
+plausible next change, and it now fails the build.
+
+**A live deployment produced this.** No test could have: every one of them was
+correct about the code, and the gap was in what the code declined to tell the
+platform.
