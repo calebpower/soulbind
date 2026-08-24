@@ -37,6 +37,18 @@ ExecStart=/opt/soulbind/core/bin/core serve --config /etc/soulbind/soulbind.toml
 #   EnvironmentFile=-/etc/soulbind/core.env    (mode 0600, root:soulbind)
 EnvironmentFile=-/etc/soulbind/core.env
 
+# A JVM killed by SIGTERM exits 143 (128+15), and systemd's default success
+# set does not include it -- so a NORMAL stop was booked as
+# "Failed with result 'exit-code'". Every upgrade, every reboot, every restart
+# left a red line in `systemctl status` that meant nothing, and the cost of a
+# signal that cries wolf is that the day it means something nobody looks.
+#
+# 143 is the correct exit for "terminated by SIGTERM": the process did what it
+# was told. Trapping the signal and exiting 0 was the alternative and is worse
+# -- it throws away the distinction between exiting normally and being stopped.
+#
+# Found on the first live deployment, at v0.1.2. DECISIONS 10.55.
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=5s
 

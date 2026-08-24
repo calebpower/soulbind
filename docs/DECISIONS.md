@@ -8680,3 +8680,49 @@ The sweep is classifier-aware, which is deliberate rather than defensive:
 jar would delete a sources jar built moments earlier. Nothing here publishes one
 today. That is exactly why the guard against it belongs in the code and not in
 the circumstance.
+
+### 10.55 — A clean stop reported as a failure
+
+Upgrading the first live deployment from `v0.1.1` to `v0.1.2`, `systemctl stop`
+left the unit in this state:
+
+```
+soulbind-core.service: Main process exited, code=exited, status=143/n/a
+soulbind-core.service: Failed with result 'exit-code'.
+```
+
+143 is 128 + 15: the JVM's exit code for a process terminated by SIGTERM.
+systemd's default success set does not include it, so a stop that did exactly
+what it was told was booked as a failure. Every upgrade, every reboot, every
+`systemctl restart` would have left that behind.
+
+`SuccessExitStatus=143`, in both shipped units — core's and the Discord
+connector's, which is the same JVM under the same signal.
+
+**Not by trapping the signal and exiting 0.** That was the alternative and it is
+worse: it throws away the distinction between "exited normally" and "was
+stopped", and the unit would then be unable to tell a clean shutdown from a
+process that decided to leave. 143 is the *correct* exit code here. What was
+wrong is the unit's description of which codes mean success.
+
+**Why it matters more than it reads.** The cost is not the red line; it is that
+an operator who sees `failed` after every routine restart stops reading the
+field. A signal that cries wolf makes the real failure invisible, and this
+project has an entry about the same shape in the migrate check (10.48) and in
+the guards' up-to-date bug — a check whose output nobody trusts is a check
+nobody has.
+
+The guard asserts it on the **shipped** unit inside the built distribution
+rather than on `packaging/` in the source tree, for the reason `ServiceDistGuardTest`
+already gives about everything else it reads: the operator installs from the
+tarball. It also asserts the unit still declares a `Restart=` policy, and says
+in its own message why the two assertions belong together — with 143 outside
+the success set and `Restart=on-failure` in force, systemd's view of "did this
+exit cleanly" is what is wrong, not merely its wording.
+
+**A divergence exists on the first deployment and is deliberate.** The installed
+unit there was patched by hand to add the line, ahead of a release carrying it.
+That host's `/etc/systemd/system/soulbind-core.service` therefore differs from
+the `packaging/` copy in the `0.1.2` tarball it was installed from, until the
+next release is deployed. Recorded here rather than discovered later as a
+mystery, which is the whole reason this file exists.

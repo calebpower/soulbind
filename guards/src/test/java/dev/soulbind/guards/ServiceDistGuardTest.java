@@ -197,4 +197,44 @@ class ServiceDistGuardTest {
                             + names);
         }
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"core", "connector-discord"})
+    @DisplayName("a normal stop is not reported as a failure")
+    void theUnitCountsSigtermAsSuccess(String module) throws IOException {
+        // A JVM killed by SIGTERM exits 143, and systemd's default success set
+        // does not include it -- so `systemctl stop` booked a clean shutdown as
+        // "Failed with result 'exit-code'". Found on the first live deployment,
+        // upgrading v0.1.1 to v0.1.2: the unit reported failed after a stop that
+        // did exactly what it was asked. Every upgrade and every reboot would
+        // have left that behind.
+        //
+        // Asserted on the SHIPPED unit rather than the one in packaging/,
+        // because the operator installs from the tarball -- the same reason the
+        // test above checks the distribution rather than the source tree.
+        Path unit = unitFileIn(distributionOf(module).resolve("packaging"), module);
+        String text = Files.readString(unit);
+
+        assertTrue(text.lines().anyMatch(l -> l.trim().equals("SuccessExitStatus=143")),
+                unit.getFileName() + " does not declare SuccessExitStatus=143. Without it a"
+                        + " normal stop reports `failed`, and a status line that cries wolf"
+                        + " is how a real failure goes unnoticed.");
+
+        // The restart policy is what makes the above matter rather than merely
+        // read badly: with 143 outside the success set and Restart=on-failure,
+        // systemd's own view of "did this exit cleanly" is wrong.
+        assertTrue(text.lines().anyMatch(l -> l.trim().startsWith("Restart=")),
+                unit.getFileName() + " declares no Restart policy, so this assertion is"
+                        + " checking a property nothing depends on any more -- read both"
+                        + " lines before deleting either.");
+    }
+
+    private static Path unitFileIn(Path packaging, String module) throws IOException {
+        try (Stream<Path> files = Files.list(packaging)) {
+            return files.filter(p -> p.getFileName().toString().endsWith(".service"))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            module + " ships no .service file in " + packaging));
+        }
+    }
 }

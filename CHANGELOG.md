@@ -8,6 +8,15 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
+## Unreleased
+
+### Fixed
+
+- **`systemctl stop` reported a clean shutdown as a failure.** A JVM terminated
+  by SIGTERM exits 143, which is not in systemd's default success set, so every
+  routine stop, restart and reboot left `Failed with result 'exit-code'` behind.
+  Both shipped units now declare `SuccessExitStatus=143`.
+
 ## 0.1.2 — 2026-08-24
 
 ### Fixed
