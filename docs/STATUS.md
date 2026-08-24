@@ -957,6 +957,47 @@ rather than a defect. If the battery should exercise jars named as they would
 ship, the mechanism is a `SOULBIND_VERSION` override passed in by the manifest;
 nothing needs it today, because the names do not affect what the battery tests.
 
+### Run 35, and the first live deployment
+
+**Run 35 is green**, `reaper exit=0`, on the build-manifest change: both storage
+axes, every stage, the install gate, Infection, browser evidence, the ratchet.
+Same stage tallies as run 34.
+
+**Core is deployed on the first estate**, which is not named here or anywhere in
+this repository. `v0.1.2`, installed by following `docs/install.md` and nothing
+else — every step worked as written, on a host with ten days of uptime and years
+of accumulated state rather than a fresh guest. That document's gate had only
+ever been proven on a clean VM.
+
+- SQLite, not the estate's MariaDB. `docs/install.md` recommends it for a single
+  core on one host, and it means soulbind never opens the database the forum and
+  game live in. `SHOW DATABASES` after install and after two restarts is
+  unchanged.
+- Bound to loopback. `doctor` before first start: 6 ok, 1 warning, 0 failed.
+- A full `mysqldump` of the estate's two live databases was taken first and
+  verified — 165 `CREATE TABLE`s against 165 tables.
+
+**`connector-velocity` 0.1.2 is deployed in read-only posture.** `gate.join` and
+`effector.group` are both unset, so the join gate is disabled and no group is
+ever granted. The plugin says so itself at startup — `soulbind ready; join gate
+disabled` — which is the posture asserted by the running system rather than
+claimed by its operator. Registered with `code-display,code-entry,
+enforcement-point`: the grant `harness/principals.txt` records for a proxy
+connector, and deliberately **not** `effector`.
+
+Proven live, with the credential the plugin holds: a signed `decide` against
+gate `join` returns `allow` / `no-rule`. An unconfigured gate allows, on the real
+deployment, rather than only in the battery.
+
+**Not yet proven:** the plugin's own transport to core. Nothing has driven it,
+because with the gate disabled and no player online there is no traffic to
+drive. The first `/link` typed by a person is what exercises it.
+
+Two defects were found by deploying and are fixed: 10.54 (a running core could
+not say which build it was) and 10.55 (a clean stop reported as a failure).
+Neither was reachable from any test that reads the version from the build or the
+unit from the source tree.
+
 ### Release mechanics — landed
 
 `0.1.0`, tagged `v0.1.0`. **The version is not written down anywhere.**
