@@ -8,6 +8,22 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
+## 0.1.2 — 2026-08-24
+
+### Fixed
+
+- **A running soulbind could not say which build it was.** Every published jar
+  carried a manifest with no `Implementation-Version`, so core announced itself
+  on startup as `soulbind (development)` regardless of the release it came from
+  — including `v0.1.1`, in production. Jars now declare their version and
+  module, and a guard reads it back out of the built artifact.
+
+### Internal
+
+- `build/libs` no longer accumulates a jar per commit. Stale artifacts are swept
+  when a new one is written, matching what already happened for shaded plugin
+  jars and distribution archives.
+
 ## 0.1.1 — 2026-08-23
 
 ### Changed

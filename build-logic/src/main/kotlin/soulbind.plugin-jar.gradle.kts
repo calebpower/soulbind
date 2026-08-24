@@ -119,34 +119,6 @@ tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJ
     from(tasks.named("licenceInventory")) { into("META-INF/soulbind") }
 
     mergeServiceFiles()
-
-    // Sweep jars this module built under a DIFFERENT version.
-    //
-    // build/libs is not a synced directory -- Gradle writes into it and never
-    // removes anything -- which was invisible while the version was a literal
-    // that never moved, because there was only ever one filename. Now that it
-    // is derived from the git tag, every commit leaves another jar behind, and
-    // anything downstream that says `build/libs/*.jar` gets a pile: the
-    // full-stack harness copying them all into a proxy's plugins/ directory
-    // was the case that made this urgent, since two plugins sharing an id is a
-    // stack that will not start, reported three stages from its cause.
-    //
-    // doFirst, so it runs only when the jar is actually being written. That is
-    // also its limit: a shadowJar that is up to date sweeps nothing, so a tree
-    // checked back out at an older already-built version still holds both. The
-    // consumers assert their own uniqueness for that reason -- this makes the
-    // ordinary case clean, it does not make the check unnecessary.
-    doFirst {
-        val current = archiveFile.get().asFile
-        val prefix = "${project.name}-"
-        current.parentFile?.listFiles()?.forEach { file ->
-            if (file.isFile && file != current
-                && file.name.startsWith(prefix) && file.name.endsWith(".jar")) {
-                logger.lifecycle("removing stale artifact ${file.name}")
-                file.delete()
-            }
-        }
-    }
 }
 
 // `build` produces the artifact an operator installs, rather than a thin jar

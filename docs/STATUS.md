@@ -1034,6 +1034,7 @@ never be taken back.
 | Protocol doc sync | `docs/protocol.md`'s operation and capability tables match the code, both directions |
 | Plugin jar version | The version a plugin reports to its host is the version it was built as. NOT that it is a release version — that is `release.yml`'s, per DECISIONS 10.53 |
 | Distribution archive | Every path in a `.tar.gz` or `.zip` lies under one root, and none carries an unexpanded `${` |
+| Jar manifest | Every shipped jar declares the version and module it was built as, read from the jar |
 | build-logic JUnit pin | The one version number written twice agrees with itself, and neither side floats |
 | Check-then-act | No unreviewed read-then-write in any storage write path |
 | Event doc sync | Every EventType appears in the document and vice versa |

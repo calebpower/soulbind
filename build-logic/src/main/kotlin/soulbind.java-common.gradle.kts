@@ -363,4 +363,65 @@ tasks.withType<Jar>().configureEach {
     // bytes, so a diff in a distributed artifact means a diff in the input.
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
+
+    // The version, written where a RUNNING process can read it back.
+    //
+    // `CoreVersion` resolves Package.getImplementationVersion() and falls back
+    // to "(development)" when there is none. Gradle does not write that
+    // attribute unless told to, and nothing told it to -- so core-0.1.1.jar
+    // shipped, was installed, and announced itself as
+    // "soulbind (development) listening on 127.0.0.1:7180" on a live host.
+    // CoreVersion's own javadoc says it exists so that "which build is running"
+    // is answerable from the outside, which is the first question asked of a
+    // deployment behaving unexpectedly. It was not answerable. DECISIONS 10.54.
+    //
+    // withType<Jar>, so this reaches shadowJar as well: a plugin jar is loaded
+    // into somebody else's JVM and is exactly the artifact whose provenance is
+    // hardest to establish by any other means.
+    // Sweep archives this task built under a DIFFERENT version.
+    //
+    // build/libs is not a synced directory: Gradle writes into it and never
+    // removes anything. Invisible while the version was a literal that never
+    // moved; now that it comes from the git tag, every commit leaves another
+    // file behind. core/build/libs held THIRTEEN jars when this was written,
+    // and a `core-*.jar` glob quietly resolved to the oldest -- which cost a
+    // wrong diagnosis of this very manifest bug before anyone noticed.
+    //
+    // The same sweep already existed for shaded plugin jars and for the
+    // distribution archives; this replaces the plugin-jar copy, because three
+    // implementations of one rule is how they drift.
+    //
+    // Classifier-aware: `core-1.2.3-sources.jar` also matches `core-*.jar`, so
+    // a naive sweep on the main jar would delete a sources jar built moments
+    // earlier. Nothing here publishes one today, which is exactly why the
+    // guard against it belongs in the code rather than in the circumstance.
+    doFirst {
+        val current = archiveFile.get().asFile
+        val base = archiveBaseName.get()
+        val ext = "." + archiveExtension.get()
+        val wantsClassifier = archiveClassifier.get().isNotEmpty()
+        current.parentFile?.listFiles()?.forEach { file ->
+            val name = file.name
+            if (file.isFile && file != current
+                && name.startsWith("$base-") && name.endsWith(ext)) {
+                val middle = name.substring(base.length + 1, name.length - ext.length)
+                val hasClassifier = middle.endsWith("-sources") || middle.endsWith("-javadoc")
+                if (hasClassifier == wantsClassifier) {
+                    logger.lifecycle("removing stale artifact $name")
+                    file.delete()
+                }
+            }
+        }
+    }
+
+    val implVersion = project.version.toString()
+    val implTitle = project.name
+    inputs.property("implementationVersion", implVersion)
+    inputs.property("implementationTitle", implTitle)
+    manifest {
+        attributes(
+            "Implementation-Title" to implTitle,
+            "Implementation-Version" to implVersion,
+        )
+    }
 }

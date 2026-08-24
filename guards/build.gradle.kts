@@ -56,6 +56,11 @@ val archivedModules = listOf(":core", ":connector-discord")
 
 tasks.withType<Test>().configureEach {
     dependsOn(inspectedModules.map { "$it:classes" })
+
+    // JarManifestGuardTest opens the built jar, which `classes` does not
+    // produce. Without this it would read whatever an earlier build left on
+    // disk -- or nothing.
+    dependsOn(inspectedModules.map { "$it:jar" })
     dependsOn(shadedModules.map { "$it:shadowJar" })
     dependsOn(distributedModules.map { "$it:installDist" })
     dependsOn(archivedModules.map { "$it:distTar" })

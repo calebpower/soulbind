@@ -8627,3 +8627,56 @@ coverage of a third. The workstation and the runner are both developer machines;
 the guest is deliberately not one, and that is the whole reason it is worth
 testing on. A change that reads the environment needs checking against the
 environment that has least, not against the two that are alike.
+
+### 10.54 — The running process could not say which build it was
+
+`v0.1.1` was installed on a live host. It came up saying:
+
+```
+soulbind (development) listening on 127.0.0.1:7180
+```
+
+`CoreVersion` resolves `Package.getImplementationVersion()` and falls back to
+`(development)` when there is none. Gradle does not write that attribute unless
+told to, and nothing told it to. So every jar this project has ever published
+carried a manifest reading, in full, `Manifest-Version: 1.0`.
+
+The class's own javadoc says it exists so that "which build is running" is
+answerable from the outside, "which is the first question asked of a deployment
+behaving unexpectedly". It was not answerable, in the first deployment, on the
+first question.
+
+**Why nothing caught it.** Every test that cares about the version reads it from
+the build — `SoulbindVersionTest` from the derivation, `PluginJarGuardTest` from
+`SourceTree.version()`, `DistributionArchiveGuardTest` from the archive's file
+names. All correct, and all asking the build what the build thinks. Nobody
+opened the artifact and asked *it*. That is 10.52 again — two paths to the same
+fact with no shared witness — and it is the third time this month.
+
+`JarManifestGuardTest` opens the jar. It asserts `Implementation-Version`
+matches the build and `Implementation-Title` names the module, for all eight
+shipped modules. The fallback stays: a build from a classes directory should
+still be unmistakable for a release in a bug report. What changed is that a
+RELEASE can no longer reach one.
+
+**A duplicate assertion was written and removed before committing.** A second
+test named the two shaded jars specifically, on the theory that shadowJar
+rebuilds the manifest and might drop attributes. It might — but `jarFor()`
+already resolves `build/libs/<module>-<version>.jar`, and for those two modules
+that file *is* shadowJar's output, so the loop was already opening the shaded
+artifact and the second test asserted identical bytes. A duplicate that reads as
+extra coverage is worse than no test, because somebody trusts it.
+
+**The stale-jar sweep, third and final instance.** Diagnosing this took three
+wrong turns because `unzip -p core/build/libs/core-*.jar` resolved to the oldest
+of **thirteen** jars, and reported the fix as not working after it worked. 10.51
+swept shaded plugin jars, 10.52 swept distribution archives, and the plain `jar`
+task — the one every module has — was left. It is now swept in
+`soulbind.java-common` for every `Jar` task, and the plugin-jar copy is deleted:
+three implementations of one rule is how they drift.
+
+The sweep is classifier-aware, which is deliberate rather than defensive:
+`core-1.2.3-sources.jar` also matches `core-*.jar`, so a naive sweep on the main
+jar would delete a sources jar built moments earlier. Nothing here publishes one
+today. That is exactly why the guard against it belongs in the code and not in
+the circumstance.
