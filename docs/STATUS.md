@@ -1043,6 +1043,49 @@ published zip is verified against `SHA256SUMS`, extracted, and installed from a
 path repository instead. Same bytes, no system package added to a production web
 server.
 
+### 0.1.5, and what deploying kept finding
+
+Four releases were cut from a single live deployment, each fixing something no
+test could have found because each was about the seam between a correct
+component and the world outside it:
+
+| | |
+|---|---|
+| 10.54 | a running core could not say which build it was — the manifest had no `Implementation-Version` |
+| 10.55 | a clean `systemctl stop` was reported as a failure — 143 is not in systemd's default success set |
+| 10.56 | Discord listed the administrative command to every member |
+| 10.57 | the Flarum extension had never been installable — its compiled bundles were gitignored |
+| 10.58 | the Flarum webhook endpoint was unreachable — registered behind CSRF it could never satisfy |
+
+Every one of them had a passing test beside it. The version was computed
+correctly and never written; the bundles were built correctly and never shipped;
+the verifier was correct and unreachable. **A test that verifies a part says
+nothing about whether anything can reach it**, and that sentence is the whole
+lesson of the first deployment.
+
+**The estate runs `0.1.5`**, all four components, each version read back from the
+running process rather than from what was installed. No rules exist, so every
+gate answers `allow` / `no-rule`; the one real cross-platform link has survived
+five upgrades.
+
+**A near miss worth recording.** `0.1.5` changed one display string in
+`connector-flarum/composer.json`. That commit argued no test was needed — true —
+and considered skipping the session as disproportionate, which was not. Editing
+the manifest invalidates `composer.lock`'s content hash, and the battery's
+`composer validate --check-lock` caught it eight minutes in. Skipping would have
+published an extension that fails the check an operator's own composer runs. The
+coverage was never missing; the reasoning about blast radius was.
+
+**Two host-level things found by deploying**, neither soulbind's:
+`ext-mbstring` was installed for PHP 8.3 while the forum ran 8.4, so Flarum's
+announcement excerpt died on `mb_strimwidth`. `symfony/polyfill-mbstring`
+declares `provide: ext-mbstring`, which is why composer accepted packages
+requiring it — including ours — and why the gap stayed invisible. soulbind's own
+three `mb_` calls were inside the polyfill's coverage. Now on the native
+extension. The forum's PHP also has no `ext-zip`, so a composer *artifact*
+repository cannot be used there; the published zip is verified against
+`SHA256SUMS`, extracted, and installed from a path repository.
+
 ### Release mechanics — landed
 
 `0.1.0`, tagged `v0.1.0`. **The version is not written down anywhere.**
