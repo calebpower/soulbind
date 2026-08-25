@@ -10,6 +10,12 @@ for the other.
 
 ## Unreleased
 
+### Changed
+
+- **The Flarum extension is listed as "Soulbind", not "soulbind".** Flarum prints
+  the title verbatim, so it sat lowercase in a list beside "Lock", "Nicknames"
+  and "Sticky" and read as a mistake rather than as branding.
+
 ### Fixed
 
 - **The Flarum webhook endpoint was unreachable.** It was registered on the
