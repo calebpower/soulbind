@@ -998,6 +998,51 @@ not say which build it was) and 10.55 (a clean stop reported as a failure).
 Neither was reachable from any test that reads the version from the build or the
 unit from the source tree.
 
+### Run 36, and the estate on 0.1.3
+
+**Run 36 is green**, `reaper exit=0`: both storage axes, every stage, the install
+gate, Infection, the ratchet, and — the reason it was run — **the forum tier on
+both engines, 5 of 5 browser specs each**, including a member linking a forum
+account by entering a code and core agreeing the link is real. The guest rebuilt
+the frontend bundles for each run, so the committed bundles and a clean build
+are both exercised.
+
+**Every component of the first estate now runs `0.1.3`**, each version read back
+from the running thing rather than from what was installed:
+
+| | |
+|---|---|
+| core | `soulbind 0.1.3 listening on 127.0.0.1:7180` |
+| connector-velocity | `Loaded plugin soulbind 0.1.3` |
+| connector-discord | `connector-discord 0.1.3`, 3 guild commands, 0 global |
+| connector-flarum | `soulbind-connector 0.1.3` on Flarum 1.8.19 |
+
+All three hand-patches from earlier deployments are retired: the `SuccessExitStatus`
+lines now come from the shipped units (a clean stop records `Deactivated
+successfully`), and `/soulbind` keeps `default_member_permissions=8` **through a
+full command re-registration**, which is what proves it comes from the code and
+not from the API patch a bulk overwrite would have wiped.
+
+Enforcement is still off everywhere: no rules exist, `decide` on `join` answers
+`allow` / `no-rule`, `gate.join` and `effector.group` are unset on the proxy, and
+`[effector] role`/`gate` are empty on Discord. The one real link in the identity
+graph survived every upgrade.
+
+`SHOW DATABASES` on the estate's MariaDB is unchanged throughout — soulbind runs
+on SQLite and has never opened it.
+
+**Flarum was upgraded 1.8.16 → 1.8.19 first**, because `connector-flarum`
+requires `^1.8.19`. 21 packages, 0 installs, 0 removals, nothing to migrate.
+Recorded here because the upgrade surfaced something worth keeping: running
+`migrate` and `cache:clear` without `assets:publish` leaves the forum serving
+untranslated keys in place of text — `docs/install.md` now says so.
+
+**One environment constraint found by deploying:** the estate's PHP has no
+`ext-zip`, so a composer *artifact* repository cannot be used there at all. The
+published zip is verified against `SHA256SUMS`, extracted, and installed from a
+path repository instead. Same bytes, no system package added to a production web
+server.
+
 ### Release mechanics — landed
 
 `0.1.0`, tagged `v0.1.0`. **The version is not written down anywhere.**

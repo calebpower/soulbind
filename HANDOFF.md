@@ -122,31 +122,37 @@ Read `CLAUDE.md` in the repo root first; it is the standing brief. Then:
 
 ## 4. Where things stand
 
-**Phase 10 complete. `0.1.1` released and published.**
+**Phase 10 complete. `0.1.3` released, and the first estate runs it.**
 
-`main` is at **`5b76046`**, and **nothing is committed-but-unpushed.** `v0.1.0`
-and `v0.1.1` are both tagged and pushed.
+`main` is at **`d6bbe22`**, tagged `v0.1.3` and pushed. Nothing is
+committed-but-unpushed.
 
 ```
-5b76046 docs: name 0.1.1 in the changelog                <- v0.1.1
-ccc44cf docs: record runs 33 and 34, green on the version derivation
-19eba96 fix: the version guard asserted a release property on every build
-a59df72 fix: the distribution archives shipped a directory named ${project.name}
-b16d769 build: derive the version from the git tag, and publish on it
-2b32fc4 ci: pin every action by commit SHA, and guard that they stay pinned
-8976916 release: 0.1.0, and the pipelines behind it      <- v0.1.0
+d6bbe22 fix: the Flarum extension had never been installable   <- v0.1.3
+feaac71 fix: Discord listed the admin command to every member
+62ed7b0 docs: the Phase 6 smoke was done, and two places said otherwise
+e53f3ff docs: track HANDOFF.md, current as of 0.1.1
+5b76046 docs: name 0.1.1 in the changelog                      <- v0.1.1
+a59df72 fix: the distribution archives shipped ${project.name} <- v0.1.2 lineage
 ```
 
-- **Run 34 was green**, `reaper exit=0`: both storage axes, every stage, the
-  install gate, Infection, browser evidence and the ratchet. Run 33 failed
-  first, on a guard of this project's own making — DECISIONS 10.53, and
-  `docs/STATUS.md` records both honestly, including what run 34 did *not*
-  exercise.
-- **Mutation survivors: 61 across the tree**, down from ~250.
-- **`v0.1.1` is published** with four artifacts and `SHA256SUMS`, verified by
-  downloading two of them and checking them against the published sums.
-- **`v0.1.0`'s draft release was deleted** by the owner. Its artifacts carried
-  the `${project.name}` archive bug; `v0.1.1` is the first sound release.
+**The estate is live on 0.1.3**: core, connector-velocity, connector-discord and
+connector-flarum, each version read back from the running process. Enforcement is
+off everywhere — no rules exist, so every gate allows. One real cross-platform
+link exists in the identity graph and has survived every upgrade.
+
+**Four releases in, four defects that only deploying could find**, all fixed:
+10.54 (a running core could not say which build it was), 10.55 (a clean stop
+reported as a failure), 10.56 (Discord listed the admin command to every
+member), 10.57 (the Flarum extension had never been installable — its compiled
+bundles were gitignored, so every tag shipped an extension registering files it
+did not contain).
+
+That last one is the one to read. The harness built the bundles itself before
+every test and asserted they were non-empty; the distribution shipped nothing;
+nothing compared the two. It is the same shape as 10.52 and 10.54 and it kept
+recurring because a test that is right about what it built tells you nothing
+about what you ship.
 
 ### The version is not written down anywhere
 
