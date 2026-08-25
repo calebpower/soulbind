@@ -245,13 +245,43 @@ collide with the copies your proxy already has.
 
 ### Flarum
 
+**Not from Packagist.** soulbind is not published there, and
+`composer require soulbind/flarum-connector` will fail with a 404. It is not
+installable from this repository's VCS tag either — composer resolves a VCS
+repository from the composer.json at the repository *root*, and this is a
+monorepo whose root has none. Both of those were written here as if they worked;
+neither had been tried until a live forum needed it. See DECISIONS 10.57.
+
+Take `flarum-connector-<version>.zip` from the release page and install it as a
+composer **artifact** repository.
+
 ```sh
+# Somewhere the forum's user can read. NOT inside the forum directory.
+sudo mkdir -p /opt/soulbind/packages
+sudo curl -sSLo /opt/soulbind/packages/flarum-connector-0.1.3.zip \
+    https://github.com/calebpower/soulbind/releases/download/v0.1.3/flarum-connector-0.1.3.zip
+
+# Verify it against the release's SHA256SUMS before installing it.
+sudo curl -sSLo /tmp/SHA256SUMS \
+    https://github.com/calebpower/soulbind/releases/download/v0.1.3/SHA256SUMS
+( cd /opt/soulbind/packages && grep flarum-connector /tmp/SHA256SUMS | sed 's|\./||' | sha256sum -c - )
+
 cd /path/to/flarum
-composer require soulbind/flarum-connector
+composer config repositories.soulbind '{"type":"artifact","url":"/opt/soulbind/packages"}'
+composer require soulbind/flarum-connector:0.1.3
+php flarum extension:enable soulbind-connector
+php flarum assets:publish
 php flarum cache:clear
 ```
 
-Enable it in the admin panel and set the core URL and credential there.
+The extension id is **`soulbind-connector`**, not `soulbind-flarum-connector`:
+Flarum strips a leading `flarum-` from the package name when it derives an id.
+
+`assets:publish` is not optional. Flarum compiles the frontend bundles into its
+served assets, and skipping it leaves the forum serving the previous build —
+which, on an upgrade, shows up as untranslated keys in place of text.
+
+Then set the core URL and credential in the admin panel.
 
 ---
 

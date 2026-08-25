@@ -22,6 +22,21 @@ for the other.
   restricted to ADMINISTRATOR by Discord itself, in addition to the connector's
   own check and the capability core enforces.
 
+### Fixed
+
+- **The Flarum extension had never been installable.** `extend.php` registered
+  two compiled frontend bundles that `.gitignore` kept out of every release, so
+  installing it gave `File not found at path: .../js/dist/forum.js` and HTTP 500
+  on the first frontend request. The bundles now ship.
+
+### Added
+
+- **`flarum-connector-<version>.zip`** on the release page, installable as a
+  composer artifact repository. `composer require soulbind/flarum-connector`
+  never worked — nothing is published to Packagist — and neither did installing
+  from the VCS tag, because this monorepo has no root `composer.json`.
+  `docs/install.md` now describes what does work.
+
 ## 0.1.2 — 2026-08-24
 
 ### Fixed

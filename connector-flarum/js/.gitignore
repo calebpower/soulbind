@@ -1,2 +1,12 @@
-js/dist
+# node_modules is build INPUT and stays out of the repository.
+#
+# js/dist is deliberately NOT ignored, and that is a reversal. It was ignored
+# until v0.1.2, which meant every tag shipped an extension whose extend.php
+# registered js/dist/forum.js and js/dist/admin.js -- files no consumer ever
+# received. Installing it produced HTTP 500 on the first frontend request, on a
+# live forum. DECISIONS 10.57.
+#
+# Composer cannot run npm, so a Flarum extension distributes its compiled
+# bundles or it does not work. Generated files in a repository is a real cost;
+# an extension that cannot be installed is a larger one.
 node_modules

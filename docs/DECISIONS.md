@@ -8775,3 +8775,61 @@ plausible next change, and it now fails the build.
 **A live deployment produced this.** No test could have: every one of them was
 correct about the code, and the gap was in what the code declined to tell the
 platform.
+
+### 10.57 — The Flarum extension had never been installable
+
+Installing `connector-flarum` on the first live forum produced HTTP 500 on the
+front page, from the first request after enabling it:
+
+```
+InvalidArgumentException: File not found at path:
+  .../vendor/soulbind/flarum-connector/js/dist/forum.js
+```
+
+`extend.php` has registered `js/dist/forum.js` and `js/dist/admin.js` since the
+frontend was written. `js/.gitignore` contained `js/dist`. So every tag this
+project has ever cut shipped an extension registering two files that were not in
+it, and any install — Packagist, VCS, path repository — produced a forum that
+threw on its first frontend request.
+
+**Why nothing caught it.** `harness/flarum/stack.sh` runs `npm run build` before
+every session and then asserts both bundles are non-empty, with a comment
+explaining that webpack can exit 0 having produced nothing. That check is
+correct and it has always passed: it tests bundles the harness has just built
+itself. The distribution shipped different content — nothing — and no check ever
+compared the two. Two paths to one fact with no shared witness, which is 10.52
+and 10.54 a third and fourth time.
+
+`FlarumBundleGuardTest` closes it from the other side. It reads the bundle paths
+out of `extend.php` rather than hard-coding them — a hard-coded list would pass
+while a third registered bundle went unbuilt — and asserts each is present,
+non-empty, and mentions soulbind. It also asserts the harness still rebuilds
+them, because the committed bundles and the built ones are two different things
+and the seam between them is where staleness would live.
+
+**js/dist is now committed, and that is a deliberate reversal.** Generated files
+in a repository are a real cost. Composer cannot run npm, so the alternative is
+an extension that cannot be installed, which is a larger one. Every Flarum
+extension distributed anywhere makes this same trade.
+
+**The distribution channel was also fiction.** `release.yml`'s header said
+connector-flarum shipped no artifact "on purpose", being installed from this
+repository's VCS tag. That is not possible: composer resolves a VCS repository
+from the composer.json at the repository *root*, and this monorepo has none.
+`docs/install.md` said `composer require soulbind/flarum-connector`, which
+returns 404 because nothing is published to Packagist. Neither instruction had
+ever been executed by anybody.
+
+The release now builds `flarum-connector-<v>.zip` for a composer **artifact**
+repository. An artifact repository reads composer.json from inside the zip and
+requires a `version` there, so the version is injected from the tag at package
+time — the source still carries none, deliberately, because a version in a file
+is a version somebody has to remember to change. The packaging step refuses to
+produce a zip whose registered bundles are missing, which is the same assertion
+as the guard made where it can stop a release rather than a commit.
+
+**A smaller thing found on the way.** Flarum derives an extension id by
+stripping `flarum-ext-` and `flarum-` from the package name, so
+`soulbind/flarum-connector` is `soulbind-connector`, not
+`soulbind-flarum-connector`. `install.md` now says so, because guessing it wrong
+produces "There are no extensions by the ID of ..." and no other clue.

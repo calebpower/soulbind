@@ -17,9 +17,16 @@
 # correctly. The two plugin jars are shaded because a host loads one file out
 # of a directory and there is no lib/ to unbundle into.
 #
-# connector-flarum ships no artifact on purpose: it is a Composer package
-# installed from this repository's VCS tag, which is why its composer.json
-# deliberately carries no `version` field.
+# connector-flarum ships flarum-connector-<v>.zip, and that is a correction.
+# This header used to say it shipped nothing "on purpose", being installed from
+# this repository's VCS tag instead. That was never possible: composer resolves
+# a VCS repository from the composer.json at the repository ROOT, and this
+# monorepo has none. Nobody had tried it until a live forum needed it.
+#
+# The zip is a composer ARTIFACT repository package. Its composer.json carries a
+# `version`, injected from the tag at package time -- the source still carries
+# none, deliberately, because a version in a file is a version somebody has to
+# remember to change. DECISIONS 10.57.
 #
 # THE BUILD IS RE-RUN HERE rather than trusting whatever produced the tag. An
 # artifact attached to a release is the thing people actually run, and "it built
@@ -93,6 +100,39 @@ jobs:
       # the wrong one indistinguishable from the right one on a download page.
       # A fresh runner has no earlier build, which is precisely why a glob here
       # would keep working until the day something reused a workspace.
+      # The Flarum extension, as an installable zip.
+      #
+      # It is not on Packagist and cannot be installed from this repository's
+      # VCS tag either: composer resolves a VCS repository from the composer.json
+      # at the repo ROOT, and this is a monorepo whose root has none. The release
+      # workflow's header claimed otherwise for two releases; nobody had tried it.
+      #
+      # A composer ARTIFACT repository reads composer.json from inside the zip
+      # and requires a `version` there. The source deliberately carries none --
+      # a version in a file is a version somebody has to remember to change --
+      # so it is injected here, from the tag, at package time. DECISIONS 10.57.
+      #
+      # js/dist is committed and ships as-is: composer cannot run npm, and an
+      # extension whose registered bundles are absent throws on the first
+      # frontend request. FlarumBundleGuardTest holds that.
+      - name: package the flarum extension
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p release build/flarum-pkg
+          cp -a connector-flarum/. build/flarum-pkg/
+          rm -rf build/flarum-pkg/tests build/flarum-pkg/build build/flarum-pkg/vendor \
+                 build/flarum-pkg/js/node_modules build/flarum-pkg/infection.json5 \
+                 build/flarum-pkg/phpunit.xml build/flarum-pkg/phpunit-hostile.xml
+          python3 -c 'import json,sys; p="build/flarum-pkg/composer.json"; d=json.load(open(p)); d["version"]=sys.argv[1]; json.dump(d,open(p,"w"),indent=4)' "$v"
+          # Refuse to ship an extension whose registered bundles are missing.
+          for b in forum admin; do
+            test -s "build/flarum-pkg/js/dist/$b.js" \
+              || { echo "js/dist/$b.js missing or empty in the package" >&2; exit 1; }
+          done
+          ( cd build/flarum-pkg && zip -qr "$GITHUB_WORKSPACE/release/flarum-connector-${v}.zip" . )
+          unzip -l "release/flarum-connector-${v}.zip" | tail -3
+
       - name: gather the artifacts
         run: |
           set -euo pipefail
