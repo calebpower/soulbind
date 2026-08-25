@@ -8833,3 +8833,54 @@ stripping `flarum-ext-` and `flarum-` from the package name, so
 `soulbind/flarum-connector` is `soulbind-connector`, not
 `soulbind-flarum-connector`. `install.md` now says so, because guessing it wrong
 produces "There are no extensions by the ID of ..." and no other clue.
+
+### 10.58 — The webhook endpoint was unreachable, and said it was not
+
+`extend.php` registered the webhook on `Extend\Routes('forum')` under a comment
+reading, in part:
+
+> Outside the API namespace and unauthenticated by design: core presents a
+> signature, not a session, and it has no forum account to authenticate as.
+
+The intent is right. The registration does not achieve it. Flarum's forum
+middleware stack includes `CheckCsrfToken`, so an unsigned — or signed — POST
+from anything without a forum session is refused with HTTP 400 before the
+controller runs. `WebhookVerifier`, which that same comment calls "the most
+heavily checked file in the extension", could never execute for a real caller.
+
+Found by posting to the endpoint on a live forum while checking that a newly-set
+`webhook_secret` had taken effect. The verdict never changed, because the
+verdict was never computed. The evidence that it was Flarum and not us:
+`POST /login`, a stock Flarum route, returns the identical tokenless 400.
+
+`(new Extend\Csrf())->exemptRoute('soulbind.webhook')`. The extender merges into
+`flarum.http.csrfExemptPaths` rather than replacing it, so Flarum's own
+exemptions stand and nothing else on the forum loses CSRF.
+
+**The dangerous half of this fix is over-applying it.** `soulbind.link` is
+called by a member's own browser, carries a session, and changes that member's
+link state; exempting it would make that reachable from any other site they are
+logged into. So `CsrfExemptionGuardTest` asserts the exemption list is *exactly*
+`[soulbind.webhook]` rather than that it contains it, asserts `soulbind.link` is
+still declared and still not exempt, and asserts every exempted name is a route
+the extension actually declares — because Flarum matches on route *name*, so a
+typo is silently inert and reads exactly like a working exemption.
+
+**Why no test caught it.** `WebhookVerifier` has thorough unit tests that call
+it directly, and they pass. The PHP suite cannot stand up Flarum's middleware
+stack, so nothing exercised the route as an HTTP caller would reach it. The
+component was correct and unreachable — the same shape as 10.57, where the
+bundles were built correctly and never shipped, and 10.54, where the version was
+computed correctly and never written to the manifest. A test that verifies a
+part tells you nothing about whether anything can get to it.
+
+The proof, on the live forum: an unsigned POST now returns
+`{"verdict":"malformed"}` and a wrongly-signed one `{"verdict":"bad-signature"}`
+with HTTP 401 — the controller answering in JSON rather than Flarum answering in
+HTML. `soulbind.link` still returns 400 to a tokenless POST.
+
+**A note on what this does not enable.** Core has no webhook push. There is no
+webhook code in `core/src/main/java` at all; the Discord connector polls every
+five seconds, which is the other half of the "webhook/poll transport" the
+protocol document describes. This makes the endpoint work when something sends
+to it. Nothing does yet.

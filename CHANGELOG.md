@@ -12,6 +12,16 @@ for the other.
 
 ### Fixed
 
+- **The Flarum webhook endpoint was unreachable.** It was registered on the
+  forum route collection, so Flarum's CSRF middleware refused every request
+  before the signature was ever checked — including the signed ones from core it
+  exists for. That one route is now exempt; `/soulbind/link`, which a member's
+  browser calls with a session, deliberately is not.
+
+## 0.1.3 — 2026-08-25
+
+### Fixed
+
 - **`systemctl stop` reported a clean shutdown as a failure.** A JVM terminated
   by SIGTERM exits 143, which is not in systemd's default success set, so every
   routine stop, restart and reboot left `Failed with result 'exit-code'` behind.

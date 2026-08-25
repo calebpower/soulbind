@@ -47,12 +47,35 @@ return [
     (new Extend\Locales(__DIR__ . '/locale')),
 
     /*
+     * The webhook route, exempted from CSRF -- and ONLY that route.
+     *
+     * The registration below said the endpoint was "unauthenticated by design"
+     * and it was not reachable at all: Extend\Routes('forum') puts it behind
+     * Flarum's CheckCsrfToken, so core -- which presents a signature and has no
+     * forum session to take a token from -- got HTTP 400 from the middleware
+     * before WebhookVerifier ever ran. Found on a live forum by posting to it.
+     * DECISIONS 10.58.
+     *
+     * Extend\Csrf merges into flarum.http.csrfExemptPaths rather than replacing
+     * it, so Flarum's own exemptions stand and nothing else on the forum loses
+     * CSRF. What replaces the token here is the HMAC signature: a request with
+     * no valid signature is refused by WebhookVerifier, which is the check this
+     * route was always meant to be protected by.
+     *
+     * NOT soulbind.link. That one is called by the member's own browser with a
+     * session, so it both has a CSRF token and needs one -- exempting it would
+     * make a member's link state changeable from any other site they visit.
+     */
+    (new Extend\Csrf())->exemptRoute('soulbind.webhook'),
+
+    /*
      * The webhook endpoint.
      *
-     * Outside the API namespace and unauthenticated by design: core presents a
-     * signature, not a session, and it has no forum account to authenticate as.
-     * Everything that makes this safe is in WebhookVerifier, which is why that
-     * class is the most heavily checked file in the extension.
+     * Unauthenticated by design: core presents a signature, not a session, and
+     * it has no forum account to authenticate as. Everything that makes this
+     * safe is in WebhookVerifier, which is why that class is the most heavily
+     * checked file in the extension -- and why the exemption above is scoped to
+     * this one route.
      */
     (new Extend\Routes('forum'))
         ->post('/soulbind/webhook', 'soulbind.webhook', WebhookController::class)
