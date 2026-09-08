@@ -8,6 +8,16 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
+## Unreleased
+
+### Internal
+
+- **The release workflow refuses a tag `CHANGELOG.md` does not name.** Every
+  release from 0.1.3 to 0.1.5 shipped without a section naming it, because the
+  entry was written under `## Unreleased` and the tag was cut before the heading
+  became a version. The check also refuses a release that leaves entries under
+  `## Unreleased`, which is the shape all three took.
+
 ## 0.1.5 — 2026-08-25
 
 ### Changed

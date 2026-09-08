@@ -55,6 +55,25 @@ jobs:
           # loudly, which is the intended failure, but the fix is here.
           fetch-depth: 0
 
+      # FIRST, because it costs a second and the build costs minutes -- and
+      # because the thing it refuses cannot be fixed after the fact. A tag push
+      # PUBLISHES; there is no draft to quietly amend.
+      #
+      # The selftest runs here rather than only in `build`, and that is not
+      # belt-and-braces: a tag push does not trigger the build workflow (it is
+      # scoped to branches and pull requests), so without this the check gating
+      # the release would be the one thing in the run nothing had verified.
+      # docs/STATUS.md calls that family "a check inside a task cannot say
+      # whether the task ran"; it cost this project three defects.
+      #
+      # Every release from 0.1.3 to 0.1.5 would have been refused here. 0.1.3's
+      # section was written after its tag; 0.1.4's and 0.1.5's were not written
+      # at all until b0f6164.
+      - name: the changelog must name this version
+        run: |
+          .github/scripts/changelog-check-selftest.sh
+          .github/scripts/changelog-check.sh "$GITHUB_REF_NAME"
+
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
         with:
           java-version: '25'

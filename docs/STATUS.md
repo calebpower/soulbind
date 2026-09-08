@@ -1175,15 +1175,43 @@ produced the archives and they had no destination.
 
 | Workflow | When | What |
 |---|---|---|
-| `build` | every push and PR | `./gradlew build guards`, plus the cross-language vectors through their PHPUnit-free entry point, ordinary and hostile |
+| `build` | every push and PR | `./gradlew build guards`, plus the cross-language vectors through their PHPUnit-free entry point, ordinary and hostile, plus the changelog check's own selftest |
 | `mutation ratchet` | weekly, and on demand | every module against `mutation-baseline.txt`, with `--continue` so one regression does not hide the other eight |
-| `release` | a `v*` tag | rebuilds, refuses to publish if the tag and the built version disagree, and **publishes** the four artifacts with `SHA256SUMS` |
+| `release` | a `v*` tag | refuses a tag `CHANGELOG.md` does not name, rebuilds, refuses to publish if the tag and the built version disagree, and **publishes** the four artifacts with `SHA256SUMS` |
 
 **CI is the cheap half arriving faster, and is not the gate.** It runs what
 needs only a JDK and a PHP. The full-stack battery, the MariaDB axis and the
 install gate need a real machine with a container engine, a database server, a
 Paper world and a browser — they stay in a reaper session, and a green session
 remains what a release is judged on.
+
+**The changelog check — `.github/scripts/changelog-check.sh`.** Every release
+from `0.1.3` to `0.1.5` shipped without a `CHANGELOG.md` section naming it: the
+entry was written under `## Unreleased` in the same commit as the fix, the tag
+was cut on that commit, and the step that turns the heading into a version was
+never taken. `0.1.3`'s section was written retroactively; `0.1.4`'s and
+`0.1.5`'s were not written at all until `b0f6164`. Three consecutive releases,
+and nothing was looking.
+
+It asserts two things and the second is the sharper: that a `## <version>`
+heading exists, and that `## Unreleased` — if present at all — is empty, which
+catches the entry that *is* written but under a heading that is not a version.
+Run against the tagged trees, it refuses `v0.1.3`, `v0.1.4` and `v0.1.5`, and
+passes `v0.1.0` through `v0.1.2`.
+
+It is a script with fixtures rather than eight lines of YAML because the only
+way to exercise a workflow step is to fire it, and firing this one means pushing
+a tag, which publishes. `changelog-check-selftest.sh` runs two controls and six
+mutants — the second control exists because a check that refuses everything
+kills every mutant and asserts nothing. It runs in `build` on every push **and**
+in `release` before the build, because a tag push does not trigger `build`, and
+a check nothing verified is the "a check inside a task cannot say whether the
+task ran" family this project has already paid for three times.
+
+It is not a Gradle guard, and DECISIONS 10.53 is why: "the changelog names this
+version" is a property of a release, the version is known only at tag time, and
+a release-time assertion in a build-time guard fails the environment that has
+least.
 
 The release workflow **publishes rather than drafts**, at the owner's
 instruction: pushing a version tag is the decision to release, and a draft made

@@ -87,6 +87,27 @@ jobs:
             **/build/test-results/
           retention-days: 14
 
+  # The release gate's own check, verified on every push rather than only when
+  # a tag fires it. changelog-check.sh runs in exactly one place -- a tag push
+  # -- and that is the one operation this repository will not perform
+  # speculatively, because a pushed tag publishes with no draft in between. So
+  # the check is a script with fixtures, and this is where the fixtures run.
+  #
+  # Needs no JDK, no PHP and no network beyond the checkout: it is a shell
+  # script reading constructed files, plus one live case against the real
+  # CHANGELOG.md.
+  changelog:
+    name: changelog check selftest
+    runs-on: ubuntu-latest
+    steps:
+      # Shallow, like the vectors job and for the same reason: nothing here
+      # builds a versioned artifact, so the tags `git describe` wants would be
+      # history fetched for no reader.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: changelog-check selftest
+        run: .github/scripts/changelog-check-selftest.sh
+
   vectors:
     name: cross-language vectors
     runs-on: ubuntu-latest

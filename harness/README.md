@@ -2,8 +2,6 @@
 
 Test drivers that are not themselves tests.
 
-> **Status: empty.** Each harness arrives with the tier it serves.
-
 | Directory | Serves | Phase |
 |---|---|---|
 | `discord-scripted/` | A scripted chat surface, so the real connector logic, SDK, transport and core are exercised without the live platform | 6 |
