@@ -3,7 +3,12 @@
 Where the work actually stands. **This document is trusted over the
 specification** (`soulbind-plan.md`) and over the README whenever they disagree.
 
-Last updated: 2026-08-16, Phase 8 in progress.
+Last updated: 2026-09-07. **All ten phases complete, every gate met.**
+`0.1.5` is released and the first estate runs it, with enforcement off
+everywhere — no rules exist, so every gate answers `allow` / `no-rule`.
+
+Sections below are kept in the order the work happened rather than rewritten, so
+a phase heading describes what that phase did, not what is happening now.
 
 ---
 
@@ -107,13 +112,21 @@ remembered to ask. DECISIONS 10.30.
 ## What runs today
 
 `./gradlew build` compiles every Java module and runs both test tasks — the
-ordinary one and `charsetHostilityTest` — across 970 tests, green, including the seeded fuzz tier. In a reaper session, where a real MariaDB is reachable, 304 run and both backends are exercised.
+ordinary one and `charsetHostilityTest` — green, including the seeded fuzz tier.
+**983 tests on the workstation, 1055 in a reaper session**, where a real MariaDB
+is reachable and both storage backends are exercised; `:core:test` alone is 402
+here against 471 there. Those are the last figures this document recorded, not a
+fresh count — the point of keeping both is the gap between them, because a local
+build proves nothing whatever about the second backend.
 
-Real behaviour exists now, though nothing links anything yet — that is Phase 2.
-A registered connector **can** hello and heartbeat, over both transports. What runs is the storage seam against SQLite
-(MariaDB skips without `SOULBIND_TEST_MARIADB_URL`), link-code normalisation,
-HMAC request signing, credential minting, the authorization matrix, and the
-shared TOML configuration loader with core's schema on top of it.
+The whole product runs. Identities link across platforms, gates decide, effectors
+grant and revoke real roles and groups, and the audit log is append-only and
+exportable. This paragraph read "nothing links anything yet — that is Phase 2"
+from Phase 1 until 2026-09-07, by which point a real cross-platform link had
+survived five releases on a live estate.
+
+The storage seam runs against SQLite on the workstation (MariaDB skips without
+`SOULBIND_TEST_MARIADB_URL`) and against both in a session.
 
 **`charsetHostilityTest` re-runs the `charset`-tagged tests under
 `-Dfile.encoding=ISO-8859-1`.** It exists because this JVM's default charset is
@@ -322,15 +335,17 @@ would take that away and leave the battery green with nothing showing the second
 backend ever ran. Symmetric with the browser-evidence gap that
 `keep_browser_evidence` now closes; the storage half is outstanding.
 
-- No protocol implementation. `docs/protocol.md` is a stub, and the structural
-  test holding it to the code arrives with the first real operation.
-- `vectors/` is empty. Vectors arrive with the surface they pin.
-- `harness/` is empty. Each harness arrives with the tier it serves.
-- The `[run]` verb is a placeholder until Phase 8.
+These three are the whole list. Four further bullets stood here from Phase 0
+until 2026-09-07 — no protocol implementation, an empty `vectors/`, an empty
+`harness/`, and a placeholder `[run]` verb. All four were false by Phase 8 and
+none was removed when it stopped being true: `docs/protocol.md` is 610 lines held
+to the code by a guard in both directions, `vectors/` carries the golden vectors
+both language implementations are checked against, `harness/` carries nine tiers,
+and `[run]` invokes `harness/fullstack/run.sh` on both storage axes.
 
 ---
 
-## Phase 1 gate — not yet met
+## Phase 1 gate — met
 
 The specification's gate is: *fuzz clean on both backends; matrix green; a
 registered connector can hello + heartbeat over both transports.*
@@ -341,9 +356,18 @@ registered connector can hello + heartbeat over both transports.*
 | Fuzz clean on both backends | **Met.** Clean on SQLite on the workstation, and clean on SQLite *and* MariaDB in a reaper session, where `reaper test` stands up a digest-pinned database. Both fuzz tiers print `backend=MARIADB` with their seeds |
 | hello + heartbeat over both transports | **Met.** Asserted end-to-end against a running server on every available backend, over the socket and the signed request transport |
 
-Outstanding Phase 1 deliverables: WebSocket and webhook/poll transports, `hello`/heartbeat, audit query API, `soulbind-admin`
-bootstrap, `soulbind doctor`, T2 DTO wire conformance, the audit-immutability
-guard, T6 migration idempotence on both backends, and the T7 fuzz harness.
+**All of Phase 1's deliverables have since landed**, each verified in the tree
+rather than assumed: both transports in `core/transport/TransportServer` (the
+WebSocket authenticating at connect, the webhook/poll signing every body) with
+the pair named in `docs/protocol.md` §2; `hello`/heartbeat asserted end to end
+over both; `audit.query` in the protocol's operation table, and the export tier
+reading 1200 rows over 5 pages on each storage axis; `core/cli/Bootstrap.java`
+and `core/cli/Doctor.java`; the wire-conformance suite in
+`core/src/test/.../transport/` and `protocol/src/test/` (`AbsentFieldTest`,
+`GoldenVectorTest`, `WireVocabularyTest`, and one `*WireTest` per operation); the
+audit-immutability guard, which is in the guards table below; T6 migration
+idempotence, green against MariaDB in consecutive sessions; and the T7 fuzz
+harness, which prints its backend with its seed.
 
 ## Decision latency
 
@@ -395,7 +419,16 @@ This paragraph described it as pending for some time after it had been done,
 while the Phase 6 row and narrowing 12 both recorded it as complete. A document
 that contradicts itself is worse than one that is merely out of date: each half
 looks authoritative on its own, and a reader who finds this half first stops
-looking. What remains here is only the token — see below.
+looking.
+
+**The Discord bot token.** The smoke ran against a token written to a scratchpad
+file, which was to be regenerated before the connector went live. `connector-
+discord` has since been live on the estate through five releases, so either the
+token was rotated and nobody recorded it here, or the smoke token is still in
+service. **This document cannot say which, and that is the finding** — it is the
+owner's to confirm. Said "see below" here from 2026-08-16 to 2026-09-07 with
+nothing below to see; the item lived only in the uncommitted-then-committed
+`HANDOFF.md`, which is not the document this one defers to.
 
 ## Phase 7 — the gate, met
 
@@ -471,7 +504,7 @@ handling was mutated and *every mutant survived*: the corpus held no character
 whose case mapping leaves ASCII, so there was nothing to distinguish right from
 wrong. The blindness was the finding. Full account in `DECISIONS.md` 7.3.
 
-## Phase 8 — in progress
+## Phase 8 — complete, gate met
 
 ### connector-plan, landed
 
@@ -494,60 +527,73 @@ artifact. The mutation that mattered: dropping the seconds-to-milliseconds
 factor renders 1970 on every page, which reads as a data problem rather than a
 units one.
 
-### Outstanding for the gate
+### The gate, met
+
+Run 13: `reaper test` green on both storage backends in one session, with Plan
+rendering link data for a player linked through the real flow. The rows below
+were written while the gate was open and are updated to what closed them.
 
 | Gate item | State |
 |---|---|
 | `harness/fullstack/` compose + stage scripts (§12) | **Green on SQLite, end to end.** `run.sh up migrate journeys down` passes against a real stack: Paper and Velocity up, a mineflayer client refused by the gate, admitted by an override, running `/link`, redeeming, and admitted — then migrate against the live used database, the Tier 11 transcript, and a teardown that genuinely stops all three ports. JDK and Node are now checksum-pinned so the same script runs on the guest. MariaDB axis and the `.reaper.toml` wiring outstanding |
 | `.reaper.toml` run verb becomes real | **Wired** — the run verb now calls `harness/fullstack/run.sh` for both storage axes, MariaDB on its own database so the tier's rows cannot be mistaken for the unit suite's. Green in a session is not yet claimed |
 | Run images digest-pinned | **Done, with departure 8** — the container images are digest-pinned; Paper, Velocity, the JDK and Node are SHA-256 pinned jars and tarballs, because that is how they ship |
-| T6 staged battery, both backends, MariaDB started latin1 | **Partial** — migration idempotence lands as the `migrate` stage, in-session against a used database, mutation-checked. Latin1 start, astral-plane pushes and no-backdoor state building outstanding |
-| T7 fuzz against the real deployment | Not started |
-| T8 scenarios re-run in-session | Not started |
+| T6 staged battery, both backends, MariaDB started latin1 | **Met.** Migration idempotence lands as the `migrate` stage, in-session against a used database, mutation-checked. The latin1 axis is asserted rather than assumed, astral-plane text is round-tripped and compared, and state is built through the real flows with no backdoor (`harness/README.md`) |
+| T7 fuzz against the real deployment | **Met** — fuzz runs against a populated deployment, printing its backend with its seed |
+| T8 scenarios re-run in-session | **Met** — concurrency re-run in-session on both backends |
 | Plan pages render link data | **Demonstrated in a session.** Plan renders `linked=true`, `linkStatus="linked"`, `platforms="game, harness"`, `proof="link-code"`, the subject id and `linkedSince` in milliseconds, for a player linked by a real client running `/link` and redeeming a code — with Plan's own log reporting `Registered extension: soulbind`. mariadb axis only (DECISIONS 8.15). The check has since been rewritten to assert values rather than labels and to cover the server-wide providers, which the passing version did not (8.16) |
-| `journeys` emits the T11 evidence directory | **Green for 1 of the 3 journeys the plan names.** `first-time-player` runs against the live stack and emits a real per-step transcript; `COVERAGE.md` is generated from the recorded outcomes and names the other two as uncovered. No screenshots yet |
-| T5 suite against the real stack, 5xx watchdog on | Not started |
-| Plan pages render link data for players created through real flows | Not started |
+| `journeys` emits the T11 evidence directory | **Met for the two journeys that are in scope.** `first-time-player` and `forum-first-user` both emit real per-step transcripts, the second from the forum tier where the forum actually runs (departure 10). `bedrock-player` is declined on the plan's own conditional — §11 Tier 6 makes it contingent on Geyser being in the composed stack, and it is not. `COVERAGE.md` is still generated from the recorded outcomes. No screenshots |
+| T5 suite against the real stack, 5xx watchdog on | **Met** — the browser suite runs with the 5xx watchdog armed on every non-injection pass; 5 of 5 specs on each forum engine at run 36 |
+| Plan pages render link data for players created through real flows | **Met** — this is the gate's second clause, and run 13 is where it closed |
 
 ## Where to pick up
 
 Written at the end of a working session so the next one does not have to
-reconstruct it. Everything below is true at `a15ac9a`.
+reconstruct it. True at `6c80500`, `v0.1.5-1`.
 
 ### The state of things
 
-Phase 8's **first gate clause is met**: `reaper test` runs the full battery
-green on both storage backends in one session — verified four times, most
-recently exit 0 in 16m05s with 1055 tests on the guest against 983 on the
-workstation. The **second clause is not**: *"Plan pages render link data for
-players created through real flows"* has never been demonstrated. No Plan
-instance has ever run in this project.
+**Every phase is complete and every gate is met.** `0.1.5` is released, and all
+four components — core, `connector-velocity`, `connector-discord`,
+`connector-flarum` — run on the first estate, each version read back from the
+running process rather than from what was installed.
+
+**Enforcement is off everywhere.** No rules exist, so every gate answers `allow`
+/ `no-rule`; `gate.join` and `effector.group` are unset on the proxy, and
+`[effector] role` and `gate` are empty on Discord. One real cross-platform link
+exists in the identity graph and has survived five upgrades. The estate's MariaDB
+is untouched — soulbind runs on SQLite and has never opened it.
+
+So the next piece of work is **not** more coverage. It is the first rule, which
+is the first moment soulbind can refuse a real person entry.
 
 ### Next, in the order I would do it
 
-1. **Plan pages rendering real link data.** The other half of the gate. Needs a
-   Plan instance against the full-stack tier, and `connector-plan` registered as
-   a `DataExtension` in a running Plan. Everything under it is tested; nothing
-   has rendered.
-2. **T6's remaining items.** The **latin1** half is written and is waiting on a
-   session to prove it: the battery's MariaDB now starts
-   `--character-set-server=latin1`, `soulbind_fullstack` is created without a
-   charset clause so it inherits that, and core states utf8mb4 itself — in the
-   dialect migration (`ALTER DATABASE` for future tables, `CONVERT TO` for the
-   fifteen V1–V7 already created) and on the pool (`connectionCollation`).
-   `SchemaCharsetTest` asserts the schema rather than a round trip, because a
-   round trip only sees columns the suite happened to write emoji into.
-   **Unverified against a real latin1 server** — the workstation has no MariaDB,
-   so only the SQLite branch has ever executed. DECISIONS 8.18. Still open:
-   astral-plane pushes through every stage, and no-backdoor state building.
-3. **T7 fuzz and T8 scenarios as run stages.** `run.sh`'s `STAGES` list is
-   deliberately short; adding a name without a `stage_` function is rejected
-   before anything runs, and `FullstackStagesGuardTest` asserts the list, the
-   functions and the README agree.
-4. **T5 against the real stack** — the browser suite, 5xx watchdog on, no
-   injection.
-5. **The two uncovered journeys**, `forum-first-user` and `bedrock-player`,
-   which the generated `COVERAGE.md` names on every run.
+1. **The Discord bot token — the owner's, and it blocks nothing until it does.**
+   The Phase 6 smoke ran against a token in a scratchpad file that was to be
+   retired. The connector has been live through five releases since. Confirm it
+   was rotated, or rotate it. See the note under "Outstanding, and needing the
+   owner".
+2. **The first rule, on one gate.** `HANDOFF.md` §6 has the order of operations
+   and it is the right one: one gate, rollback ready *before* the rule rather
+   than after, and the knowledge that removing the rule restores the previous
+   behaviour immediately because no rule means allow. What does not undo itself
+   is any role or group an effector granted — those are real changes in LuckPerms
+   and Discord. Know that list before writing the rule, so removing them is a
+   list and not an investigation.
+3. **Wire the audit export before it is needed.** `tools/audit-export.sh` exists
+   and the log is prunable. This is cheap now and unrecoverable later.
+4. **The storage-backend evidence gap**, under "Known gaps". The battery runs
+   both backends and the only artefact proving it that reaches the workstation is
+   the fuzz tier's seed line. Removing one `@Tag("fuzz")` would leave the battery
+   green with nothing showing the second backend ever ran — which is the same
+   shape as every defect the first deployment found.
+5. **`decisions-follow-the-rules`**, the one open lead from Phase 9, excluded
+   pending diagnosis. DECISIONS 9.10.
+6. **`PlanCheckWalkerGuardTest`'s six guards skip in a reaper session** and run
+   only on the workstation, on `assumeTrue(pythonAvailable())`, because the JDK
+   image has no Python. A guard that skips where the battery runs is the wrong
+   shape by DECISIONS 7.2's own argument.
 
 ### What will bite you
 
@@ -587,7 +633,7 @@ several times:
   mismatch, an inverted condition and a misattributed verdict, none of them
   visible to any amount of reading.
 
-## Phase 10 — in progress
+## Phase 10 — complete, gate met
 
 ### Credential rotation — landed
 

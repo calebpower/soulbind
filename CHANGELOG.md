@@ -8,13 +8,22 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
-## Unreleased
+## 0.1.5 — 2026-08-25
 
 ### Changed
 
 - **The Flarum extension is listed as "Soulbind", not "soulbind".** Flarum prints
   the title verbatim, so it sat lowercase in a list beside "Lock", "Nicknames"
   and "Sticky" and read as a mistake rather than as branding.
+
+### Internal
+
+- `connector-flarum/composer.lock` refreshed. `composer.lock` stores a content
+  hash of `composer.json`, so the title change above invalidated it even though
+  no dependency moved — and `composer validate --check-lock`, which an operator's
+  own composer runs, would have failed against the published package.
+
+## 0.1.4 — 2026-08-25
 
 ### Fixed
 
@@ -37,9 +46,6 @@ for the other.
   as "Administrative commands" — refused on use, but advertised. It is now
   restricted to ADMINISTRATOR by Discord itself, in addition to the connector's
   own check and the capability core enforces.
-
-### Fixed
-
 - **The Flarum extension had never been installable.** `extend.php` registered
   two compiled frontend bundles that `.gitignore` kept out of every release, so
   installing it gave `File not found at path: .../js/dist/forum.js` and HTTP 500
