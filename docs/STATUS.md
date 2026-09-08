@@ -427,8 +427,8 @@ discord` has since been live on the estate through five releases, so either the
 token was rotated and nobody recorded it here, or the smoke token is still in
 service. **This document cannot say which, and that is the finding** — it is the
 owner's to confirm. Said "see below" here from 2026-08-16 to 2026-09-07 with
-nothing below to see; the item lived only in the uncommitted-then-committed
-`HANDOFF.md`, which is not the document this one defers to.
+nothing below to see; the item lived only in `HANDOFF.md`, a fourth document
+that drifted out of agreement with this one and has since been removed.
 
 ## Phase 7 — the gate, met
 
@@ -574,13 +574,29 @@ is the first moment soulbind can refuse a real person entry.
    retired. The connector has been live through five releases since. Confirm it
    was rotated, or rotate it. See the note under "Outstanding, and needing the
    owner".
-2. **The first rule, on one gate.** `HANDOFF.md` §6 has the order of operations
-   and it is the right one: one gate, rollback ready *before* the rule rather
-   than after, and the knowledge that removing the rule restores the previous
-   behaviour immediately because no rule means allow. What does not undo itself
-   is any role or group an effector granted — those are real changes in LuckPerms
-   and Discord. Know that list before writing the rule, so removing them is a
-   list and not an investigation.
+2. **The first rule, on one gate.** This is the first moment soulbind can refuse
+   a real person entry, and the order matters. The deployment steps that come
+   before it are already done on the estate — backed up, core alone, connectors
+   registered one at a time with the narrowest capability set that works, each
+   deployed in read-only posture. What is left is the rule itself:
+
+   - **One gate.** Not a posture change everywhere at once.
+   - **Rollback ready before the rule, not after.** Removing the rule restores
+     the previous behaviour immediately, because no rule means allow — that is
+     the whole rollback, and it only works if you know which gate to clear.
+   - **What does not undo itself** is any role or group an effector granted.
+     Those are real changes in LuckPerms and Discord. Know that list *before*
+     writing the rule, so removing them is a list and not an investigation.
+
+   Three things to watch once a rule exists. **Fail-closed and fail-open sit
+   next to each other:** a connector whose core is unreachable *denies*, while
+   core with no rule *allows*. Those are not contradictory, but together they
+   mean core being down is a user-visible outage on any gated action — so know
+   which gates are gated before gating them. **`connector.rotate` has no overlap
+   window:** the old credential stops working on the next request, which is
+   correct for a leak and hostile mid-session. **Overrides emit gate
+   transitions:** an override set by hand grants roles and groups and removing
+   it revokes them. It is not a quiet annotation.
 3. **Wire the audit export before it is needed.** `tools/audit-export.sh` exists
    and the log is prunable. This is cheap now and unrecoverable later.
 4. **The storage-backend evidence gap**, under "Known gaps". The battery runs
