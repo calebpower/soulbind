@@ -171,3 +171,51 @@ annotation-driven code fails quietly and "cannot be tested" must not become
 The panels are deliberately few. Anything richer — per-platform breakdowns,
 history, linking trends — is a question about whether the dashboard is the right
 place to answer it, not a matter of adding another provider.
+
+## Reporting playtime
+
+Off unless an operator turns it on. When on, this connector also **reports** how
+much each player has played over a trailing window, so a rule can require it:
+
+```toml
+[measure]
+enabled = true
+credential = ""          # holds measure-source; prefer SOULBIND_MEASURE_CREDENTIAL
+name = "playtime"        # a rule's threshold names the same string
+windowseconds = 604800   # a rule must ask for exactly this
+sweepseconds = 900
+```
+
+**Two credentials, and they are not interchangeable.** `core.credential` holds
+`link-state-reader` and can mutate nothing. `measure.credential` holds
+`measure-source` and can do nothing but report. Merging them would let the
+dashboard — the most-installed and least-audited surface in the system — either
+read everybody's measurements or manufacture entitlement, depending on which way
+the merge went.
+
+**The cadence must be well inside the window**, and the loader refuses a
+configuration where it is not. A stale observation refuses without emitting
+anything, so a reporter that refreshes no more often than the window it measures
+leaves every observation stale and every role standing on evidence that has
+expired.
+
+**Nothing is ever reported as zero because it could not be read.** Both halves of
+the source answer with `Optional`; an empty answer means this connector says
+nothing at all about that player that cycle. The failure being avoided is not a
+missing grant, it is every holder dropping to zero at once on the sweep after
+somebody renames a column.
+
+### Where the SQL is, and why there is any
+
+`dev.soulbind.connector.plan.playtime` is the only package outside
+`core/storage` permitted to name a table or hold a JDBC type, and the storage
+seam guard exempts exactly it — with a must-fail fixture proving the exemption is
+one package and not the module around it.
+
+The dashboard's public API has a windowed playtime total but **no idle-aware
+one**, and the difference is six-fold for some players: a role meaning "active"
+must not be earnable by leaving a client connected overnight. So the sum is
+spelled out, and run over the dashboard's *own* pooled connection. soulbind opens
+no database of its own and holds no database credential, which is what keeps its
+own state a file on disk.
+

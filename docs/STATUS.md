@@ -1288,10 +1288,21 @@ same answer.
 | `protocol` | `measure-source`, `measure.report`, `measure.get`, `RuleView.measure` |
 | `core` | `V8__measures.sql`, `MeasureRepository`, aggregation by strongest, `forget` on unlink |
 
-**Outstanding for the gate:** the reporter itself (`connector-plan`, which is not
-deployed anywhere yet), the storage-seam guard exemption its SQL will need, and a
-reaper session — V8 is a schema change, so the full-stack battery on both
-backends is mandatory rather than optional.
+| `connector-plan` | the reporter: population that drains, never zero on an unreadable source, its own `measure-source` credential |
+| `guards` | the storage-seam exemption for one package, with a must-fail fixture proving it is one package and not the module |
+
+**The reporter's two rules, because both prevent a silent mass revocation.**
+Nothing is reported as zero because it could not be read — both halves of
+`PlaytimeSource` answer with `Optional`, and empty means "say nothing about this
+player", not "they played none". And the population each cycle is *everyone
+active in the window ∪ everyone last reported non-zero*, which is what makes
+revocation work with no core sweep and which **drains**: once somebody is
+reported at zero they are dropped, because zero is below every threshold.
+
+**Outstanding for the gate:** a reaper session. V8 is a schema change, so the
+full-stack battery on both backends is mandatory rather than optional, and the
+reporter has never run against a real dashboard. `connector-plan` is also not
+deployed anywhere yet, so deploying it is a new install rather than an upgrade.
 
 **Not yet run in a session.** Everything above is green on the workstation only,
 which by this document's own standard is a claim about SQLite and nothing else.

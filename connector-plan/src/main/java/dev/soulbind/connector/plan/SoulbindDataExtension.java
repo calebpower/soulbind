@@ -40,11 +40,16 @@ import java.util.function.Supplier;
  * annotated: it cannot be exercised without Plan scanning it, so the less it
  * decides the less goes untested.
  *
- * <p><b>Read-only, and not by politeness.</b> The connector is registered with
- * capabilities that permit inspection and nothing else, so a provider here
- * cannot mutate the identity graph even if somebody added one that tried. The
- * plan's "mutations stay on the admin API" is enforced by the credential rather
- * than by this file remembering.
+ * <p><b>Read-only, and not by politeness.</b> The credential this class's data
+ * source holds permits inspection and nothing else, so a provider here cannot
+ * mutate the identity graph even if somebody added one that tried. The plan's
+ * "mutations stay on the admin API" is enforced by the credential rather than by
+ * this file remembering.
+ *
+ * <p>The module around it does now write something — it reports measurements —
+ * but through a <em>different</em> credential held by a different object, and
+ * nothing on this path can reach it. That separation is the whole reason the
+ * grants were not merged.
  *
  * <p>The roster comes from the caller, because Plan asks about the players it
  * knows and core does not know who is online.

@@ -25,6 +25,11 @@ import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
+import dev.soulbind.connector.plan.playtime.HostQueries;
+import dev.soulbind.connector.plan.playtime.PlanQueryPlaytimeSource;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import dev.soulbind.config.Config;
 import dev.soulbind.sdk.DecisionCache;
 import dev.soulbind.sdk.SoulbindClient;
@@ -99,6 +104,8 @@ public final class SoulbindPlanPlugin {
     private final Path dataDirectory;
 
     private SoulbindDataExtension extension;
+
+    private ScheduledExecutorService sweeps;
 
     @Inject
     public SoulbindPlanPlugin(
@@ -178,6 +185,80 @@ public final class SoulbindPlanPlugin {
                     e.getClass().getSimpleName(),
                     e.getMessage());
         }
+
+        // AFTER the registration block and outside its catch, deliberately.
+        // Reporting and rendering are independent: a dashboard that refuses the
+        // extension has nothing to do with whether measurements reach core, and
+        // tying them would mean one failure silently disabling the other.
+        startReporting(config);
+    }
+
+    /**
+     * Starts the playtime reporter, if an operator has asked for one.
+     *
+     * <p>Off unless configured, and it says which. "No reporter configured" and
+     * "a reporter that is not working" look identical in a log that says
+     * nothing, and only one of them is somebody's problem.
+     */
+    private void startReporting(Config config) {
+        if (!PlanConfig.measureEnabled(config)) {
+            logger.info("playtime reporting is off; no measure will be sent to core");
+            return;
+        }
+
+        PlanQueryPlaytimeSource.Queries queries;
+        try {
+            // The adapter lives in the playtime package, not here, so the
+            // storage seam's exemption covers exactly one package.
+            queries = HostQueries.live();
+        } catch (IllegalStateException e) {
+            // The dashboard is not far enough along to answer queries. Reported
+            // rather than retried: it means this plugin loaded before the thing
+            // it reads, which is a deployment fault a restart fixes and a
+            // retry loop would hide.
+            logger.error("the dashboard's query API is unavailable ({}); no playtime will be "
+                    + "reported. Nothing already granted is affected.", e.getMessage());
+            return;
+        }
+
+        // Its OWN credential, holding measure-source. The read-only one this
+        // connector already carries cannot write, and widening it would give
+        // the most-installed and least-audited surface in the system the
+        // ability to manufacture entitlement.
+        String credential = config.findString(PlanConfig.MEASURE_CREDENTIAL).orElse("");
+        SoulbindClient reporting = new SoulbindClient(
+                new dev.soulbind.sdk.transport.HttpTransport(
+                        config.getString(PlanConfig.CORE_URL), credential, Clock.systemUTC()),
+                credential,
+                Clock.systemUTC(),
+                new DecisionCache());
+
+        MeasureReporter reporter = new MeasureReporter(
+                reporting,
+                new PlanQueryPlaytimeSource(
+                        queries, (message, cause) -> logger.warn("{}", message, cause)),
+                PlanConfig.platformKind(config),
+                PlanConfig.measureName(config),
+                PlanConfig.measureWindow(config),
+                Clock.systemUTC(),
+                (message, cause) -> logger.warn("{}", message, cause));
+
+        sweeps = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "soulbind-measures");
+            t.setDaemon(true);
+            return t;
+        });
+
+        long seconds = PlanConfig.measureSweep(config).toSeconds();
+        // scheduleWithFixedDelay, not AtFixedRate: a sweep that runs long must
+        // not have another queued behind it, or a slow database turns into a
+        // backlog of sweeps all reading the same thing.
+        sweeps.scheduleWithFixedDelay(reporter::sweepQuietly, 0, seconds, TimeUnit.SECONDS);
+
+        logger.info("reporting '{}' over {}s to core every {}s",
+                PlanConfig.measureName(config),
+                PlanConfig.measureWindow(config).toSeconds(),
+                seconds);
     }
 
     /**

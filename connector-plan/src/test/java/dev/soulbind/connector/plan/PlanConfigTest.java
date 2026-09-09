@@ -150,4 +150,106 @@ class PlanConfigTest {
 
         assertEquals("proxy", PlanConfig.platformKind(PlanConfig.load(file)));
     }
+
+    // --- reporting -----------------------------------------------------------
+
+    @Test
+    @DisplayName("reporting is off unless asked for, with documented defaults when on")
+    void measureDefaults() {
+        Config off = load(MINIMAL);
+        assertFalse(PlanConfig.measureEnabled(off),
+                "a connector that starts reporting because it was installed is one nobody chose");
+        assertTrue(PlanConfig.validate(off).isEmpty(), () -> PlanConfig.validate(off).toString());
+
+        Config on = load(MINIMAL + """
+                [measure]
+                enabled = true
+                credential = "c"
+                """);
+        assertTrue(PlanConfig.measureEnabled(on));
+        assertEquals("playtime", PlanConfig.measureName(on));
+        assertEquals(Duration.ofDays(7), PlanConfig.measureWindow(on));
+        assertEquals(Duration.ofMinutes(15), PlanConfig.measureSweep(on));
+        assertTrue(PlanConfig.validate(on).isEmpty(), () -> PlanConfig.validate(on).toString());
+    }
+
+    @Test
+    @DisplayName("a cadence at or above the window is refused, because nothing stays fresh")
+    void cadenceMustBeWellInsideTheWindow() {
+        // This is the mitigation for the one narrowing measures carry: a role
+        // granted on a measure survives the reporter going away, because a
+        // stale observation refuses without emitting. A reporter that measures
+        // no more often than the window it measures leaves EVERY observation
+        // stale, so the mitigation has to be enforced rather than documented.
+        List<String> equal = PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = true
+                credential = "c"
+                windowseconds = 3600
+                sweepseconds = 3600
+                """));
+        assertEquals(1, equal.size(), equal::toString);
+        assertTrue(equal.get(0).contains("well below"), equal::toString);
+
+        List<String> longer = PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = true
+                credential = "c"
+                windowseconds = 3600
+                sweepseconds = 7200
+                """));
+        assertEquals(1, longer.size(), longer::toString);
+
+        assertTrue(PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = true
+                credential = "c"
+                windowseconds = 3600
+                sweepseconds = 60
+                """)).isEmpty(), "a cadence well inside the window was refused");
+    }
+
+    @Test
+    @DisplayName("reporting without its own credential is refused")
+    void reportingNeedsItsOwnCredential() {
+        // The read-only credential this connector already holds cannot write,
+        // and widening it would let the least-audited surface in the system
+        // manufacture entitlement.
+        List<String> problems = PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = true
+                """));
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("measure.credential"), problems::toString);
+    }
+
+    @Test
+    @DisplayName("a non-positive window or cadence is refused")
+    void nonPositiveIsRefused() {
+        assertFalse(PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = true
+                credential = "c"
+                windowseconds = 0
+                """)).isEmpty());
+        assertFalse(PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = true
+                credential = "c"
+                sweepseconds = 0
+                """)).isEmpty());
+    }
+
+    @Test
+    @DisplayName("nothing about reporting is validated while it is off")
+    void disabledReportingIsNotValidated() {
+        // Otherwise an operator cannot leave a half-written block in the file
+        // while they decide, which is how a setting ends up somewhere worse.
+        assertTrue(PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = false
+                windowseconds = 1
+                sweepseconds = 999999
+                """)).isEmpty());
+    }
 }

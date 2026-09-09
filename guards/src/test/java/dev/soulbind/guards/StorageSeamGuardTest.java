@@ -59,6 +59,32 @@ class StorageSeamGuardTest {
     private static final String STORAGE_PACKAGE = "dev/soulbind/core/storage";
 
     /**
+     * The one package permitted to know about a FOREIGN system's database.
+     *
+     * <p>A narrowing, and the reason covers exactly what it narrows and no more.
+     * This guard protects <b>core's</b> storage backend: nothing outside
+     * {@link #STORAGE_PACKAGE} may learn which database soulbind runs against,
+     * so that no caller can branch on it. That property is untouched here —
+     * soulbind still opens no database of its own, and its state is still a file
+     * on disk.
+     *
+     * <p>What this package does is read the analytics dashboard's schema, over a
+     * connection the dashboard owns and pools, because the dashboard's public
+     * API has no idle-aware playtime total and the difference between connected
+     * time and active time is six-fold for some players. The alternative was a
+     * second connection with a second copy of that system's credentials in a
+     * soulbind config file — strictly worse, and it would trip this same guard.
+     *
+     * <p><b>Exactly one package, and the fixture below proves it is one.</b> The
+     * adapter over the host's query API lives inside it for that reason alone:
+     * written where it was naturally called, it would have made this exemption
+     * cover two places, and an exemption that grows is one nobody can state the
+     * boundary of.
+     */
+    private static final String FOREIGN_QUERY_PACKAGE =
+            "dev/soulbind/connector/plan/playtime";
+
+    /**
      * Modules whose source must not know about databases.
      *
      * <p>Derived from {@code settings.gradle.kts}, not hand-listed: a new module
@@ -123,6 +149,29 @@ class StorageSeamGuardTest {
                 () -> "expected the backend name to be named in the violation: " + violations);
     }
 
+    @Test
+    @DisplayName("the foreign-query exemption covers one package, not the module around it")
+    void foreignQueryExemptionIsExactlyOnePackage() {
+        // The exemption is stated as "this package and nothing else". That
+        // sentence is only true if the module AROUND it is still scanned, and
+        // nothing else asserts it -- an exemption widened to the module by a
+        // careless edit would leave every test here green.
+        Path fixtures = SourceTree.repoRoot().resolve("guards/src/test/resources/fixtures");
+        List<String> violations = scan(fixtures, List.of("foreign-query-exemption-violation"));
+
+        assertFalse(
+                violations.isEmpty(),
+                "the must-fail fixture was not rejected: SQL in the connector package NEXT to "
+                        + "the exempt one went unnoticed, so the exemption is wider than it "
+                        + "claims to be");
+        assertTrue(
+                violations.stream().anyMatch(v -> v.contains("NotExempt.java")),
+                () -> "the fixture was rejected for the wrong file: " + violations);
+        assertTrue(
+                violations.stream().noneMatch(v -> v.contains("playtime/")),
+                () -> "the exempt package itself was flagged, so nothing is exempt: " + violations);
+    }
+
     /**
      * The scanning engine, parameterised so the fixtures drive exactly this code.
      */
@@ -131,8 +180,8 @@ class StorageSeamGuardTest {
         for (String module : modules) {
             for (Path src : SourceTree.javaSourcesUnder(root.resolve(module))) {
                 String rel = SourceTree.rel(src).replace('\\', '/');
-                if (rel.contains(STORAGE_PACKAGE)) {
-                    continue; // the one package permitted to know
+                if (rel.contains(STORAGE_PACKAGE) || rel.contains(FOREIGN_QUERY_PACKAGE)) {
+                    continue; // the two packages permitted to know
                 }
                 String[] lines = SourceTree.read(src).split("\n", -1);
                 boolean inBlockComment = false;

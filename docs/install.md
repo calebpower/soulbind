@@ -235,6 +235,22 @@ that stopped responding.
 
 Both are single jars. Drop them in and restart the host.
 
+The Plan connector reads its configuration from
+`plugins/soulbind/soulbind-plan.toml` on the proxy. It is inert without one.
+
+If it is to **report playtime** as well as display link state, it needs a second
+credential holding `measure-source` — registered separately, and not the
+`link-state-reader` one it already carries:
+
+```sh
+sudo -u soulbind soulbind register --name plan-measures \
+    --capabilities measure-source --config /etc/soulbind/soulbind.toml
+```
+
+Two grants rather than one is deliberate: reporting a measurement and reading
+everybody's measurements are different powers, and the dashboard should hold
+only the first.
+
 ```sh
 sudo cp connector-velocity-*.jar /path/to/velocity/plugins/
 sudo cp connector-plan-*.jar     /path/to/plan/extensions/
