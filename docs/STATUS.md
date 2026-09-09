@@ -1304,8 +1304,27 @@ full-stack battery on both backends is mandatory rather than optional, and the
 reporter has never run against a real dashboard. `connector-plan` is also not
 deployed anywhere yet, so deploying it is a new install rather than an upgrade.
 
-**Not yet run in a session.** Everything above is green on the workstation only,
-which by this document's own standard is a claim about SQLite and nothing else.
+**Green in a session, on both backends** — run 37, every stage passing on the
+SQLite and MariaDB axes, the forum tier 5 of 5 on each, the install gate, the
+ratchet, and the `plan` stage rendering against a real dashboard for the first
+time. `V8` applied to MariaDB with `success=true` in the Flyway history and the
+live schema dumped back showing `identity_ref VARCHAR(256)` and all four
+`measure_*` columns on `rule`.
+
+**What the session found that the workstation could not.** `measure.identity_ref`
+was `VARCHAR(191)` and had to be 256: a reference is `kind:id` over a 64- and a
+191-character column, so a legal one reaches 256. SQLite ignores `VARCHAR` length
+entirely, so every workstation run passed; MariaDB raises error 1406. It was
+fixed before the axis ran, and the axis is what proves the fix.
+
+**A known gap this exposed, recorded rather than closed.** Nothing generally
+asserts that a declared column is wide enough for the widest legal value it can
+hold. The two tests that do exist — `MeasureRepositoryTest`'s longest legal
+reference and name — were written for this defect and cover this table only.
+`identity_ref` appears at `VARCHAR(256)` in three further tables, and the same
+reasoning that got `measure` wrong could get the next one wrong the same way:
+silently on SQLite, loudly on a deployment, and only for accounts with long
+identifiers.
 
 ## Guards in force
 

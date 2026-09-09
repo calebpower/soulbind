@@ -77,14 +77,24 @@ OPERATIONS = ["code.issue", "code.redeem", "identity.describe", "decide",
               # nothing has ever sent nonsense to.
               "measure.report", "measure.get"]
 FIELDS = ["platformKind", "platformId", "display", "code", "gate", "key", "value",
-          # `name` and `windowSeconds` exist so the measure operations can be
-          # reached at all. Without them every generated body is refused by
-          # measure.report's blank-name or non-positive-window check before
-          # storage is touched, and the oracle -- no 5xx, always an envelope --
-          # holds trivially against a request that never got anywhere. Adding an
-          # operation to the list above without the fields its payload needs is
-          # coverage that looks present and is not.
           "name", "windowSeconds"]
+
+# Values that are hostile FOR A NUMBER.
+#
+# The corpus is entirely strings, so a numeric field filled from it can never be
+# anything but a type error -- refused at validation, before the code under test
+# runs. That is how `measure.report` came to sit in OPERATIONS while never once
+# reaching storage: adding it to the list, and then adding its fields to FIELDS,
+# both looked like coverage and neither was. A session measured it at roughly a
+# five percent chance per request of getting past validation, which is a stage
+# that covers the write path about one run in four.
+NUMERIC_HOSTILE = [0, -1, 1, 2**31 - 1, 2**31, 2**63 - 1, -(2**63), 604800, 86400]
+NUMERIC_FIELDS = {"windowSeconds", "value"}
+
+
+def hostile_for(field, text):
+    """A hostile value of the right KIND for this field."""
+    return rng.choice(NUMERIC_HOSTILE) if field in NUMERIC_FIELDS else text
 
 def post(body, timestamp=None, nonce=None, token=None):
     timestamp = int(time.time()) if timestamp is None else timestamp
@@ -118,7 +128,7 @@ def a_case():
     """One request, hostile somewhere."""
     hostile = rng.choice(corpus)
     op = rng.choice(OPERATIONS)
-    shape = rng.randrange(6)
+    shape = rng.randrange(7)
     if shape == 0:
         op = hostile                                    # hostile operation name
         payload = {}
@@ -129,10 +139,24 @@ def a_case():
     elif shape == 3:
         payload = hostile                               # payload is not an object
     elif shape == 4:
-        payload = {f: hostile for f in FIELDS}          # hostile everywhere
-    else:
+        # Hostile everywhere, but hostile in the right KIND per field, so a
+        # numeric field is a bad number rather than a type error.
+        payload = {f: hostile_for(f, hostile) for f in FIELDS}
+    elif shape == 5:
         payload = {"platformKind": "game", "platformId": hostile,
                    "display": hostile, "code": hostile}
+    else:
+        # A measure report VALID ENOUGH TO REACH STORAGE, hostile in the places
+        # that can be. Deliberately not left to chance: the interesting question
+        # here is what a hostile name and identifier do to the write path and to
+        # the gate transition it triggers, and a shape that arrives there only
+        # when the dice agree is one nobody can point at.
+        op = "measure.report"
+        payload = {"platformKind": "game",
+                   "platformId": hostile,
+                   "name": hostile.strip() or "playtime",
+                   "value": rng.choice(NUMERIC_HOSTILE),
+                   "windowSeconds": 604800}
     body = json.dumps({"schema": 1, "op": op, "id": str(uuid.uuid4()),
                        "payload": payload}, separators=(",", ":"))
     return op, body

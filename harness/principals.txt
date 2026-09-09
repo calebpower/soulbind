@@ -40,10 +40,16 @@ t10-auditor  | audit-source,config-management                                   
 # fifth time this capability has broken a caller. A guard now holds the
 # document to this row.
 discord      | code-display,code-entry,effector,link-state-reader,enforcement-point | code.issue code.redeem identity.describe decide
-# The reporting half of the dashboard connector, registered SEPARATELY from its
-# read-only credential. Two grants rather than one because reporting a
-# measurement and reading everybody's measurements are different powers, and the
-# most-installed surface in the system should hold only the first.
+# The grant docs/install.md tells an OPERATOR to register for reporting, which
+# is why it is here: this file exists so the credential smoke attempts every
+# grant a real deployment is told to create, and the install document has
+# already broken a caller five times by naming the wrong one.
+#
+# It is deliberately not what the full-stack harness registers. That runs ONE
+# dashboard connector and gives it both capabilities (the `plan` row above),
+# because one process holds both halves there. A deployment can split them, and
+# the document says to; the harness does not need to, and pretending otherwise
+# in this table would be describing an intent nothing implements.
 plan-measures | measure-source                                                      | measure.report
 
 # --- the simulated-user tier ------------------------------------------------
