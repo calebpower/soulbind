@@ -40,6 +40,14 @@ import java.util.List;
  *     treated as absent rather than as an instruction to delete, because
  *     "clear the documentation" is not a thing anybody has needed and the
  *     alternative is a request that wipes a note by omission.
+ * @param measure a threshold on a reported measure, or null. Rendered only
+ *     when present, and the omission is arranged in {@code Codec} rather than
+ *     here: this module declares no serialization library at all, deliberately,
+ *     and a guard holds it to that. The inclusion is scoped to this type there
+ *     rather than set on the mapper, because a global "drop nulls" would change
+ *     {@code description}, {@code registeredBy} and every other nullable field
+ *     on every other response -- a wire change to a dozen operations smuggled
+ *     in under one feature.
  * @param registeredBy the connector that first declared this gate.
  *     <b>Response-only.</b> It is ignored on the way in: a caller does not get
  *     to state who introduced a gate, least of all somebody else.
@@ -51,11 +59,25 @@ public record RuleView(
         long graceSeconds,
         String defaultEffect,
         String description,
-        String registeredBy) {
+        String registeredBy,
+        MeasureRequirementView measure) {
 
     public RuleView {
         requiredKinds = requiredKinds == null ? List.of() : List.copyOf(requiredKinds);
         description = description == null || description.isBlank() ? null : description;
+    }
+
+    /** The shape every rule view had before measures existed. */
+    public RuleView(
+            String gate,
+            List<String> requiredKinds,
+            boolean requireLinked,
+            long graceSeconds,
+            String defaultEffect,
+            String description,
+            String registeredBy) {
+        this(gate, requiredKinds, requireLinked, graceSeconds, defaultEffect,
+                description, registeredBy, null);
     }
 
     /** The rule alone, for callers that have nothing to say about the gate. */

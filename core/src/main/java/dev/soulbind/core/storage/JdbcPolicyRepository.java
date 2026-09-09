@@ -16,6 +16,7 @@
 package dev.soulbind.core.storage;
 
 import dev.soulbind.policy.Effect;
+import dev.soulbind.policy.MeasureRequirement;
 import dev.soulbind.policy.PolicyOverride;
 import dev.soulbind.policy.Rule;
 import java.sql.PreparedStatement;
@@ -158,8 +159,10 @@ final class JdbcPolicyRepository implements PolicyRepository {
             }
             try (PreparedStatement ps = c.prepareStatement(
                     "INSERT INTO rule (gate_name, required_kinds, require_linked, grace_seconds,"
-                            + " default_effect, updated_at, updated_via)"
-                            + " VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                            + " default_effect, updated_at, updated_via, measure_name,"
+                            + " measure_at_least, measure_window_seconds,"
+                            + " measure_max_age_seconds)"
+                            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
                 ps.setString(1, rule.gateName());
                 ps.setString(2, rule.requiredKinds().isEmpty()
                         ? null
@@ -169,6 +172,18 @@ final class JdbcPolicyRepository implements PolicyRepository {
                 ps.setString(5, rule.defaultEffect().name());
                 ps.setLong(6, at.toEpochMilli());
                 ps.setString(7, updatedVia);
+                MeasureRequirement measure = rule.measure();
+                if (measure == null) {
+                    ps.setNull(8, java.sql.Types.VARCHAR);
+                    ps.setNull(9, java.sql.Types.BIGINT);
+                    ps.setNull(10, java.sql.Types.BIGINT);
+                    ps.setNull(11, java.sql.Types.BIGINT);
+                } else {
+                    ps.setString(8, measure.name());
+                    ps.setLong(9, measure.atLeast());
+                    ps.setLong(10, measure.windowSeconds());
+                    ps.setLong(11, measure.maxAgeSeconds());
+                }
                 ps.executeUpdate();
             }
             return null;
@@ -291,8 +306,9 @@ final class JdbcPolicyRepository implements PolicyRepository {
     }
 
     private static String selectRule() {
-        return "SELECT gate_name, required_kinds, require_linked, grace_seconds, default_effect"
-                + " FROM rule";
+        return "SELECT gate_name, required_kinds, require_linked, grace_seconds, default_effect,"
+                + " measure_name, measure_at_least, measure_window_seconds,"
+                + " measure_max_age_seconds FROM rule";
     }
 
     private static Rule mapRule(ResultSet rs) throws SQLException {
@@ -310,7 +326,30 @@ final class JdbcPolicyRepository implements PolicyRepository {
                 // policy row this build cannot parse must not open a gate, and
                 // refusing to start would take the whole deployment down over
                 // one row.
-                Effect.fromConfigName(rs.getString("default_effect")).orElse(Effect.DENY));
+                Effect.fromConfigName(rs.getString("default_effect")).orElse(Effect.DENY),
+                mapMeasure(rs));
+    }
+
+    /**
+     * The rule's measure requirement, or null when it has none.
+     *
+     * <p>Keyed on the NAME being present rather than on all four columns, so a
+     * half-written row cannot become a requirement nobody typed. A row whose
+     * name is set but whose numbers are nonsense would throw out of
+     * MeasureRequirement's constructor, which is right: that is a policy this
+     * build cannot evaluate, and guessing at it would answer a question the
+     * operator did not ask.
+     */
+    private static MeasureRequirement mapMeasure(ResultSet rs) throws SQLException {
+        String name = Jdbc.nullableString(rs, "measure_name");
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return new MeasureRequirement(
+                name,
+                rs.getLong("measure_at_least"),
+                rs.getLong("measure_window_seconds"),
+                rs.getLong("measure_max_age_seconds"));
     }
 
     private static PolicyOverride mapOverride(ResultSet rs) throws SQLException {

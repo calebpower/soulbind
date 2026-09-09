@@ -56,6 +56,19 @@ public enum Capability {
     AUDIT_SOURCE("audit-source"),
 
     /**
+     * Report a measured quantity about a platform account.
+     *
+     * <p>Separate from {@link #AUDIT_SOURCE}, which it superficially resembles,
+     * because the blast radius is different in kind. An audit row is a record
+     * nobody enforces on; a measure is a number a RULE enforces on, so a
+     * connector holding this can manufacture entitlement by reporting a large
+     * one. A materially different blast radius earns its own grant -- the same
+     * argument that split {@code link-state-reader} out rather than handing out
+     * {@code config-management}.
+     */
+    MEASURE_SOURCE("measure-source"),
+
+    /**
      * Read link state for an identity, and nothing else.
      *
      * <p>The only capability in this enum that grants no mutation of any kind.

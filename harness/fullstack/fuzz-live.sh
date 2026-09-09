@@ -69,7 +69,13 @@ corpus = load_corpus(corpus_path)
 print(f"[fuzz-live] {len(corpus)} corpus entries")
 
 OPERATIONS = ["code.issue", "code.redeem", "identity.describe", "decide",
-              "rule.set", "audit.query", "heartbeat", "hello"]
+              "rule.set", "audit.query", "heartbeat", "hello",
+              # A write endpoint taking a name and two numbers, and a read
+              # taking an optional one. Both are reachable with a credential, so
+              # both belong here: the oracle is that no input produces a 5xx or
+              # a malformed envelope, and an operation left off this list is one
+              # nothing has ever sent nonsense to.
+              "measure.report", "measure.get"]
 FIELDS = ["platformKind", "platformId", "display", "code", "gate", "key", "value"]
 
 def post(body, timestamp=None, nonce=None, token=None):

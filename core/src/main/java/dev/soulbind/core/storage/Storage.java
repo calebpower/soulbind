@@ -47,6 +47,7 @@ public final class Storage implements AutoCloseable {
     private final PolicyRepository policy;
     private final EventRepository events;
     private final RuntimeConfigRepository runtimeConfig;
+    private final MeasureRepository measures;
 
     private Storage(Backend backend, HikariDataSource dataSource, ExecutorService writeExecutor) {
         this.backend = backend;
@@ -60,6 +61,7 @@ public final class Storage implements AutoCloseable {
         this.policy = new JdbcPolicyRepository(dataSource, writeExecutor);
         this.events = new JdbcEventRepository(dataSource, writeExecutor);
         this.runtimeConfig = new JdbcRuntimeConfigRepository(dataSource, writeExecutor);
+        this.measures = new JdbcMeasureRepository(dataSource, writeExecutor);
     }
 
     /**
@@ -429,6 +431,10 @@ public final class Storage implements AutoCloseable {
 
     public RuntimeConfigRepository runtimeConfig() {
         return runtimeConfig;
+    }
+
+    public MeasureRepository measures() {
+        return measures;
     }
 
     @Override

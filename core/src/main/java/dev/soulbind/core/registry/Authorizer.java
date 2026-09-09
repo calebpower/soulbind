@@ -73,6 +73,18 @@ public final class Authorizer {
         DECIDE(Capability.ENFORCEMENT_POINT),
         AUDIT_PUSH(Capability.AUDIT_SOURCE),
 
+        /**
+         * Report a measured quantity about a platform account.
+         *
+         * <p>Its own capability rather than {@code audit-source}, which it
+         * resembles. An audit row is a record nobody enforces on; a measure is
+         * a number a rule enforces on, so this grant lets a connector
+         * manufacture entitlement. Not {@code config-management} either -- that
+         * would hand rule rewriting and unlinking to whatever process happens
+         * to measure something.
+         */
+        MEASURE_REPORT(Capability.MEASURE_SOURCE),
+
         RULE_GET(Capability.CONFIG_MANAGEMENT),
         RULE_SET(Capability.CONFIG_MANAGEMENT),
         OVERRIDE_GET(Capability.CONFIG_MANAGEMENT),
@@ -103,7 +115,24 @@ public final class Authorizer {
         CONNECTOR_ROTATE(Capability.CONFIG_MANAGEMENT),
         SUBJECT_INSPECT(Capability.CONFIG_MANAGEMENT),
         IDENTITY_UNLINK(Capability.CONFIG_MANAGEMENT),
-        AUDIT_QUERY(Capability.CONFIG_MANAGEMENT);
+        AUDIT_QUERY(Capability.CONFIG_MANAGEMENT),
+
+        /**
+         * Read what has been reported about an account.
+         *
+         * <p>Administrative, because "how much has this person done" is personal
+         * data about one member. It sits with the operations that read across
+         * the graph rather than with {@code link-state-reader}, whose whole
+         * point is that it reveals link state and nothing else.
+         *
+         * <p>It is not optional, though it looks it. Routine reports write no
+         * audit row -- see the handler -- so without this the only ways to see
+         * what core believes are a refusal message from {@code decide}, which
+         * needs a gate and {@code enforcement-point}, or opening core's
+         * database, which is the second management surface this project has
+         * refused three times.
+         */
+        MEASURE_GET(Capability.CONFIG_MANAGEMENT);
 
         private final Capability required;
 

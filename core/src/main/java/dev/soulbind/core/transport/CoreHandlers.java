@@ -27,6 +27,14 @@ import dev.soulbind.core.identity.LinkCodeRecord;
 import dev.soulbind.core.identity.LinkingService;
 import dev.soulbind.core.identity.RedeemThrottle;
 import dev.soulbind.core.policy.GateEvaluator;
+import dev.soulbind.core.storage.MeasureRecord;
+import dev.soulbind.core.storage.MeasureRepository;
+import dev.soulbind.policy.MeasureRequirement;
+import dev.soulbind.protocol.MeasureGetRequest;
+import dev.soulbind.protocol.MeasureGetResponse;
+import dev.soulbind.protocol.MeasureReportRequest;
+import dev.soulbind.protocol.MeasureRequirementView;
+import dev.soulbind.protocol.MeasureView;
 import dev.soulbind.core.policy.GateTransitions;
 import dev.soulbind.core.storage.GateRecord;
 import dev.soulbind.core.storage.AuditRepository;
@@ -69,6 +77,7 @@ import dev.soulbind.protocol.HeartbeatResponse;
 import dev.soulbind.protocol.SchemaVersion;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -97,6 +106,7 @@ public final class CoreHandlers {
             PolicyRepository policy,
             EventRepository events,
             RuntimeConfigRepository runtimeConfig,
+            MeasureRepository measures,
             LinkingService linking,
             GateEvaluator gateEvaluator,
             RedeemThrottle throttle,
@@ -242,6 +252,78 @@ public final class CoreHandlers {
                     request.get().detail()));
 
             return WireResponse.ok(Map.of("sequence", appended.sequence()));
+        });
+
+        handlers.put(Operation.MEASURE_REPORT, (connector, payload) -> {
+            var request = codec.bind(payload, MeasureReportRequest.class);
+            if (request.isEmpty()) {
+                return unreadable(Operation.MEASURE_REPORT, MeasureReportRequest.class);
+            }
+            MeasureReportRequest q = request.get();
+            if (blank(q.platformKind()) || blank(q.platformId()) || blank(q.name())) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST,
+                        "measure.report names a platform kind, an id and a measure");
+            }
+            if (q.windowSeconds() <= 0) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST,
+                        "windowSeconds must be positive; a value covering no time cannot be "
+                                + "compared against a rule's window");
+            }
+
+            String ref = q.platformKind() + ":" + q.platformId();
+
+            // Bracketed exactly as code.redeem, attest, unlink and override.set
+            // are. Reporting is a MUTATION, so the re-evaluation happens inside
+            // the request that caused it -- which is the whole answer to "what
+            // re-evaluates a trailing window", and why core still needs no
+            // timer. The population is bounded by construction: one report
+            // concerns one account.
+            Map<String, Set<String>> before = transitions.before(List.of(ref));
+
+            // NO AUDIT ROW. A reporter running every few minutes over an active
+            // population writes thousands of rows a week of pure telemetry, into
+            // a log that is designed to be prunable and whose value is that a
+            // human can read it. The precedent is exact: gateSeen is called on
+            // the decide hot path and deliberately appends nothing.
+            //
+            // What IS worth recording is the CONSEQUENCE, and it already is: a
+            // report that changes which gates a subject satisfies emits
+            // requirements-met or -lost below. The measurement is telemetry; the
+            // transition is the decision.
+            measures.report(ref, q.name(), q.value(), q.windowSeconds(),
+                    clock.instant(), "connector:" + connector.id());
+
+            transitions.emit(before, List.of(ref));
+
+            return WireResponse.ok(Map.of("recorded", true));
+        });
+
+        handlers.put(Operation.MEASURE_GET, (connector, payload) -> {
+            var request = codec.bind(payload, MeasureGetRequest.class);
+            if (request.isEmpty()) {
+                return unreadable(Operation.MEASURE_GET, MeasureGetRequest.class);
+            }
+            MeasureGetRequest q = request.get();
+            if (blank(q.platformKind()) || blank(q.platformId())) {
+                return WireResponse.error(ErrorCode.INVALID_REQUEST,
+                        "measure.get names a platform kind and an id");
+            }
+
+            String ref = q.platformKind() + ":" + q.platformId();
+            List<MeasureView> views = new ArrayList<>();
+            for (MeasureRecord record
+                    : measures.forRefs(List.of(ref), blank(q.name()) ? null : q.name())) {
+                // observedAt is returned and staleness is NOT computed. Staleness
+                // is maxAgeSeconds, which belongs to a RULE: the same observation
+                // is fresh for a thirty-day rule and stale for an hourly one.
+                views.add(new MeasureView(
+                        record.name(),
+                        record.value(),
+                        record.windowSeconds(),
+                        record.observedAt().getEpochSecond(),
+                        record.reportedBy()));
+            }
+            return WireResponse.ok(new MeasureGetResponse(views));
         });
 
         handlers.put(Operation.AUDIT_QUERY, (connector, payload) -> {
@@ -560,7 +642,8 @@ public final class CoreHandlers {
                         Set.copyOf(view.requiredKinds()),
                         view.requireLinked(),
                         view.graceSeconds(),
-                        effect);
+                        effect,
+                        toRequirement(view.measure()));
             } catch (IllegalArgumentException e) {
                 return WireResponse.error(ErrorCode.INVALID_REQUEST, e.getMessage());
             }
@@ -821,7 +904,24 @@ public final class CoreHandlers {
                 rule.graceSeconds(),
                 rule.defaultEffect().wireName(),
                 gate == null ? null : gate.description(),
-                gate == null ? null : gate.registeredBy());
+                gate == null ? null : gate.registeredBy(),
+                rule.measure() == null ? null : new MeasureRequirementView(
+                        rule.measure().name(),
+                        rule.measure().atLeast(),
+                        rule.measure().windowSeconds(),
+                        rule.measure().maxAgeSeconds()));
+    }
+
+    /**
+     * A wire requirement as policy's, or null.
+     *
+     * <p>Throws {@link IllegalArgumentException} for a nonsensical one, which
+     * the rule.set handler already catches and reports as invalid-request --
+     * the same path a negative graceSeconds takes.
+     */
+    private static MeasureRequirement toRequirement(MeasureRequirementView view) {
+        return view == null ? null : new MeasureRequirement(
+                view.name(), view.atLeast(), view.windowSeconds(), view.maxAgeSeconds());
     }
 
     private static OverrideView toView(PolicyOverride override) {

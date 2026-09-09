@@ -18,6 +18,7 @@ package dev.soulbind.policy;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
@@ -45,13 +46,27 @@ import java.util.TreeSet;
  * @param firstSeenAt when this identity was first recorded, from audit rather
  *     than from the connector. A connector-supplied time is a time the caller
  *     controls, and grace computed from it is grace anybody can extend.
+ * @param measures what has been reported about this subject, by name. Already
+ *     aggregated across the subject's identities by whoever built the snapshot;
+ *     the evaluator compares and does not combine.
  */
 public record SubjectSnapshot(
         String subjectId,
         String askingIdentityRef,
         Set<String> verifiedKinds,
         int identityCount,
-        Instant firstSeenAt) {
+        Instant firstSeenAt,
+        Map<String, MeasureObservation> measures) {
+
+    /** The shape every snapshot had before measures existed. */
+    public SubjectSnapshot(
+            String subjectId,
+            String askingIdentityRef,
+            Set<String> verifiedKinds,
+            int identityCount,
+            Instant firstSeenAt) {
+        this(subjectId, askingIdentityRef, verifiedKinds, identityCount, firstSeenAt, Map.of());
+    }
 
     public SubjectSnapshot {
         Objects.requireNonNull(askingIdentityRef, "askingIdentityRef");
@@ -61,6 +76,7 @@ public record SubjectSnapshot(
         if (identityCount < 0) {
             throw new IllegalArgumentException("identityCount must not be negative");
         }
+        measures = measures == null ? Map.of() : Map.copyOf(measures);
     }
 
     /** Somebody arriving for the first time: no subject, nothing verified. */

@@ -176,16 +176,20 @@ public final class Main {
                             storage.policy(),
                             storage.events(),
                             storage.runtimeConfig(),
+                            storage.measures(),
                             new LinkingService(
                                     new EventEmitter(storage.events(), clock),
                                     storage.identities(), storage.linkCodes(),
                                     storage.platformKinds(), storage.audit(),
+                                    storage.measures(),
                                     new GateEvaluator(
-                                            storage.identities(), storage.policy(), clock),
+                                            storage.identities(), storage.policy(),
+                                            storage.measures(), clock),
                                     clock,
                                     Duration.ofSeconds(
                                             CoreConfig.linkCodeTtlSeconds(config))),
-                            new GateEvaluator(storage.identities(), storage.policy(), clock),
+                            new GateEvaluator(storage.identities(), storage.policy(),
+                                    storage.measures(), clock),
                             new RedeemThrottle(),
                             codec,
                             clock,

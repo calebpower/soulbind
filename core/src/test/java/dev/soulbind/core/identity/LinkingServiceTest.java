@@ -69,6 +69,7 @@ class LinkingServiceTest {
     Path tempDir;
 
     private static final Instant T0 = Instant.ofEpochSecond(1_700_000_000L);
+    private static final Instant AT = Instant.parse("2026-03-01T12:00:00Z");
     private static final Duration TTL = Duration.ofMinutes(10);
 
     /** A clock the tests move deliberately, so TTL edges are reachable. */
@@ -120,8 +121,10 @@ class LinkingServiceTest {
                         new EventEmitter(storage.events(), clock),
                         storage.identities(), storage.linkCodes(), storage.platformKinds(),
                         storage.audit(),
+                        storage.measures(),
                         new dev.soulbind.core.policy.GateEvaluator(
-                                storage.identities(), storage.policy(), clock),
+                                storage.identities(), storage.policy(),
+                                storage.measures(), clock),
                         clock, TTL),
                 clock);
     }
@@ -426,8 +429,9 @@ class LinkingServiceTest {
                     new LosesTheClaim(f.storage().linkCodes()),
                     f.storage().platformKinds(),
                     f.storage().audit(),
+                    f.storage().measures(),
                     new dev.soulbind.core.policy.GateEvaluator(
-                            f.storage().identities(), f.storage().policy(), clock),
+                            f.storage().identities(), f.storage().policy(), f.storage().measures(), clock),
                     clock,
                     TTL);
 
@@ -668,6 +672,34 @@ class LinkingServiceTest {
                     storage.identities().findIdentity("kind-b", "acct-2")
                             .orElseThrow().createdAt(),
                     "the new identity is new, including its dates");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("unlink forgets what was measured about the account")
+    void unlinkForgetsMeasures(Backend backend) {
+        // Section 6 says re-linking an account creates a NEW identity precisely
+        // so a resurrected row cannot carry its old dates. A surviving measure
+        // is exactly that: somebody unlinks, re-links, and arrives holding an
+        // entitlement earned by an identity that no longer exists -- with
+        // nothing anywhere to report it.
+        try (Fixture f = fixture(backend)) {
+            Storage storage = f.storage();
+            LinkCodeRecord code = f.linking().issue("conn-a", "kind-a", "acct-1", null);
+            f.linking().redeem("conn-b", code.code(), "kind-b", "acct-2", null);
+
+            storage.measures().report(
+                    "kind-b:acct-2", "playtime", 25_200L, 604_800L, AT, "connector:reporter");
+            storage.measures().report(
+                    "kind-a:acct-1", "playtime", 1L, 604_800L, AT, "connector:reporter");
+
+            assertTrue(f.linking().unlink("conn-b", "kind-b", "acct-2"));
+
+            assertTrue(storage.measures().forRefs(List.of("kind-b:acct-2"), null).isEmpty(),
+                    "the unlinked account kept its measurement, which a re-link would inherit");
+            assertEquals(1, storage.measures().forRefs(List.of("kind-a:acct-1"), null).size(),
+                    "unlinking one account forgot another account's measurement");
         }
     }
 

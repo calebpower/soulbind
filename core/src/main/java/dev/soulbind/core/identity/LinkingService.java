@@ -22,6 +22,7 @@ import dev.soulbind.core.policy.GateEvaluator;
 import dev.soulbind.core.policy.GateTransitions;
 import dev.soulbind.core.storage.AuditRepository;
 import dev.soulbind.core.storage.IdentityRepository;
+import dev.soulbind.core.storage.MeasureRepository;
 import dev.soulbind.core.storage.LinkCodeRepository;
 import dev.soulbind.core.storage.PlatformKindRepository;
 import dev.soulbind.protocol.EventType;
@@ -76,6 +77,7 @@ public final class LinkingService {
     private final LinkCodeRepository codes;
     private final PlatformKindRepository kinds;
     private final AuditRepository audit;
+    private final MeasureRepository measures;
 
     private final GateTransitions transitions;
     private final Clock clock;
@@ -87,6 +89,7 @@ public final class LinkingService {
             LinkCodeRepository codes,
             PlatformKindRepository kinds,
             AuditRepository audit,
+            MeasureRepository measures,
             GateEvaluator gates,
             Clock clock,
             Duration ttl) {
@@ -95,6 +98,7 @@ public final class LinkingService {
         this.codes = codes;
         this.kinds = kinds;
         this.audit = audit;
+        this.measures = measures;
         this.transitions = new GateTransitions(events, identities, gates);
         this.clock = clock;
         this.ttl = ttl;
@@ -402,6 +406,19 @@ public final class LinkingService {
         boolean removed = identities.unlink(platformKind, platformId);
 
         if (removed) {
+            // BEFORE the transitions are emitted, so a gate that was satisfied
+            // only because of this account's measurement is already unsatisfied
+            // when the diff is taken -- otherwise the role would stay on until
+            // something else moved.
+            //
+            // This BREAKS the precedent set by purgeExpiredOverrides and
+            // purgeExpired, which filter at read time and are called by nothing.
+            // The reason does not apply here: section 6 says re-linking creates
+            // a NEW identity precisely so a resurrected row cannot carry its old
+            // dates, and a surviving measure is exactly that -- an entitlement
+            // outliving the identity that earned it, with nothing to report it.
+            measures.forget(platformKind + ":" + platformId);
+
             audit.append(new AuditEntry(
                     0L,
                     clock.instant(),

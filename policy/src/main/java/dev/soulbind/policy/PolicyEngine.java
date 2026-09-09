@@ -110,7 +110,8 @@ public final class PolicyEngine {
 
         List<String> missing = snapshot.missingKinds(rule.requiredKinds());
         boolean linkedEnough = !rule.requireLinked() || snapshot.isLinked();
-        boolean satisfied = missing.isEmpty() && linkedEnough;
+        MeasureVerdict measured = measureVerdict(snapshot, rule.measure(), now);
+        boolean satisfied = missing.isEmpty() && linkedEnough && measured.satisfied();
 
         if (satisfied) {
             return new Decision(
@@ -134,13 +135,74 @@ public final class PolicyEngine {
                     missing);
         }
 
-        Decision.Reason reason = !linkedEnough && missing.isEmpty()
-                ? Decision.Reason.NOT_LINKED
-                : Decision.Reason.MISSING_KINDS;
+        // Kinds first, then linkage, then the measure. The order is what the
+        // refusal SAYS, and it puts the most actionable thing in front: "verify
+        // your forum account" is something a person can do now, where "play for
+        // another two hours" is not, and a refusal naming only the second when
+        // both are true sends them at the harder one.
+        if (!missing.isEmpty() || !linkedEnough) {
+            Decision.Reason reason = !linkedEnough && missing.isEmpty()
+                    ? Decision.Reason.NOT_LINKED
+                    : Decision.Reason.MISSING_KINDS;
+            return new Decision(rule.defaultEffect(), reason, describe(missing, linkedEnough),
+                    ttlSeconds, missing);
+        }
 
-        return new Decision(rule.defaultEffect(), reason, describe(missing, linkedEnough),
+        return new Decision(rule.defaultEffect(), measured.reason(), measured.detail(),
                 ttlSeconds, missing);
     }
+
+    /**
+     * Whether a reported measure satisfies the rule, and why not when it does
+     * not.
+     *
+     * <p>The checks are ordered so the refusal names the fault that will not fix
+     * itself. A window mismatch is a MISCONFIGURATION -- somebody set the
+     * reporter to one window and the rule to another -- and it is reported ahead
+     * of staleness, which is operational and may well clear on its own.
+     */
+    private static MeasureVerdict measureVerdict(
+            SubjectSnapshot snapshot, MeasureRequirement required, Instant now) {
+        if (required == null) {
+            return SATISFIED;
+        }
+
+        MeasureObservation observed = snapshot.measures().get(required.name());
+        if (observed == null) {
+            return new MeasureVerdict(false, Decision.Reason.MEASURE_ABSENT,
+                    "nothing has reported '" + required.name() + "' for this subject");
+        }
+
+        if (observed.windowSeconds() != required.windowSeconds()) {
+            return new MeasureVerdict(false, Decision.Reason.MEASURE_WINDOW_MISMATCH,
+                    "'" + required.name() + "' covers " + observed.windowSeconds()
+                            + "s but the rule asks for " + required.windowSeconds()
+                            + "s; the reporter and the rule disagree about the window");
+        }
+
+        // Exclusive, like every other deadline here: an observation whose age is
+        // exactly the limit is still good. Same convention as grace and override
+        // expiry, so there is one boundary rule to learn rather than three.
+        if (now.isAfter(observed.observedAt().plusSeconds(required.maxAgeSeconds()))) {
+            return new MeasureVerdict(false, Decision.Reason.MEASURE_STALE,
+                    "'" + required.name() + "' was last reported at " + observed.observedAt()
+                            + ", older than the " + required.maxAgeSeconds()
+                            + "s this rule accepts");
+        }
+
+        if (observed.value() < required.atLeast()) {
+            return new MeasureVerdict(false, Decision.Reason.MEASURE_BELOW_THRESHOLD,
+                    "'" + required.name() + "' is " + observed.value() + ", below the "
+                            + required.atLeast() + " this gate requires");
+        }
+
+        return SATISFIED;
+    }
+
+    /** Satisfied carries no reason, because a met requirement explains nothing. */
+    private static final MeasureVerdict SATISFIED = new MeasureVerdict(true, null, null);
+
+    private record MeasureVerdict(boolean satisfied, Decision.Reason reason, String detail) {}
 
     /**
      * The override that applies, with deny winning over allow.

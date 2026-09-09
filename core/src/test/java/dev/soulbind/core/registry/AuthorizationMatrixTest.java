@@ -77,6 +77,12 @@ class AuthorizationMatrixTest {
                 put(Operation.CODE_REDEEM, Optional.of(Capability.CODE_ENTRY));
                 put(Operation.DECIDE, Optional.of(Capability.ENFORCEMENT_POINT));
                 put(Operation.AUDIT_PUSH, Optional.of(Capability.AUDIT_SOURCE));
+                put(Operation.MEASURE_REPORT, Optional.of(Capability.MEASURE_SOURCE));
+                // Reading a measure is administrative; reporting one is not.
+                // The asymmetry is deliberate: a reporter should be able to say
+                // what it measured without being able to read what everybody
+                // else's has.
+                put(Operation.MEASURE_GET, Optional.of(Capability.CONFIG_MANAGEMENT));
 
                 put(Operation.RULE_GET, Optional.of(Capability.CONFIG_MANAGEMENT));
                 put(Operation.RULE_SET, Optional.of(Capability.CONFIG_MANAGEMENT));

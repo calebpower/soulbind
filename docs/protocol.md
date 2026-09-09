@@ -81,6 +81,7 @@ new integration arrive without a dispatcher change.
 | `enforcement-point` | Ask allow/deny for an (identity, gate) pair |
 | `effector` | Consume events and apply side effects |
 | `audit-source` | Append connector-side events to the audit stream |
+| `measure-source` | Report a measured quantity about a platform account |
 | `link-state-reader` | Read link state for an identity, and nothing else. The only capability that grants no mutation |
 | `config-management` | Read and mutate rules, overrides and runtime config; inspect subjects; unlink |
 
@@ -102,6 +103,7 @@ copy of the rule.
 | `code.redeem` | `code-entry` |
 | `decide` | `enforcement-point` |
 | `audit.push` | `audit-source` |
+| `measure.report` | `measure-source` |
 | `rule.get` | `config-management` |
 | `rule.set` | `config-management` |
 | `override.get` | `config-management` |
@@ -114,6 +116,7 @@ copy of the rule.
 | `subject.inspect` | `config-management` |
 | `identity.unlink` | `config-management` |
 | `audit.query` | `config-management` |
+| `measure.get` | `config-management` |
 
 *(any registered)* means any credential that resolves to an **active**
 registered connector. It never means unauthenticated: a caller with no
@@ -483,6 +486,71 @@ enforcement point overwrites within seconds of starting up.
 The two differ for `registeredBy` on any gate another connector declared first,
 which is precisely the case worth seeing.
 
+## Measures
+
+A **measure** is a named number a connector reports about one platform account,
+carrying the window it covers and, from core's clock, when it was recorded.
+
+```json
+{"platformKind":"game","platformId":"9f2c",
+ "name":"playtime","value":25200,"windowSeconds":604800}
+```
+
+Core never learns what the number counts. That a measure called `playtime` means
+seconds, adjusted for idling, over the trailing week, is a convention between the
+connector reporting it and the operator writing the rule.
+
+**One observation per (account, name), overwritten.** This is not a time series
+and must not become one. Core computing windows over stored samples would force
+retention, and retention would force a sweep — and nothing here re-evaluates on a
+timer. The reporter computes its own window and reports the answer.
+
+**There is no observation time in the request.** Core stamps it. Freshness a
+connector can assert is freshness any connector can extend, which would make a
+staleness rule something the reporter opts out of by claiming it just looked.
+
+**A rule compares; it does not aggregate.** Where a subject holds several
+identities, the value is the *strongest* any of them reports, never their total.
+Summing would let one person's two accounts on a platform add up to an
+entitlement neither earned, and a cross-platform total measures nothing at all —
+forum posts and minutes of play are not the same quantity.
+
+A rule's threshold rides on `rule.set` and comes back on `rule.get`, and is
+**absent entirely** when a rule has none:
+
+```json
+"measure": {"name":"playtime","atLeast":25200,
+            "windowSeconds":604800,"maxAgeSeconds":3600}
+```
+
+`atLeast` is **inclusive**; `maxAgeSeconds` is **exclusive**, matching grace and
+override expiry, so there is one boundary convention to learn. `windowSeconds`
+must match the observation **exactly** — not "at least this long". A longer
+window over-counts and a shorter one under-counts, and a reporter misconfigured
+to thirty days would otherwise satisfy a seven-day rule with nothing anywhere
+failing: it would simply grant to people who had not earned it.
+
+Four refusals are specific to measures: `measure-absent`, `measure-stale`,
+`measure-window-mismatch` and `measure-below-threshold`. Each names the measure,
+what was observed and what was required, so a refusal is actionable.
+
+**Reporting is a mutation**, so it re-evaluates in the same request and emits
+`subject.requirements-met` or `-lost` if the answer changed. That is the whole
+mechanism by which a trailing window advances without a clock: the reporter
+re-measures, and core re-decides while it is being told.
+
+**A routine report writes no audit row.** A reporter running every few minutes
+over an active population would write thousands a week of pure telemetry into a
+log designed to be prunable and valuable because a person can read it — the same
+reasoning that keeps `decide` off the audit path. What is recorded is the
+*consequence*: the gate transition, which is what an operator asking "why did
+this role come off in March" actually needs.
+
+`measure.get` reads back what core holds. It returns `observedAtEpochSeconds` and
+**does not** compute staleness, because staleness is `maxAgeSeconds` and that
+belongs to a rule — the same observation is fresh for a thirty-day rule and stale
+for an hourly one.
+
 ## Decisions
 
 `decide` asks whether an identity may pass a gate. The **identity**, not the
@@ -504,7 +572,16 @@ it exists, and an operator cannot write a rule for a gate they cannot see.
 ### Reasons
 
 `no-rule`, `requirements-met` and `grace` produce `allow`. `not-linked`,
-`missing-kinds` and `default` produce `deny`. `override` produces either.
+`missing-kinds`, `measure-absent`, `measure-stale`, `measure-window-mismatch`,
+`measure-below-threshold` and `default` produce `deny`. `override` produces
+either.
+
+Identity faults are reported ahead of measure faults, and among measure faults a
+window mismatch is reported ahead of staleness. The order is what the refusal
+*says*, and it puts the most actionable thing first: "verify your forum account"
+is something a person can do now where "play for another two hours" is not, and a
+window mismatch is a misconfiguration that will not fix itself where staleness
+may clear on the next report.
 
 ### Precedence
 

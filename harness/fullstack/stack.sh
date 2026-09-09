@@ -446,11 +446,15 @@ CHAT_CRED=$("$CORE_CLI" register --name chat --quiet \
     --capabilities code-display,code-entry,link-state-reader \
     --config "$RUN/core/soulbind.toml")
 
-# The dashboard connector, holding exactly one capability: link-state-reader.
+# The dashboard connector: link-state-reader, plus measure-source since it also
+# reports what it measures.
 #
-# ONE, and it grants no mutation of any kind. This is the whole point of the
-# capability added in 8.14: the dashboard can answer "what is this account
-# linked to" and can do nothing else at all.
+# TWO, and the second is the narrowest grant that lets it write anything. The
+# first grants no mutation of any kind -- the whole point of the capability
+# added in 8.14: the dashboard can answer "what is this account linked to" and
+# can do nothing else. measure-source lets it say what it measured and nothing
+# further: it cannot read another account's measures, which is
+# config-management, and it cannot touch policy or the graph.
 #
 # What it used to hold was code-display -- the closest available before the
 # read-only capability existed -- which also permits minting a link code. And
@@ -463,7 +467,7 @@ CHAT_CRED=$("$CORE_CLI" register --name chat --quiet \
 # a deployment should run, which is how a missing grant stays hidden until
 # somebody else's install.
 PLAN_CRED=$("$CORE_CLI" register --name plan --quiet \
-    --capabilities link-state-reader \
+    --capabilities link-state-reader,measure-source \
     --config "$RUN/core/soulbind.toml")
 
 # --- the simulated-user cast --------------------------------------------

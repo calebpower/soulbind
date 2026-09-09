@@ -50,6 +50,14 @@ public record Decision(
         NOT_LINKED,
         /** Required platform kinds are missing or unverified. */
         MISSING_KINDS,
+        /** The rule requires a measure nobody has reported for this subject. */
+        MEASURE_ABSENT,
+        /** The measure was reported, but too long ago to still count. */
+        MEASURE_STALE,
+        /** The measure covers a different window from the one the rule asks for. */
+        MEASURE_WINDOW_MISMATCH,
+        /** The measure was reported and is fresh, but below the threshold. */
+        MEASURE_BELOW_THRESHOLD,
         /** The rule's requirements are unmet and its default applies. */
         DEFAULT;
 

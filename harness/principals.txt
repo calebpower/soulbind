@@ -28,9 +28,9 @@ harness      | code-display,code-entry,config-management,enforcement-point,link-
 
 # --- the full-stack tier ----------------------------------------------------
 proxy        | code-display,code-entry,enforcement-point                            | code.issue decide
-fs-harness   | code-entry,config-management,enforcement-point                       | decide rule.set audit.query
+fs-harness   | code-entry,config-management,enforcement-point                       | decide rule.set audit.query measure.get
 chat         | code-display,code-entry,link-state-reader                            | code.issue identity.describe
-plan         | link-state-reader                                                    | identity.describe
+plan         | link-state-reader,measure-source                                     | identity.describe measure.report
 t10-auditor  | audit-source,config-management                                       | audit.push audit.query
 
 # --- the grant docs/install.md tells operators to use --------------------------

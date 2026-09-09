@@ -8884,3 +8884,94 @@ webhook code in `core/src/main/java` at all; the Discord connector polls every
 five seconds, which is the other half of the "webhook/poll transport" the
 protocol document describes. This makes the endpoint work when something sends
 to it. Nothing does yet.
+
+---
+
+## Phase 11 — measures
+
+### 11.1 — A number a rule can compare, without core growing a clock
+
+The estate wants a Discord role granted at seven hours of playtime over the
+trailing week and taken away below two. Three things were missing: the
+measurement, a way for a rule to compare one, and something to re-ask the
+question when no user action has occurred.
+
+The third is the hard one, and it is stated three times in this repository as a
+deliberate property — STATUS's narrowing list, `GateEvaluator.satisfiedGates`,
+and 10.26 — as the reason this project has **twice refused** to grant a role for
+a time-bounded condition. Grace, then expiring overrides. A trailing window is
+that case again with a longer clock.
+
+**What made it tractable was refusing to store a time series.** A trailing sum
+changes continuously; a stored *observation* of one changes only when somebody
+stores a new one. Keeping samples would mean core computing windows, which forces
+retention, which forces a sweep — all three of the hard problems at once, and the
+sweep is the timer. Storing the answer the reporter already computed, plus the
+window it covers and when core recorded it, removes all three rather than solving
+them.
+
+So: one row per (identity, name), overwritten. And **reporting is a mutation**,
+bracketed with `GateTransitions.before`/`emit` exactly as `code.redeem`,
+`attest`, `identity.unlink` and `override.set` already are. The population is
+bounded by construction — one report concerns one account — so there is no
+enumeration, no cursor and no scheduler. The window advances because the reporter
+re-measures it, not because core waited.
+
+**Hysteresis is not in core, and must not be.** Grant at seven hours, revoke
+below two: between them the answer depends on the previous answer, which is
+state, and a stateful `decide` is the end of the matrix. Two callers asking about
+the same person would get different answers. It is instead two gates — a high one
+and a low one — bound to the same role in the connector, the high one granting
+and the low one revoking. The two directions deliberately ignored are the band.
+Each gate stays a plain threshold and a pure function.
+
+**Three things I would not cut**, each because the failure it prevents is silent:
+
+- **The exact window match.** A reporter misconfigured to thirty days satisfies a
+  seven-day rule on any other reading, and *nothing anywhere fails* — it simply
+  grants to people who did not earn it, forever. One comparison prevents the
+  worst outcome this feature can produce.
+- **The mandatory freshness bound.** `maxAgeSeconds` must be positive, refused at
+  construction. Without one the answer survives the reporter disappearing, and
+  there is no timer here to notice.
+- **`measures.forget` on unlink.** This breaks the precedent of
+  `purgeExpiredOverrides` and `purgeExpired`, which filter at read time and are
+  called by nothing. The reason does not carry: §6 says re-linking creates a NEW
+  identity precisely so a resurrected row cannot carry its old dates, and a
+  surviving measure is exactly that — an entitlement outliving the identity that
+  earned it, with nothing to report it.
+
+**`measure.get` was going to be cut and should not have been.** Routine reports
+write no audit row — thousands a week of telemetry into a log designed to be
+prunable, and `gateSeen` on the `decide` hot path is the exact precedent for
+leaving it out. But that makes the table write-only over the wire, and the
+remaining ways to ask "what does core believe about this player, and is the
+reporter reporting at all" are a refusal message from `decide` (which needs a
+gate and `enforcement-point`) or opening core's database — the second management
+surface this project has refused three times. Deferring the read side would have
+made debugging the reporter the one thing an operator is not allowed to do.
+
+**What the mutation checks found.** Twenty-five mutants across the four modules,
+two of which mattered:
+
+- `tableArray`'s soundness flag in the config loader was **unobservable** —
+  every path that would clear it has already appended a problem, so the load
+  throws before the value is read. Deleted; a flag that cannot change an outcome
+  reads as a safeguard and is not one.
+- The "strongest, not summed" aggregation had **no test that distinguished
+  strongest from last-wins**. The first version of the assertion used one measure
+  whose larger value happened to be reported second. It now uses two, ordered
+  against each other, so both mutants die. This is the vacuous-assertion shape
+  8.20 and 10.26 both record, arriving a third time.
+
+`measure-source` is its own capability rather than `audit-source`. An audit row
+is a record nobody enforces on; a measure is a number a rule enforces on, so the
+grant lets a connector manufacture entitlement. A materially different blast
+radius earns its own grant — the argument that produced `link-state-reader`.
+
+**One narrowing, and its scope is exactly this:** a role granted on a measure
+survives the reporter going away. The observation goes stale, `decide` correctly
+refuses, but nothing emits `requirements-lost`, so an effector holding a standing
+role keeps it until the reporter returns and reports a low value. Closing it
+properly needs the swept operation this design rejects. Mitigated by requiring a
+reporter's cadence to be materially shorter than `maxAgeSeconds`.

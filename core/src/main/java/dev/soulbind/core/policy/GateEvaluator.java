@@ -26,6 +26,12 @@ import dev.soulbind.policy.SubjectSnapshot;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashSet;
+import dev.soulbind.core.storage.MeasureRecord;
+import dev.soulbind.core.storage.MeasureRepository;
+import dev.soulbind.policy.MeasureObservation;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -50,9 +56,16 @@ public final class GateEvaluator {
 
     private final Clock clock;
 
-    public GateEvaluator(IdentityRepository identities, PolicyRepository policy, Clock clock) {
+    private final MeasureRepository measures;
+
+    public GateEvaluator(
+            IdentityRepository identities,
+            PolicyRepository policy,
+            MeasureRepository measures,
+            Clock clock) {
         this.identities = identities;
         this.policy = policy;
+        this.measures = measures;
         this.clock = clock;
     }
 
@@ -67,7 +80,11 @@ public final class GateEvaluator {
         String ref = platformKind + ":" + platformId;
         var subject = identities.subjectOf(platformKind, platformId);
         if (subject.isEmpty()) {
-            return SubjectSnapshot.unlinked(ref, clock.instant());
+            // An account belonging to no subject can still have been measured --
+            // a reporter sees the game account before anybody links anything --
+            // so the unlinked snapshot carries its own measures rather than none.
+            return new SubjectSnapshot(
+                    null, ref, Set.of(), 1, clock.instant(), strongestByName(List.of(ref)));
         }
 
         List<Identity> graph = identities.identitiesOf(subject.get().id());
@@ -83,7 +100,39 @@ public final class GateEvaluator {
         }
         // firstSeen from the graph, not from a caller: grace computed from a
         // connector-supplied time is grace anybody can extend.
-        return new SubjectSnapshot(subject.get().id(), ref, verified, graph.size(), firstSeen);
+        List<String> refs = new ArrayList<>();
+        for (Identity identity : graph) {
+            refs.add(identity.platformKind() + ":" + identity.platformId());
+        }
+        return new SubjectSnapshot(subject.get().id(), ref, verified, graph.size(), firstSeen,
+                strongestByName(refs));
+    }
+
+    /**
+     * The strongest observation of each measure across a subject's identities.
+     *
+     * <p><b>Strongest, not summed</b>, and the whole record travels together
+     * rather than a maximum value being paired with somebody else's window.
+     *
+     * <p>Summing would let one person's two accounts on the same platform add up
+     * to an entitlement neither earned -- an alt farm, which is the shape the
+     * unique (platform_kind, platform_id) constraint exists to prevent
+     * elsewhere. It would also produce a meaningless number across platforms:
+     * forum minutes and game minutes are not the same quantity, and their total
+     * measures nothing. "The strongest evidence any platform has" is the only
+     * reading that stays true whichever platforms happen to report.
+     */
+    private Map<String, MeasureObservation> strongestByName(List<String> refs) {
+        Map<String, MeasureObservation> out = new LinkedHashMap<>();
+        for (MeasureRecord record : measures.forRefs(refs, null)) {
+            MeasureObservation candidate = new MeasureObservation(
+                    record.value(), record.windowSeconds(), record.observedAt());
+            MeasureObservation existing = out.get(record.name());
+            if (existing == null || candidate.value() > existing.value()) {
+                out.put(record.name(), candidate);
+            }
+        }
+        return out;
     }
 
     /**
@@ -112,6 +161,18 @@ public final class GateEvaluator {
      * <p>What remains is {@code requirements-met} and an operator's explicit
      * allow-{@code override} — two states that change only when something else
      * emits an event, which is exactly what an effector can track.
+     *
+     * <p><b>The sentence above needs one qualification since measures landed.</b>
+     * "Nothing re-evaluates on a timer" is still true of core, and is still the
+     * reason grace and expiring overrides are excluded. A measure requirement is
+     * not an exception to it: a reported measure changes only when a connector
+     * reports one, and reporting is a mutation that re-evaluates inside its own
+     * request, so a measure-satisfied gate is as durable as a linked identity.
+     * The gap is narrower and is recorded as a narrowing in {@code STATUS.md} —
+     * an observation that goes STALE stops satisfying {@code decide} the instant
+     * it lapses, but emits nothing, because nothing is watching the clock. A
+     * role granted on a measure therefore outlives its evidence until the
+     * reporter comes back and reports a low value.
      *
      * @param platformKind the platform
      * @param platformId the account on it

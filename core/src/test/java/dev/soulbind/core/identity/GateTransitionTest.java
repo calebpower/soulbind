@@ -76,7 +76,9 @@ class GateTransitionTest {
                         new EventEmitter(storage.events(), clock),
                         storage.identities(), storage.linkCodes(), storage.platformKinds(),
                         storage.audit(),
-                        new GateEvaluator(storage.identities(), storage.policy(), clock),
+                        storage.measures(),
+                        new GateEvaluator(storage.identities(), storage.policy(),
+                                storage.measures(), clock),
                         clock, TTL));
     }
 
@@ -177,7 +179,8 @@ class GateTransitionTest {
         try (Fixture f = fixture(backend)) {
             Clock clock = Clock.fixed(Instant.parse("2026-03-01T12:00:00Z"), ZoneOffset.UTC);
             GateEvaluator evaluator = new GateEvaluator(
-                    f.storage().identities(), f.storage().policy(), clock);
+                    f.storage().identities(), f.storage().policy(),
+                    f.storage().measures(), clock);
 
             f.storage().policy().gateSeen("merely.mentioned", "conn-a", null);
             ruleRequiringBoth(f.storage(), "chat.member");
@@ -252,6 +255,82 @@ class GateTransitionTest {
                             + " newly satisfies it; requirements-met means a TRANSITION");
             assertTrue(met.size() > afterFirst,
                     "the newly-joined identity was never told it satisfies the gate");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("a subject's measure is the strongest its identities report, not their total")
+    void measuresAggregateByStrongest(Backend backend) {
+        // SUMMING would let one person's two accounts add up to an entitlement
+        // neither earned -- an alt farm, which is the shape the unique
+        // (platform_kind, platform_id) constraint exists to prevent elsewhere.
+        // It would also produce a meaningless number across platforms: forum
+        // minutes and game minutes are not the same quantity, and their total
+        // measures nothing.
+        //
+        // TWO measures, deliberately ordered against each other. Rows arrive
+        // ordered by identity_ref, so kind-a is read before kind-b:
+        //
+        //   playtime  kind-a=400 kind-b=700  -> strongest 700, first-wins 400
+        //   posts     kind-a=900 kind-b=100  -> strongest 900, last-wins  100
+        //
+        // One alone would leave a "keep whichever came last" mutant alive, which
+        // is exactly what happened when this test was first written with only
+        // the first row. Summing is excluded by both (1100 and 1000).
+        try (Fixture f = fixture(backend)) {
+            Storage storage = f.storage();
+            Clock clock = Clock.fixed(Instant.parse("2026-03-01T12:00:00Z"), ZoneOffset.UTC);
+
+            LinkCodeRecord code = f.linking().issue("conn-a", "kind-a", "acct-1", null);
+            f.linking().redeem("conn-b", code.code(), "kind-b", "acct-2", null);
+
+            storage.measures().report("kind-a:acct-1", "playtime", 400L, 604_800L,
+                    clock.instant(), "connector:reporter");
+            storage.measures().report("kind-b:acct-2", "playtime", 700L, 604_800L,
+                    clock.instant(), "connector:reporter");
+            storage.measures().report("kind-a:acct-1", "posts", 900L, 604_800L,
+                    clock.instant(), "connector:reporter");
+            storage.measures().report("kind-b:acct-2", "posts", 100L, 604_800L,
+                    clock.instant(), "connector:reporter");
+
+            GateEvaluator evaluator = new GateEvaluator(
+                    storage.identities(), storage.policy(), storage.measures(), clock);
+
+            var measures = evaluator.snapshotFor("kind-a", "acct-1").measures();
+            assertEquals(2, measures.size(), measures::toString);
+            assertEquals(700L, measures.get("playtime").value(),
+                    "the subject's measure was not the strongest its identities reported");
+            assertEquals(900L, measures.get("posts").value(),
+                    "the later row won rather than the stronger one");
+
+            // Asked from the other side, the answer is the same subject's, so it
+            // must not depend on which account happened to ask.
+            assertEquals(700L,
+                    evaluator.snapshotFor("kind-b", "acct-2").measures().get("playtime").value(),
+                    "the answer depended on which account asked");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("an account linked to nothing still carries its own measures")
+    void unlinkedAccountsCarryMeasures(Backend backend) {
+        // A reporter sees a game account long before anybody links a chat one,
+        // and a gate that asks only for a measure has to be answerable then.
+        try (Fixture f = fixture(backend)) {
+            Storage storage = f.storage();
+            Clock clock = Clock.fixed(Instant.parse("2026-03-01T12:00:00Z"), ZoneOffset.UTC);
+            storage.measures().report("kind-a:nobody", "playtime", 42L, 604_800L,
+                    clock.instant(), "connector:reporter");
+
+            var snapshot = new GateEvaluator(
+                    storage.identities(), storage.policy(), storage.measures(), clock)
+                    .snapshotFor("kind-a", "nobody");
+
+            assertEquals(42L, snapshot.measures().get("playtime").value(),
+                    "an unlinked account's measurement was dropped, so a measure-only gate "
+                            + "could never open for anybody new");
         }
     }
 }

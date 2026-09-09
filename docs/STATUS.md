@@ -3,7 +3,8 @@
 Where the work actually stands. **This document is trusted over the
 specification** (`soulbind-plan.md`) and over the README whenever they disagree.
 
-Last updated: 2026-09-07. **All ten phases complete, every gate met.**
+Last updated: 2026-09-09. **All ten phases complete, every gate met.**
+Phase 11 (measures) is in progress — see the section at the end.
 `0.1.5` is released and the first estate runs it, with enforcement off
 everywhere — no rules exist, so every gate answers `allow` / `no-rule`.
 
@@ -1229,6 +1230,23 @@ artifact.
 namespace ownership, and they are a separate decision rather than a bigger
 version of this one. Depend on the SDK by building it.
 
+## Narrowing in force from 11.1
+
+A role granted on a **measure** survives the reporter going away. The observation
+goes stale, `decide` correctly refuses from that instant, but no
+`requirements-lost` is emitted — nothing watches the clock — so an effector
+holding a standing role keeps it until the reporter returns and reports a low
+value. The scope is exactly that: a role held after its evidence expired, caused
+by the reporter's absence, corrected on the reporter's return.
+
+It is not the grace case in disguise. A measure that is merely *below threshold*
+emits normally, because the report that lowered it is a mutation and re-evaluates
+in its own request. Only the reporter falling silent is uncovered.
+
+Mitigated rather than closed: a reporter's cadence must be materially shorter
+than the rule's `maxAgeSeconds`. Closing it properly needs a swept operation,
+which is the timer this design exists to avoid.
+
 ## Narrowing in force from 10.26
 
 An override carrying an `expiresAt` is not counted by
@@ -1238,6 +1256,45 @@ honours a temporary override in full: `decide` returns `allow`, and a test
 asserts it. The reason is the one already stated for grace: nothing in this
 system re-evaluates on a timer, so a group granted for a one-hour override would
 never be taken back.
+
+## Phase 11 — measures, in progress
+
+**What a measure is.** A named number a connector reports about one platform
+account, carrying the window it covers and — from core's clock, never the
+caller's — when it was recorded. Core never learns what the number counts.
+
+**One observation per (identity, name), overwritten. Not a time series**, and
+that is the decision the whole design rests on: storing samples would make core
+compute windows, which forces retention, which forces a sweep, which is the timer
+this project has twice refused to introduce.
+
+**Reporting is a mutation**, bracketed with `GateTransitions` exactly as
+`code.redeem`, `attest`, `identity.unlink` and `override.set` are. That is the
+whole answer to "what re-runs a trailing window when nobody has done anything",
+and it needs no scheduler: the population is bounded by construction, since one
+report concerns one account.
+
+**Hysteresis is two gates composed in the connector**, never state in core. A
+high gate grants and a low gate revokes; the band between them is the two
+directions the effector deliberately ignores. Each gate stays a plain threshold
+and a pure function, so two callers asking about the same person still get the
+same answer.
+
+| Landed | |
+|---|---|
+| `config` | `TABLE_ARRAY` — a list of tables with a nested element schema, so unknown-key rejection recurses into elements |
+| `connector-discord` | several role bindings, each with a direction; replaces the single `effector.role`/`effector.gate` pair |
+| `policy` | `MeasureRequirement`, `MeasureObservation`, four refusal reasons, still a pure function |
+| `protocol` | `measure-source`, `measure.report`, `measure.get`, `RuleView.measure` |
+| `core` | `V8__measures.sql`, `MeasureRepository`, aggregation by strongest, `forget` on unlink |
+
+**Outstanding for the gate:** the reporter itself (`connector-plan`, which is not
+deployed anywhere yet), the storage-seam guard exemption its SQL will need, and a
+reaper session — V8 is a schema change, so the full-stack battery on both
+backends is mandatory rather than optional.
+
+**Not yet run in a session.** Everything above is green on the workstation only,
+which by this document's own standard is a claim about SQLite and nothing else.
 
 ## Guards in force
 

@@ -19,7 +19,9 @@ package dev.soulbind.core.transport;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.soulbind.protocol.MeasureRequirementView;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import dev.soulbind.protocol.ErrorCode;
@@ -46,6 +48,25 @@ public final class Codec {
                 // protocol mismatch turns into a missing side effect nobody can
                 // trace; the envelope reports it instead.
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
+
+        // A rule with no measure requirement must render EXACTLY as it did
+        // before measures existed. A null component serializes as
+        // `"measure":null` by default, which changes the bytes of every
+        // rule.get and rule.set response ever written.
+        //
+        // Scoped to the one type, NOT set on the mapper. `setSerializationInclusion`
+        // would drop nulls everywhere -- `description`, `registeredBy`,
+        // `subjectId` and every other nullable field on every other operation --
+        // which is a wire change to a dozen unrelated responses smuggled in
+        // under one feature.
+        //
+        // It lives here rather than as an annotation on the record because
+        // `protocol` declares no serialization library and a guard holds it to
+        // that: the DTOs are plain records, and how they are rendered is this
+        // layer's business.
+        mapper.configOverride(MeasureRequirementView.class)
+                .setInclude(JsonInclude.Value.construct(
+                        JsonInclude.Include.NON_NULL, JsonInclude.Include.ALWAYS));
     }
 
     /** The parsed shell of a request, before any of it is trusted. */

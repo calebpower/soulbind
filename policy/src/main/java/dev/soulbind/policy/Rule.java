@@ -35,6 +35,9 @@ import java.util.TreeSet;
  *     from "prove you are here".
  * @param graceSeconds how long after first being seen the gate stays open.
  *     A new forum registrant can read before linking; zero means no grace.
+ * @param measure a threshold on a reported measure, or null. Nullable rather
+ *     than an empty value because "no measure requirement" is the case every
+ *     rule written before this existed is in, and it must serialize to nothing.
  * @param defaultEffect what happens when the requirements are NOT met.
  *     Almost always DENY — a rule whose unmet state is ALLOW is a rule that
  *     does nothing, and making that spellable is deliberate so an operator can
@@ -45,7 +48,23 @@ public record Rule(
         Set<String> requiredKinds,
         boolean requireLinked,
         long graceSeconds,
-        Effect defaultEffect) {
+        Effect defaultEffect,
+        MeasureRequirement measure) {
+
+    /**
+     * The shape every rule had before measures existed.
+     *
+     * <p>Kept so that adding a component edits no call site: the acceptance gate
+     * on this change is that the existing suites pass with no test file touched.
+     */
+    public Rule(
+            String gateName,
+            Set<String> requiredKinds,
+            boolean requireLinked,
+            long graceSeconds,
+            Effect defaultEffect) {
+        this(gateName, requiredKinds, requireLinked, graceSeconds, defaultEffect, null);
+    }
 
     public Rule {
         Objects.requireNonNull(gateName, "gateName");
@@ -78,8 +97,20 @@ public record Rule(
         return new Rule(gateName, Set.of(kinds), false, 0L, Effect.DENY);
     }
 
-    /** Whether this rule asks for anything at all. */
+    /** A gate requiring a measure to reach a threshold. */
+    public static Rule measuring(String gateName, MeasureRequirement measure) {
+        return new Rule(gateName, Set.of(), false, 0L, Effect.DENY, measure);
+    }
+
+    /**
+     * Whether this rule asks for anything at all.
+     *
+     * <p>The measure clause is load-bearing: without it a rule whose ONLY
+     * requirement is a threshold falls through to the "this gate requires
+     * nothing" branch, which allows everybody regardless of defaultEffect. The
+     * gate would be wide open and read as configured.
+     */
     public boolean requiresSomething() {
-        return requireLinked || !requiredKinds.isEmpty();
+        return requireLinked || !requiredKinds.isEmpty() || measure != null;
     }
 }
