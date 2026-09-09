@@ -57,6 +57,9 @@ class MeasureWireTest {
     private static final Set<Capability> REPORTER = Set.of(Capability.MEASURE_SOURCE);
     private static final Set<Capability> ADMIN = Set.of(
             Capability.MEASURE_SOURCE, Capability.CONFIG_MANAGEMENT);
+    private static final Set<Capability> ADMIN_AND_LINKING = Set.of(
+            Capability.MEASURE_SOURCE, Capability.CONFIG_MANAGEMENT,
+            Capability.CODE_DISPLAY, Capability.CODE_ENTRY);
 
     private JsonNode call(TestCore core, Clock clock, String op, String body) throws Exception {
         return core.codec.mapper().readTree(
@@ -336,6 +339,79 @@ class MeasureWireTest {
             assertFalse(json.get(Wire.OK).asBoolean(), json::toString);
             assertEquals(ErrorCode.INVALID_REQUEST.wireName(),
                     json.get(Wire.ERROR).get("code").asText(), json::toString);
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("a measure on one identity moves the gate for the subject's OTHER identities")
+    void reportTransitionsEveryIdentityOfTheSubject(Backend backend) throws Exception {
+        // THE TEST THAT WOULD HAVE CAUGHT IT. The snapshot takes the strongest
+        // observation across a subject's identities, so a measurement recorded
+        // against one changes the answer for all of them -- but the handler
+        // emitted only for the identity that was measured.
+        //
+        // Effectors route on the identity ref and each acts only on its own
+        // platform's, so an event naming just the measured identity is an event
+        // every OTHER platform's effector correctly ignores. A measurement taken
+        // on one platform could never move a role on another. Deploying is what
+        // found it; the earlier transition test passed because its subject held
+        // a single identity, so "some event fired" and "the right events fired"
+        // were indistinguishable.
+        Clock clock = TestCore.fixedClock();
+        try (TestCore core = new TestCore(backend, tempDir, ADMIN_AND_LINKING, clock)) {
+            ok(core, clock, "rule.set", """
+                    {"gate":"activity.gate","requireLinked":false,"requiredKinds":[],
+                     "graceSeconds":0,"defaultEffect":"deny",
+                     "measure":{"name":"playtime","atLeast":100,
+                                "windowSeconds":604800,"maxAgeSeconds":3600}}
+                    """);
+
+            // Link two identities of different kinds, through the real flow.
+            String code = ok(core, clock, "code.issue", """
+                    {"platformKind":"kind-a","platformId":"acct-1","display":"Alex"}
+                    """).get("code").asText();
+            ok(core, clock, "code.redeem", "{\"code\":\"" + code
+                    + "\",\"platformKind\":\"kind-b\",\"platformId\":\"acct-2\"}");
+
+            drain(core, clock);
+
+            // Measure the FIRST identity only.
+            ok(core, clock, "measure.report", """
+                    {"platformKind":"kind-a","platformId":"acct-1","name":"playtime",
+                     "value":25200,"windowSeconds":604800}
+                    """);
+
+            JsonNode events = ok(core, clock, "event.subscribe", "{\"limit\":100}").get("events");
+            boolean measured = false;
+            boolean sibling = false;
+            for (JsonNode e : events) {
+                if (!"subject.requirements-met".equals(e.get("type").asText())
+                        || !"activity.gate".equals(e.get("gate").asText())) {
+                    continue;
+                }
+                String ref = e.get("identityRef").asText();
+                measured |= ref.startsWith("kind-a:");
+                sibling |= ref.startsWith("kind-b:");
+            }
+
+            assertTrue(measured, "no event for the identity that was actually measured");
+            assertTrue(sibling,
+                    "the subject's OTHER identity got no event, so an effector on that platform "
+                            + "would never grant -- a measurement on one platform could never "
+                            + "move a role on another");
+        }
+    }
+
+    /** Consumes whatever is already queued, so a later read sees only new events. */
+    private void drain(TestCore core, Clock clock) throws Exception {
+        JsonNode events = ok(core, clock, "event.subscribe", "{\"limit\":100}").get("events");
+        long last = 0;
+        for (JsonNode e : events) {
+            last = Math.max(last, e.get("sequence").asLong());
+        }
+        if (last > 0) {
+            ok(core, clock, "event.ack", "{\"through\":" + last + "}");
         }
     }
 }

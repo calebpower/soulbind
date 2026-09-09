@@ -278,7 +278,21 @@ public final class CoreHandlers {
             // re-evaluates a trailing window", and why core still needs no
             // timer. The population is bounded by construction: one report
             // concerns one account.
-            Map<String, Set<String>> before = transitions.before(List.of(ref));
+            //
+            // EVERY IDENTITY OF THE SUBJECT, not just the one measured. The
+            // snapshot takes the STRONGEST observation across a subject's
+            // identities, so a measurement recorded against one of them changes
+            // the answer for all of them -- and effectors route on the identity
+            // ref, each acting only on its own platform's. Emitting for the
+            // reported identity alone means a measurement taken on one platform
+            // can never move a role on another, which is the entire point of
+            // the feature. Found by deploying: playtime measured against a game
+            // account emitted only a game-kind event, and the chat effector --
+            // correctly refusing a foreign kind -- ignored every one of them.
+            List<String> affected = identities.subjectOf(q.platformKind(), q.platformId())
+                    .map(subject -> transitions.targetsOf(subject.id(), null))
+                    .orElse(List.of(ref));
+            Map<String, Set<String>> before = transitions.before(affected);
 
             // NO AUDIT ROW. A reporter running every few minutes over an active
             // population writes thousands of rows a week of pure telemetry, into
@@ -293,7 +307,7 @@ public final class CoreHandlers {
             measures.report(ref, q.name(), q.value(), q.windowSeconds(),
                     clock.instant(), "connector:" + connector.id());
 
-            transitions.emit(before, List.of(ref));
+            transitions.emit(before, affected);
 
             return WireResponse.ok(Map.of("recorded", true));
         });
