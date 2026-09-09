@@ -10,6 +10,50 @@ for the other.
 
 ## Unreleased
 
+### Added
+
+- **A Discord connector can maintain more than one role.** `[[effector.roles]]`
+  replaces `effector.role` / `effector.gate`, one block per binding, each naming
+  a gate, a role, and optionally a direction — `grant`, `revoke` or `both`.
+
+  **This is a breaking configuration change.** A deployment carrying the old
+  keys will refuse to start, naming them as unknown. Replace them with an
+  `[[effector.roles]]` block before upgrading; see
+  `packaging/connector-discord/discord.toml.sample`.
+
+  The direction is what lets one role be granted at one threshold and taken away
+  at a lower one: two gates bound to the same role, the higher granting and the
+  lower revoking, with the gap between them the band where the role is kept. A
+  role that some binding grants but none can remove is refused at load, because
+  it would go on and never come off.
+
+- **Measures — a rule can require a reported quantity.** A connector holding the
+  new `measure-source` capability reports a named number about an account, with
+  the window it covers; a rule can require that number to reach a threshold. New
+  operations `measure.report` and `measure.get`.
+
+  Core stores **one observation per account and name, overwritten** — it is not a
+  time series and keeps no history. It computes no windows and runs no sweep: the
+  reporter measures its own window and reports the answer, and core re-decides
+  while it is being told. The observation time is core's, never the caller's.
+
+  A rule's `windowSeconds` must match the reported window **exactly**. A reporter
+  misconfigured to a longer window would otherwise satisfy a shorter rule with
+  nothing anywhere failing.
+
+  Routine reports write **no audit row** — they are telemetry, and the audit log
+  is designed to be prunable and read by people. What is audited is the
+  consequence: the gate transition a report causes.
+
+- **The Plan connector can report playtime.** Off unless configured. When on it
+  needs a *second* credential holding `measure-source`, separate from the
+  read-only one it already carries — see `docs/install.md`.
+
+- **Configuration files can carry a list of tables.** A schema may declare an
+  array-of-tables key with its own element schema, and elements are validated
+  exactly as top-level keys are: types, required fields, unknown-key rejection
+  with a suggestion, and secret redaction.
+
 ### Internal
 
 - **The release workflow refuses a tag `CHANGELOG.md` does not name.** Every
