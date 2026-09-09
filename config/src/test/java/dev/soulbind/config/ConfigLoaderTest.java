@@ -842,6 +842,57 @@ class ConfigLoaderTest {
         }
 
         @Test
+        @DisplayName("a value that is a table, not an array of them, is named as a table")
+        void aTableIsNamedATable() {
+            // describeType names arrays and tables before its fallback, which
+            // would otherwise print tomlj's implementation class -- and
+            // "found MutableTomlTable" tells an operator nothing about the file
+            // in front of them.
+            ConfigException e = assertThrows(ConfigException.class,
+                    () -> load("[effector.roles]\ngate = \"g\"\n"));
+            assertTrue(e.getMessage().contains("found a table"),
+                    () -> "a table was described by its implementation class: " + e.getMessage());
+        }
+
+        @Test
+        @DisplayName("each wrong shape is named by what it is, not by tomlj's class name")
+        void everyShapeIsNamedInTheOperatorsTerms() {
+            // describeType names arrays and tables ahead of a fallback that
+            // prints the implementation class. "found MutableTomlArray" tells an
+            // operator nothing about the file in front of them, and the fallback
+            // is still there for a type nothing has a name for.
+            ConfigException nestedArray = assertThrows(ConfigException.class,
+                    () -> load("[effector]\nroles = [ [ \"a\" ] ]\n"));
+            assertTrue(nestedArray.getMessage().contains("found an array"),
+                    () -> "an array element was described by its class: "
+                            + nestedArray.getMessage());
+
+            // A TOML datetime has no branch of its own, so this is the fallback
+            // -- and it must still say something recognisable rather than the
+            // empty string.
+            ConfigException exotic = assertThrows(ConfigException.class,
+                    () -> load("[effector]\nroles = 1979-05-27T07:32:00Z\n"));
+            assertTrue(exotic.getMessage().contains("must be an array of tables"),
+                    exotic::getMessage);
+            assertTrue(exotic.getMessage().contains("DateTime")
+                            || exotic.getMessage().contains("Date"),
+                    () -> "the fallback said nothing about what was actually there: "
+                            + exotic.getMessage());
+        }
+
+        @Test
+        @DisplayName("reading a table array through a key the schema never declared is refused")
+        void foreignKeyIsRefused() {
+            // The same rule every other accessor obeys: code cannot read a key
+            // the schema does not declare, so the file and the caller cannot
+            // disagree about what exists.
+            Config config = load("");
+            ConfigKey undeclared =
+                    ConfigKey.tables("somewhere.else", element, "not in this schema");
+            assertThrows(IllegalArgumentException.class, () -> config.getTables(undeclared));
+        }
+
+        @Test
         @DisplayName("reading a table array as a scalar, or a scalar as a table array, is refused")
         void accessorsAreTypeChecked() {
             Config config = load("");

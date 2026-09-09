@@ -140,4 +140,42 @@ class MeasureRepositoryTest {
                     "forgetting nothing reported that it had removed something");
         }
     }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("the longest legal identity reference fits")
+    void longestLegalReferenceFits(Backend backend) {
+        // A reference is `kind:id`, and the graph allows platform_kind up to 64
+        // characters and platform_id up to 191 -- so 256 is legal and reachable.
+        //
+        // THIS TEST IS ONLY MEANINGFUL ON MARIADB, and that is the point.
+        // SQLite ignores VARCHAR length entirely, so a column declared too
+        // narrow passes every workstation run and raises error 1406 on the
+        // first deployment, for exactly the accounts with long identifiers.
+        // The column was 191 when this was written.
+        String kind = "k".repeat(64);
+        String id = "i".repeat(191);
+        String ref = kind + ":" + id;
+        assertEquals(256, ref.length(), "the widest legal reference is not 256 characters");
+
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            storage.measures().report(ref, "playtime", 7L, WEEK, AT, "connector:reporter");
+
+            List<MeasureRecord> found = storage.measures().forRefs(List.of(ref), null);
+            assertEquals(1, found.size(), "the widest legal reference did not round-trip");
+            assertEquals(ref, found.get(0).identityRef(),
+                    "the reference came back truncated, so two accounts could collide");
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dev.soulbind.core.storage.StorageBackends#available")
+    @DisplayName("the longest legal measure name fits")
+    void longestLegalNameFits(Backend backend) {
+        String name = "n".repeat(64);
+        try (Storage storage = StorageBackends.open(backend, tempDir)) {
+            storage.measures().report(REF, name, 1L, WEEK, AT, "connector:reporter");
+            assertEquals(name, storage.measures().forRefs(List.of(REF), null).get(0).name());
+        }
+    }
 }

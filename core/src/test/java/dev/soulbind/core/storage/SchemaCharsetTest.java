@@ -73,11 +73,16 @@ final class SchemaCharsetTest {
      * <p>Every assertion below is of the form "nothing in this list is wrong",
      * and a query returning nothing satisfies all of them. That is the exact
      * shape of the vacuous assertion this project keeps finding, so the count is
-     * checked first. Fifteen tables exist at V8; the floor is stated as the
+     * checked first. Sixteen tables exist at V8; the floor is stated as the
      * number that must be visible for the rest of the test to mean anything, and
      * it rises only when somebody deliberately raises it.
+     *
+     * <p>Raised from fifteen when V8 added `measure`. Raising it is what makes
+     * the new table covered by everything below rather than merely not
+     * contradicted by it -- the comment had already gone stale once, saying
+     * fifteen while the floor stayed a floor and the test kept passing.
      */
-    private static final int MIGRATED_TABLES = 15;
+    private static final int MIGRATED_TABLES = 16;
 
     /**
      * The same floor, for columns.

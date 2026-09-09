@@ -64,7 +64,7 @@ class MeasureReporterTest {
     private static final UUID SAM = UUID.fromString("00000000-0000-0000-0000-00000000005a");
 
     /** A source whose answers the test states outright, including "I cannot say". */
-    private static final class FakeSource implements PlaytimeSource {
+    private static class FakeSource implements PlaytimeSource {
         private Optional<Set<UUID>> population = Optional.of(Set.of());
         private final Map<UUID, Optional<Duration>> answers = new LinkedHashMap<>();
         private final List<UUID> asked = new ArrayList<>();
@@ -273,5 +273,31 @@ class MeasureReporterTest {
         assertTrue(swept.ran());
         assertEquals(0, swept.considered());
         assertTrue(f.logged().isEmpty(), f.logged()::toString);
+    }
+
+    @Test
+    @DisplayName("an Error out of a sweep is contained, not left to cancel the schedule")
+    void sweepQuietlyContainsAnError() {
+        // A cancelled scheduled task is silent: the connector stays up, keeps
+        // rendering link state, and never reports another measurement -- so
+        // every role drifts out of date with nothing in the log to say when it
+        // stopped. Catching Throwable rather than RuntimeException is the point.
+        FakeSource exploding = new FakeSource() {
+            @Override
+            public Optional<Set<UUID>> playersActiveSince(Instant since) {
+                throw new NoClassDefFoundError("com/djrapitops/plan/query/QueryService");
+            }
+        };
+        List<String> logged = new ArrayList<>();
+        MeasureReporter reporter = new MeasureReporter(
+                new SoulbindClient(InMemoryTransport.always("{}"), "cred", CLOCK,
+                        new DecisionCache()),
+                exploding, "game", "playtime", WEEK, CLOCK,
+                (message, cause) -> logged.add(message));
+
+        reporter.sweepQuietly();
+
+        assertEquals(1, logged.size(), logged::toString);
+        assertTrue(logged.get(0).contains("retried"), logged::toString);
     }
 }

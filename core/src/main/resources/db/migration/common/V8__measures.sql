@@ -13,11 +13,18 @@
 -- reporter already computed, plus enough provenance to decide whether to still
 -- believe it, removes all three problems rather than solving them.
 --
--- Column widths follow platform_id's 191 rather than policy_override's 256.
--- These two are a composite PRIMARY KEY, and 191 is the width chosen in V5 for
--- exactly that reason: a utf8mb4 index prefix has a byte budget, and a key that
--- fits on SQLite and fails to create on MariaDB is a migration that passes here
--- and stops a deployment there.
+-- identity_ref is VARCHAR(256), matching audit, policy_override and
+-- event_outbox. It holds a COMPOSITE `kind:id`, and the parts are
+-- platform_kind VARCHAR(64) and platform_id VARCHAR(191) -- so a legal
+-- reference reaches 256 characters and 191 truncates it.
+--
+-- An earlier draft used 191 and justified it on an index budget. That argument
+-- was wrong twice over: it does not bind here -- (256 + 64) x 4 = 1280 bytes,
+-- comfortably under the 3072-byte DYNAMIC limit -- and the failure it would have
+-- caused is the exact shape this project keeps finding. SQLite ignores VARCHAR
+-- length entirely, so every test would pass; MariaDB in strict mode raises
+-- error 1406 and the connector gets a 500. It would have been invisible until a
+-- deployment, and only for accounts with long identifiers.
 --
 -- NOT a foreign key to `identity`, for the reason policy_override is not one to
 -- subject: an account can accumulate a measure before it is linked to anything,
@@ -26,7 +33,7 @@
 -- own transaction rather than by a reaper nothing calls.
 
 CREATE TABLE measure (
-    identity_ref   VARCHAR(191) NOT NULL,
+    identity_ref   VARCHAR(256) NOT NULL,
     name           VARCHAR(64)  NOT NULL,
     value          BIGINT       NOT NULL,
     -- The window the value covers, as the REPORTER understands it. Stored

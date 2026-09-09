@@ -224,20 +224,52 @@ class PlanConfigTest {
     }
 
     @Test
-    @DisplayName("a non-positive window or cadence is refused")
+    @DisplayName("a non-positive window or cadence is refused, and says one thing about it")
     void nonPositiveIsRefused() {
-        assertFalse(PlanConfig.validate(load(MINIMAL + """
+        // EXACTLY one problem each. Asserting only "not empty" let a boundary
+        // mutant survive: with `window >= 0` instead of `> 0`, a window of zero
+        // produced its own complaint AND the cadence complaint, and a test that
+        // only counted "some" could not tell.
+        List<String> zeroWindow = PlanConfig.validate(load(MINIMAL + """
                 [measure]
                 enabled = true
                 credential = "c"
                 windowseconds = 0
-                """)).isEmpty());
-        assertFalse(PlanConfig.validate(load(MINIMAL + """
+                """));
+        assertEquals(1, zeroWindow.size(), zeroWindow::toString);
+        assertTrue(zeroWindow.get(0).contains("windowseconds"), zeroWindow::toString);
+
+        List<String> zeroSweep = PlanConfig.validate(load(MINIMAL + """
                 [measure]
                 enabled = true
                 credential = "c"
                 sweepseconds = 0
-                """)).isEmpty());
+                """));
+        assertEquals(1, zeroSweep.size(), zeroSweep::toString);
+    }
+
+    @Test
+    @DisplayName("a blank credential is refused, not treated as one that was set")
+    void blankCredentialIsRefused() {
+        // A quoted empty string looks configured. If it passed, the connector
+        // would start and every report would be refused by core with nothing
+        // in this file to explain why.
+        List<String> problems = PlanConfig.validate(load(MINIMAL + """
+                [measure]
+                enabled = true
+                credential = "   "
+                """));
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("measure.credential"), problems::toString);
+    }
+
+    @Test
+    @DisplayName("a blank measure name falls back to the default rather than being sent blank")
+    void blankNameFallsBack() {
+        assertEquals("playtime", PlanConfig.measureName(load(MINIMAL + """
+                [measure]
+                name = "  "
+                """)), "a blank name would be reported to core as a measure called nothing");
     }
 
     @Test

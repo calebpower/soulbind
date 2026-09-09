@@ -61,14 +61,50 @@
 # for 10.47, which added the gate-description path: both rows are TIGHTENED
 # rather than raised, because the new code arrived covered and took two
 # survivors and a no-coverage row with it.
+#
+# ALL FIVE ROWS TOUCHED BY MEASURES were re-measured 2026-09-09, after the
+# battery refused the change. Every row moved for a reason, and the reasons are
+# not the same:
+#
+#   policy, protocol   TIGHTENED back to their old survivor and no-coverage
+#                      counts. The new code arrived covered; the mutants the
+#                      battery caught were killed rather than recorded.
+#   config             no-coverage 2 -> 3. The one addition is unreachable BY
+#                      CONSTRUCTION: fromTable's TABLE_ARRAY branch throws, and
+#                      ConfigKey refuses a nested table array at declaration, so
+#                      no input reaches it. The switch must still be exhaustive.
+#                      (This row had ALSO been silently red since 8a13aaa, which
+#                      shipped the table-array type without re-measuring. The
+#                      battery is what said so; those mutants are killed here,
+#                      not recorded.)
+#   connector-plan     no-coverage 7 -> 13. Velocity plugin wiring and the
+#                      adapter over the host's query API: reachable only with a
+#                      running proxy and a running dashboard. The SQL itself is
+#                      NOT in this number -- it was separated behind a seam and
+#                      is now tested against a fake statement, which took 31
+#                      no-coverage mutants down to these 13.
+#   core               survivors 39 -> 44, no-coverage 113 -> 119.
+#                      FOUR of the five new survivors are `setNull` calls that
+#                      bind a rule's absent measure columns. SQLite cannot
+#                      distinguish an unset parameter from a null one, so they
+#                      are unkillable in THIS configuration and would be killed
+#                      on MariaDB -- which this table deliberately excludes. The
+#                      fifth is an equivalent tie-break, reasoned about at the
+#                      line in GateEvaluator.strongestByName. The no-coverage
+#                      additions are the measure repository's insert-race probe,
+#                      the same shape as the runtime-config one beside it.
+#
+# `core` survivors read 44 on two consecutive runs while TIMED_OUT moved 9 -> 8,
+# which is the noise this file's header describes; the survivor set was stable
+# across both, so 44 is measured rather than sampled once.
 
 # module              total killed surv nocov  t/o
-config                  99     94    3     2    0
+config                 138    132    3     3    0
 connector-discord      303    231    1    71    0
-connector-plan         102     94    1     7    0
+connector-plan         159    145    1    13    0
 connector-sdk          104     94    2     8    0
 connector-velocity     214    164    3    47    0
-core                  1007    848   39   113    7
-policy                  84     82    2     0    0
-protocol               100     98    1     0    1
+core                  1079    908   44   119    8
+policy                 112    110    2     0    0
+protocol               101     99    1     0    1
 sim                    312    232    6    74    0

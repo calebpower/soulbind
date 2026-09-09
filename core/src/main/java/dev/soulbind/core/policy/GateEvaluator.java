@@ -128,6 +128,13 @@ public final class GateEvaluator {
             MeasureObservation candidate = new MeasureObservation(
                     record.value(), record.windowSeconds(), record.observedAt());
             MeasureObservation existing = out.get(record.name());
+            // EQUIVALENT MUTANT at the boundary, recorded rather than
+            // rediscovered: `>` and `>=` differ only when two identities report
+            // the SAME value, and then they differ only in which equally-strong
+            // observation's window and timestamp survive. Neither answer is more
+            // correct, so asserting one would be pinning an arbitrary tie-break
+            // and calling it a requirement. Same treatment as the reference-parsing
+            // boundary a connector-side effector records, per DECISIONS 10.28.
             if (existing == null || candidate.value() > existing.value()) {
                 out.put(record.name(), candidate);
             }

@@ -76,7 +76,15 @@ OPERATIONS = ["code.issue", "code.redeem", "identity.describe", "decide",
               # a malformed envelope, and an operation left off this list is one
               # nothing has ever sent nonsense to.
               "measure.report", "measure.get"]
-FIELDS = ["platformKind", "platformId", "display", "code", "gate", "key", "value"]
+FIELDS = ["platformKind", "platformId", "display", "code", "gate", "key", "value",
+          # `name` and `windowSeconds` exist so the measure operations can be
+          # reached at all. Without them every generated body is refused by
+          # measure.report's blank-name or non-positive-window check before
+          # storage is touched, and the oracle -- no 5xx, always an envelope --
+          # holds trivially against a request that never got anywhere. Adding an
+          # operation to the list above without the fields its payload needs is
+          # coverage that looks present and is not.
+          "name", "windowSeconds"]
 
 def post(body, timestamp=None, nonce=None, token=None):
     timestamp = int(time.time()) if timestamp is None else timestamp

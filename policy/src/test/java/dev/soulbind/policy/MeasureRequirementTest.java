@@ -256,6 +256,23 @@ class MeasureRequirementTest {
     }
 
     @Test
+    @DisplayName("a threshold of zero is legitimate: it means reported at all, and recently")
+    void zeroThresholdIsAllowed() {
+        // NOT the same as no requirement. `atLeast = 0` still demands an
+        // observation that exists, covers the right window and is fresh -- which
+        // is exactly "has this reporter seen them lately". Refusing it would
+        // make that unspellable, and the boundary between `< 0` and `<= 0` is
+        // one character.
+        MeasureRequirement any = new MeasureRequirement(NAME, 0L, 604_800L, 3_600L);
+
+        assertEquals(Effect.ALLOW, decide(snapshotWith(fresh(0L)), rule(any)).effect(),
+                "a zero threshold refused a zero measurement, so it is not a threshold at all");
+        assertEquals(Decision.Reason.MEASURE_ABSENT,
+                decide(snapshotWith(), rule(any)).reason(),
+                "a zero threshold was satisfied by nothing having been reported");
+    }
+
+    @Test
     @DisplayName("a rule written before measures existed still has none")
     void olderRulesCarryNoMeasure() {
         // The compatibility claim, asserted rather than assumed: the five-argument
