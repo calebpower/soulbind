@@ -75,7 +75,8 @@ class RoleEffectorTest {
 
         return new Fixture(
                 new RoleEffector(
-                        client, connector, new IdempotentApplier(), GATE, ROLE, "chat",
+                        client, connector, new IdempotentApplier(),
+                        List.of(new RoleBinding(GATE, ROLE, RoleBinding.Mode.BOTH)), "chat",
                         (message, cause) -> logged.add(message)),
                 surface, transport, logged);
     }
@@ -110,7 +111,8 @@ class RoleEffectorTest {
         List<String> logged = new ArrayList<>();
         return new Fixture(
                 new RoleEffector(
-                        client, connector, new IdempotentApplier(), GATE, ROLE, "chat",
+                        client, connector, new IdempotentApplier(),
+                        List.of(new RoleBinding(GATE, ROLE, RoleBinding.Mode.BOTH)), "chat",
                         (message, cause) -> logged.add(message)),
                 surface, transport, logged);
     }
@@ -167,7 +169,8 @@ class RoleEffectorTest {
         SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
         RoleEffector effector = new RoleEffector(
                 client, new ChatConnector(client, new ScriptedSurface(), "chat"),
-                new IdempotentApplier(), GATE, ROLE, "chat",
+                new IdempotentApplier(),
+                        List.of(new RoleBinding(GATE, ROLE, RoleBinding.Mode.BOTH)), "chat",
                 (message, cause) -> logged.add(message));
 
         effector.drain();
@@ -193,7 +196,8 @@ class RoleEffectorTest {
         SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
         RoleEffector effector = new RoleEffector(
                 client, new ChatConnector(client, new ScriptedSurface(), "chat"),
-                new IdempotentApplier(), GATE, ROLE, "chat",
+                new IdempotentApplier(),
+                        List.of(new RoleBinding(GATE, ROLE, RoleBinding.Mode.BOTH)), "chat",
                 (message, cause) -> logged.add(message));
 
         assertDoesNotThrow(effector::drainQuietly,
@@ -220,7 +224,8 @@ class RoleEffectorTest {
         SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
         RoleEffector effector = new RoleEffector(
                 client, new ChatConnector(client, new ScriptedSurface(), "chat"),
-                new IdempotentApplier(), GATE, ROLE, "chat",
+                new IdempotentApplier(),
+                        List.of(new RoleBinding(GATE, ROLE, RoleBinding.Mode.BOTH)), "chat",
                 (message, cause) -> logged.add(message));
 
         effector.drain();
@@ -514,5 +519,175 @@ class RoleEffectorTest {
 
         f.effector().drain();
         assertTrue(f.surface().rolesOf("acct-1").isEmpty());
+    }
+
+    // ---------------------------------------------------------------- bindings
+
+    /**
+     * A fixture with arbitrary bindings, and a core that answers {@code decide}
+     * with a fixed effect so reconcile can be driven.
+     */
+    private Fixture bound(String decideEffect, List<RoleBinding> bindings, String... events) {
+        String body = page(events);
+        String decideAnswer = "{\"schema\":1,\"ok\":true,\"payload\":{\"effect\":\""
+                + decideEffect + "\",\"reason\":\"x\",\"detail\":\"x\",\"ttlSeconds\":60}}";
+        InMemoryTransport transport = new InMemoryTransport(request -> {
+            if (request.contains("event.ack")) {
+                return ACK_OK;
+            }
+            if (request.contains("\"decide\"")) {
+                return decideAnswer;
+            }
+            return body;
+        });
+        ScriptedSurface surface = new ScriptedSurface();
+        SoulbindClient client = new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
+        ChatConnector connector = new ChatConnector(client, surface, "chat");
+        List<String> logged = new ArrayList<>();
+        return new Fixture(
+                new RoleEffector(client, connector, new IdempotentApplier(), bindings, "chat",
+                        (message, cause) -> logged.add(message)),
+                surface, transport, logged);
+    }
+
+    private static final RoleBinding GAME =
+            new RoleBinding("chat.gamelinked", "GameLinked", RoleBinding.Mode.BOTH);
+    private static final RoleBinding FORUM =
+            new RoleBinding("chat.forumslinked", "ForumsLinked", RoleBinding.Mode.BOTH);
+    private static final RoleBinding MEEPER_GRANT =
+            new RoleBinding("activity.meeper.grant", "Meeper", RoleBinding.Mode.GRANT);
+    private static final RoleBinding MEEPER_KEEP =
+            new RoleBinding("activity.meeper.keep", "Meeper", RoleBinding.Mode.REVOKE);
+
+    @Test
+    @DisplayName("each binding moves its own role, and only on its own gate")
+    void bindingsAreIndependent() {
+        Fixture f = bound("allow", List.of(GAME, FORUM),
+                event(1, "subject.requirements-met", "k1", "chat:acct", "chat.gamelinked"));
+
+        f.effector().drain();
+
+        assertEquals(List.of("acct GameLinked"), f.surface().grantCalls(),
+                "the forum role moved on the game gate's event, or the game role did not");
+    }
+
+    @Test
+    @DisplayName("one gate may carry more than one role")
+    void oneGateManyRoles() {
+        RoleBinding second =
+                new RoleBinding("chat.gamelinked", "Verified", RoleBinding.Mode.BOTH);
+        Fixture f = bound("allow", List.of(GAME, second),
+                event(1, "subject.requirements-met", "k1", "chat:acct", "chat.gamelinked"));
+
+        f.effector().drain();
+
+        assertEquals(List.of("acct GameLinked", "acct Verified"), f.surface().grantCalls());
+    }
+
+    @Test
+    @DisplayName("an event for a gate nothing is bound to is ignored")
+    void unboundGateIsIgnored() {
+        Fixture f = bound("allow", List.of(GAME),
+                event(1, "subject.requirements-met", "k1", "chat:acct", "some.other.gate"));
+
+        f.effector().drain();
+
+        assertTrue(f.surface().grantCalls().isEmpty(), f.surface().grantCalls()::toString);
+    }
+
+    @Test
+    @DisplayName("grant-mode ignores the losing half, which is the hysteresis band")
+    void grantModeDoesNotRevoke() {
+        // Dropping below the HIGH threshold must not take the role away -- the
+        // whole point of a second, lower gate is that the band between them
+        // holds. If this revoked, the keep gate could never mean anything.
+        Fixture f = bound("allow", List.of(MEEPER_GRANT, MEEPER_KEEP),
+                event(1, "subject.requirements-lost", "k1", "chat:acct",
+                        "activity.meeper.grant"));
+        f.surface().preexistingRole("acct", "Meeper");
+
+        f.effector().drain();
+
+        assertTrue(f.surface().revokeCalls().isEmpty(),
+                "falling below the grant threshold took the role away, so the keep threshold "
+                        + "can never apply: " + f.surface().revokeCalls());
+    }
+
+    @Test
+    @DisplayName("revoke-mode ignores the meeting half, so the low gate never grants")
+    void revokeModeDoesNotGrant() {
+        // The mirror, and it matters just as much: if meeting the LOW gate
+        // granted, everybody over 2h would get the role and the 7h threshold
+        // would be decoration.
+        Fixture f = bound("allow", List.of(MEEPER_GRANT, MEEPER_KEEP),
+                event(1, "subject.requirements-met", "k1", "chat:acct",
+                        "activity.meeper.keep"));
+
+        f.effector().drain();
+
+        assertTrue(f.surface().grantCalls().isEmpty(),
+                "meeting the keep threshold granted the role, so the grant threshold means "
+                        + "nothing: " + f.surface().grantCalls());
+    }
+
+    @Test
+    @DisplayName("the two halves each do their own job")
+    void hysteresisPairMovesInBothDirections() {
+        // A mutant that ignored the mode entirely would fail the two tests
+        // above; one that ignored EVERYTHING would pass them and fail this.
+        Fixture grant = bound("allow", List.of(MEEPER_GRANT, MEEPER_KEEP),
+                event(1, "subject.requirements-met", "k1", "chat:acct",
+                        "activity.meeper.grant"));
+        grant.effector().drain();
+        assertEquals(List.of("acct Meeper"), grant.surface().grantCalls());
+
+        Fixture revoke = bound("allow", List.of(MEEPER_GRANT, MEEPER_KEEP),
+                event(1, "subject.requirements-lost", "k1", "chat:acct",
+                        "activity.meeper.keep"));
+        revoke.surface().preexistingRole("acct", "Meeper");
+        revoke.effector().drain();
+        assertEquals(List.of("acct Meeper"), revoke.surface().revokeCalls());
+    }
+
+    @Test
+    @DisplayName("a rule change on a grant-only gate reconciles nothing")
+    void reconcileSkipsGrantOnlyBindings() {
+        // reconcile() is revocation-only, so running it for the HIGH gate would
+        // strip the role from everybody in the band -- the same defect as
+        // grantModeDoesNotRevoke, arriving through rule.changed instead.
+        Fixture f = bound("deny", List.of(MEEPER_GRANT),
+                event(1, "rule.changed", "k1", "", "activity.meeper.grant"));
+        f.surface().preexistingRole("acct", "Meeper");
+
+        f.effector().drain();
+
+        assertTrue(f.surface().revokeCalls().isEmpty(),
+                "a rule change on the grant gate revoked from the band: "
+                        + f.surface().revokeCalls());
+    }
+
+    @Test
+    @DisplayName("a rule change on a revoking gate still reconciles")
+    void reconcileRunsForRevokingBindings() {
+        Fixture f = bound("deny", List.of(MEEPER_KEEP),
+                event(1, "rule.changed", "k1", "", "activity.meeper.keep"));
+        f.surface().preexistingRole("acct", "Meeper");
+
+        f.effector().drain();
+
+        assertEquals(List.of("acct Meeper"), f.surface().revokeCalls(),
+                "the keep gate stopped reconciling, so a rule edit leaves stale roles standing");
+    }
+
+    @Test
+    @DisplayName("no bindings at all changes nothing")
+    void noBindingsIsInert() {
+        Fixture f = bound("allow", List.of(),
+                event(1, "subject.requirements-met", "k1", "chat:acct", "chat.gamelinked"));
+
+        f.effector().drain();
+
+        assertTrue(f.surface().grantCalls().isEmpty(),
+                "an unconfigured effector granted a role: " + f.surface().grantCalls());
     }
 }

@@ -17,9 +17,11 @@ package dev.soulbind.connector.discord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.soulbind.config.Config;
+import dev.soulbind.config.ConfigException;
 import dev.soulbind.config.ConfigLoader;
 import dev.soulbind.sdk.DecisionCache;
 import java.nio.file.Files;
@@ -142,42 +144,153 @@ class DiscordConfigTest {
     }
 
     @Test
-    @DisplayName("a role with no gate is refused, because nothing would ever grant it")
-    void roleWithoutGate() {
-        List<String> problems = DiscordConfig.validate(load(MINIMAL + """
-                [effector]
-                role = "linked"
+    @DisplayName("a binding missing a required field is refused by the loader")
+    void bindingMissingAField() {
+        // The paired effector.role/effector.gate check this replaces asserted
+        // the same thing a weaker way: that neither half is useful alone. Now
+        // they are fields of one element, so the LOADER enforces it and the
+        // message names the element.
+        ConfigException e = assertThrows(ConfigException.class, () -> load(MINIMAL + """
+                [[effector.roles]]
+                role = "GameLinked"
                 """));
-
-        assertEquals(1, problems.size(), problems::toString);
-        assertTrue(problems.get(0).contains("effector.gate"), problems::toString);
+        assertTrue(e.getMessage().contains("effector.roles[0].gate"), e.getMessage());
     }
 
     @Test
-    @DisplayName("a gate with no role is refused too, and it is the same mistake")
-    void gateWithoutRole() {
-        // Both directions, because the check is an inequality between two
-        // presences: a mutant that compared them the other way round, or always
-        // one way, would survive a test that only ever set the role.
-        List<String> problems = DiscordConfig.validate(load(MINIMAL + """
-                [effector]
-                gate = "chat.member"
-                """));
+    @DisplayName("several bindings are read in order, with their modes")
+    void severalBindings() {
+        Config config = load(MINIMAL + """
+                [[effector.roles]]
+                gate = "chat.gamelinked"
+                role = "GameLinked"
 
-        assertEquals(1, problems.size(), problems::toString);
-        assertTrue(problems.get(0).contains("effector.role"), problems::toString);
+                [[effector.roles]]
+                gate = "chat.forumslinked"
+                role = "ForumsLinked"
+
+                [[effector.roles]]
+                gate = "activity.meeper.grant"
+                role = "Meeper"
+                mode = "grant"
+
+                [[effector.roles]]
+                gate = "activity.meeper.keep"
+                role = "Meeper"
+                mode = "revoke"
+                """);
+
+        assertTrue(DiscordConfig.validate(config).isEmpty(),
+                () -> DiscordConfig.validate(config).toString());
+
+        List<RoleBinding> bindings = DiscordConfig.bindings(config);
+        assertEquals(4, bindings.size());
+        assertEquals("chat.gamelinked", bindings.get(0).gate());
+        assertEquals(RoleBinding.Mode.BOTH, bindings.get(0).mode(),
+                "an unset mode is both, so a single-threshold role needs no ceremony");
+        assertEquals(RoleBinding.Mode.GRANT, bindings.get(2).mode());
+        assertEquals(RoleBinding.Mode.REVOKE, bindings.get(3).mode());
     }
 
     @Test
-    @DisplayName("both together are fine, and neither is fine")
-    void bothOrNeither() {
+    @DisplayName("no bindings at all is fine -- it is the inert posture")
+    void noBindingsIsFine() {
+        Config config = load(MINIMAL);
+        assertTrue(DiscordConfig.validate(config).isEmpty());
+        assertEquals(List.of(), DiscordConfig.bindings(config));
+    }
+
+    @Test
+    @DisplayName("a role that can be granted but never removed is refused")
+    void grantWithoutRevoke() {
+        // Half a hysteresis pair: the grant gate configured, the keep gate
+        // forgotten. The role would go on and never come off, diverging from
+        // core's answer permanently -- which is the divergence the met/lost
+        // pair exists to prevent.
+        List<String> problems = DiscordConfig.validate(load(MINIMAL + """
+                [[effector.roles]]
+                gate = "activity.meeper.grant"
+                role = "Meeper"
+                mode = "grant"
+                """));
+
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("never come off"), problems::toString);
+        assertTrue(problems.get(0).contains("Meeper"), problems::toString);
+    }
+
+    @Test
+    @DisplayName("revoke-only is allowed, because it removes rather than grants")
+    void revokeWithoutGrantIsFine() {
+        // The asymmetry is deliberate and worth pinning: a binding that can only
+        // TAKE a role away cannot leave anybody holding something they should
+        // not, so it needs no partner. Asserting only the grant direction would
+        // let a mutant that refused both survive.
         assertTrue(DiscordConfig.validate(load(MINIMAL + """
-                [effector]
-                role = "linked"
-                gate = "chat.member"
+                [[effector.roles]]
+                gate = "activity.meeper.keep"
+                role = "Meeper"
+                mode = "revoke"
                 """)).isEmpty());
+    }
 
-        assertTrue(DiscordConfig.validate(load(MINIMAL)).isEmpty());
+    @Test
+    @DisplayName("an unrecognised mode is named, not silently treated as both")
+    void badMode() {
+        List<String> problems = DiscordConfig.validate(load(MINIMAL + """
+                [[effector.roles]]
+                gate = "g"
+                role = "R"
+                mode = "sometimes"
+                """));
+
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("sometimes"), problems::toString);
+    }
+
+    @Test
+    @DisplayName("a blank gate or role is refused, because it looks configured")
+    void blankFields() {
+        List<String> problems = DiscordConfig.validate(load(MINIMAL + """
+                [[effector.roles]]
+                gate = "  "
+                role = "R"
+                """));
+
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("must not be blank"), problems::toString);
+    }
+
+    @Test
+    @DisplayName("the same binding twice is refused")
+    void duplicateBinding() {
+        List<String> problems = DiscordConfig.validate(load(MINIMAL + """
+                [[effector.roles]]
+                gate = "chat.gamelinked"
+                role = "GameLinked"
+
+                [[effector.roles]]
+                gate = "chat.gamelinked"
+                role = "GameLinked"
+                """));
+
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("duplicate"), problems::toString);
+    }
+
+    @Test
+    @DisplayName("two roles on one gate is not a duplicate")
+    void twoRolesOneGate() {
+        assertTrue(DiscordConfig.validate(load(MINIMAL + """
+                [[effector.roles]]
+                gate = "chat.gamelinked"
+                role = "GameLinked"
+
+                [[effector.roles]]
+                gate = "chat.gamelinked"
+                role = "Verified"
+                """)).isEmpty(),
+                "one requirement may legitimately carry more than one role");
     }
 
     @Test
@@ -186,8 +299,10 @@ class DiscordConfigTest {
         // An operator fixing a configuration one refusal per restart is an
         // operator restarting four times. Both faults, one pass.
         List<String> problems = DiscordConfig.validate(load(MINIMAL + """
-                [effector]
-                role = "linked"
+                [[effector.roles]]
+                gate = "g"
+                role = "R"
+                mode = "sideways"
 
                 [events]
                 pollseconds = 0

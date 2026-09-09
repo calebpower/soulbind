@@ -23,7 +23,9 @@ import dev.soulbind.config.ConfigSchema;
 import dev.soulbind.sdk.DecisionCache;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Everything this connector reads from configuration. */
 public final class DiscordConfig {
@@ -58,12 +60,36 @@ public final class DiscordConfig {
             "platform.kind", Type.STRING, "the platform kind this connector speaks for");
 
     /** The role granted when a subject satisfies the gate. */
-    public static final ConfigKey LINKED_ROLE = ConfigKey.optional(
-            "effector.role", Type.STRING,
-            "role granted when a subject satisfies the configured gate");
+    /**
+     * One binding's fields -- the element schema for {@link #ROLES}.
+     *
+     * <p>These paths are relative to their element, so they are bare names
+     * rather than dotted: {@code gate}, not {@code effector.roles.gate}.
+     */
+    public static final ConfigKey BINDING_GATE = ConfigKey.required(
+            "gate", Type.STRING, "the gate whose events drive this role");
 
-    public static final ConfigKey GATE = ConfigKey.optional(
-            "effector.gate", Type.STRING, "the gate whose events drive the role");
+    public static final ConfigKey BINDING_ROLE = ConfigKey.required(
+            "role", Type.STRING, "the role granted or removed");
+
+    public static final ConfigKey BINDING_MODE = ConfigKey.optional(
+            "mode", Type.STRING,
+            "grant, revoke, or both (the default) -- which half of the stream to act on");
+
+    public static final ConfigSchema BINDING =
+            ConfigSchema.of(BINDING_GATE, BINDING_ROLE, BINDING_MODE);
+
+    /**
+     * The roles this connector maintains.
+     *
+     * <p>Replaces the single {@code effector.role} / {@code effector.gate} pair,
+     * which could express exactly one role. Absent or empty means the connector
+     * displays and accepts codes but changes nothing -- a reasonable first
+     * deployment, and the posture the estate has been running in.
+     */
+    public static final ConfigKey ROLES = ConfigKey.tables(
+            "effector.roles", BINDING,
+            "the gate-to-role bindings this connector maintains");
 
     public static final ConfigKey FAIL_MODE = ConfigKey.optional(
             "gate.failmode", Type.STRING, "closed (default) or open, when core is unreachable");
@@ -74,7 +100,7 @@ public final class DiscordConfig {
 
     public static final ConfigSchema SCHEMA = ConfigSchema.of(
             CORE_URL, CREDENTIAL, BOT_TOKEN, GUILD_ID, PLATFORM_KIND,
-            LINKED_ROLE, GATE, FAIL_MODE, POLL_SECONDS);
+            ROLES, FAIL_MODE, POLL_SECONDS);
 
     public static Config load(Path file) {
         return ConfigLoader.load(file, SCHEMA);
@@ -103,16 +129,85 @@ public final class DiscordConfig {
                     + "long after the link that somebody will have asked why it did not work.");
         }
 
-        boolean hasRole = config.findString(LINKED_ROLE).isPresent();
-        boolean hasGate = config.findString(GATE).isPresent();
-        if (hasRole != hasGate) {
-            // Either alone does nothing, and silently: a role nothing grants,
-            // or a gate whose events nobody acts on.
-            problems.add("effector.role and effector.gate go together: one without the other "
-                    + "is a role nothing will ever grant, or a gate whose events nothing acts "
-                    + "on. Set both, or neither.");
+        problems.addAll(bindingProblems(config));
+
+        return problems;
+    }
+
+    /**
+     * The bindings, as configured.
+     *
+     * <p>Assumes {@link #validate} found no problems: an unparseable mode reads
+     * as {@code BOTH} here and is reported there, because a loader that threw
+     * would report one problem where the contract is to report them all.
+     */
+    public static List<RoleBinding> bindings(Config config) {
+        List<RoleBinding> bindings = new ArrayList<>();
+        for (Config entry : config.getTables(ROLES)) {
+            RoleBinding.Mode mode =
+                    RoleBinding.Mode.fromConfigName(entry.findString(BINDING_MODE).orElse(null));
+            bindings.add(new RoleBinding(
+                    entry.getString(BINDING_GATE),
+                    entry.getString(BINDING_ROLE),
+                    mode == null ? RoleBinding.Mode.BOTH : mode));
+        }
+        return List.copyOf(bindings);
+    }
+
+    private static List<String> bindingProblems(Config config) {
+        List<String> problems = new ArrayList<>();
+        List<Config> entries = config.getTables(ROLES);
+        Set<List<String>> seen = new HashSet<>();
+        Set<String> granted = new HashSet<>();
+        Set<String> revocable = new HashSet<>();
+
+        for (int i = 0; i < entries.size(); i++) {
+            Config entry = entries.get(i);
+            String where = "effector.roles[" + i + "]";
+            String gate = entry.getString(BINDING_GATE).strip();
+            String role = entry.getString(BINDING_ROLE).strip();
+
+            if (gate.isEmpty() || role.isEmpty()) {
+                // Blank is not absent. Absent is caught by the loader as a
+                // missing required key; a quoted empty string looks configured
+                // and binds nothing.
+                problems.add(where + ": gate and role must not be blank. Leave the whole "
+                        + "[[effector.roles]] entry out to bind nothing.");
+                continue;
+            }
+
+            String raw = entry.findString(BINDING_MODE).orElse(null);
+            RoleBinding.Mode mode = RoleBinding.Mode.fromConfigName(raw);
+            if (mode == null) {
+                problems.add(where + ": mode '" + raw + "' is not grant, revoke or both");
+                continue;
+            }
+
+            if (!seen.add(List.of(gate, role, mode.name()))) {
+                problems.add(where + ": duplicate binding of gate '" + gate + "' to role '"
+                        + role + "'. It would apply the same change twice for every event.");
+            }
+            if (mode.grants()) {
+                granted.add(role);
+            }
+            if (mode.revokes()) {
+                revocable.add(role);
+            }
         }
 
+        for (String role : granted) {
+            if (!revocable.contains(role)) {
+                // A role this connector can only ever add diverges from core's
+                // answer permanently, which is the divergence the met/lost pair
+                // exists to prevent. The usual cause is half a hysteresis pair:
+                // the grant gate configured, the keep gate forgotten, and a
+                // role nothing will ever take back.
+                problems.add("role '" + role + "' is granted by a binding but no binding can "
+                        + "remove it, so it will never come off. Add a binding with "
+                        + "mode = \"revoke\" naming the gate that should keep it, or use "
+                        + "mode = \"both\" on a single gate.");
+            }
+        }
         return problems;
     }
 }

@@ -18,6 +18,7 @@ package dev.soulbind.connector.discord;
 import dev.soulbind.sdk.IdempotentApplier;
 import dev.soulbind.sdk.SoulbindClient;
 import dev.soulbind.sdk.Payload;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
 
@@ -40,8 +41,7 @@ public final class RoleEffector {
     private final SoulbindClient client;
     private final ChatConnector connector;
     private final IdempotentApplier applier;
-    private final String gate;
-    private final String role;
+    private final List<RoleBinding> bindings;
     private final String platformKind;
     private final BiConsumer<String, Throwable> log;
 
@@ -55,15 +55,13 @@ public final class RoleEffector {
             SoulbindClient client,
             ChatConnector connector,
             IdempotentApplier applier,
-            String gate,
-            String role,
+            List<RoleBinding> bindings,
             String platformKind,
             BiConsumer<String, Throwable> log) {
         this.client = client;
         this.connector = connector;
         this.applier = applier;
-        this.gate = gate;
-        this.role = role;
+        this.bindings = List.copyOf(bindings);
         this.platformKind = platformKind;
         this.log = log;
     }
@@ -160,10 +158,25 @@ public final class RoleEffector {
         String type = event.text("type");
         String eventGate = event.text("gate");
 
-        // Only this connector's gate. An event for another gate is not this
-        // effector's business, and acting on it would grant a role for a
-        // requirement nobody tied to it.
-        if (gate != null && !gate.isBlank() && !gate.equals(eventGate)) {
+        // Only gates this connector is bound to. An event for another gate is
+        // not this effector's business, and acting on it would grant a role for
+        // a requirement nobody tied to it. No bindings therefore means an
+        // effector that changes nothing, which is the inert posture a first
+        // deployment wants.
+        List<RoleBinding> matching = new ArrayList<>();
+        for (RoleBinding binding : bindings) {
+            if (binding.gate().equals(eventGate)) {
+                matching.add(binding);
+            }
+        }
+        // EQUIVALENT MUTANT, recorded rather than rediscovered: removing this
+        // early return changes nothing observable. With no matching binding the
+        // rule.changed loop iterates nothing, the switch below iterates nothing,
+        // and platformIdOf has no side effects. It is kept because it states the
+        // intent -- an event for a gate nothing is bound to is not this
+        // effector's business -- and avoids parsing a reference for no reason.
+        // Same treatment as `colon < 0` below, DECISIONS 10.28.
+        if (matching.isEmpty()) {
             return;
         }
 
@@ -171,7 +184,7 @@ public final class RoleEffector {
         // identity at all -- it is a fact about everybody at once, and the
         // identity-shaped path below would drop it silently.
         if ("rule.changed".equals(type)) {
-            reconcile();
+            matching.forEach(this::reconcile);
             return;
         }
 
@@ -180,13 +193,23 @@ public final class RoleEffector {
             return;
         }
 
-        switch (type) {
-            case "subject.requirements-met" -> connector.applyRole(platformId, role);
-            case "subject.requirements-lost" -> connector.removeRole(platformId, role);
-            default -> {
-                // Every other event type is somebody else's. Ignored rather
-                // than logged: this stream carries everything, and a line per
-                // uninteresting event is a log nobody reads.
+        for (RoleBinding binding : matching) {
+            switch (type) {
+                case "subject.requirements-met" -> {
+                    if (binding.mode().grants()) {
+                        connector.applyRole(platformId, binding.role());
+                    }
+                }
+                case "subject.requirements-lost" -> {
+                    if (binding.mode().revokes()) {
+                        connector.removeRole(platformId, binding.role());
+                    }
+                }
+                default -> {
+                    // Every other event type is somebody else's. Ignored rather
+                    // than logged: this stream carries everything, and a line per
+                    // uninteresting event is a log nobody reads.
+                }
             }
         }
     }
@@ -215,10 +238,17 @@ public final class RoleEffector {
      * wait, because until it happens somebody has access a rule says they
      * should not.
      */
-    private void reconcile() {
-        if (role == null || role.isBlank() || gate == null || gate.isBlank()) {
+    private void reconcile(RoleBinding binding) {
+        // A GRANT-only binding must not reconcile, and this is the line that
+        // keeps hysteresis working. Reconciling the high gate would take the
+        // role off everybody below it -- which is exactly the band the pair
+        // exists to hold, so the role would be revoked at the grant threshold
+        // and the lower gate would never get to mean anything.
+        if (!binding.mode().revokes()) {
             return;
         }
+        String gate = binding.gate();
+        String role = binding.role();
         List<String> holders = connector.holdersOf(role);
         if (holders.isEmpty()) {
             return;

@@ -26,12 +26,29 @@ guild = "000000000000000000"
 # The platform kind this connector speaks for, as core knows it.
 kind = "discord"
 
-[effector]
-# The role granted when a subject satisfies the gate below, and the gate whose
-# events drive it. Both unset means the connector displays and accepts codes
-# but changes nothing -- a reasonable first deployment.
-role = ""
-gate = ""
+# The roles this connector maintains: one [[effector.roles]] block per binding.
+# No blocks at all means the connector displays and accepts codes but changes
+# nothing -- a reasonable first deployment.
+#
+# `mode` is grant, revoke, or both (the default). A role granted at one
+# threshold and taken away at a LOWER one is two gates bound to the same role,
+# the higher granting and the lower revoking; the gap between them is the band
+# where the role is kept. A role that some binding grants must be revocable by
+# some binding, or it would never come off.
+#
+# [[effector.roles]]
+# gate = "chat.gamelinked"
+# role = "GameLinked"
+#
+# [[effector.roles]]
+# gate = "activity.meeper.grant"
+# role = "Meeper"
+# mode = "grant"
+#
+# [[effector.roles]]
+# gate = "activity.meeper.keep"
+# role = "Meeper"
+# mode = "revoke"
 
 [gate]
 # What to do when core is unreachable: "closed" (default) refuses, "open"

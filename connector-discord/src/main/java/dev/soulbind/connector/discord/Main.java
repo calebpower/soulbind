@@ -116,12 +116,11 @@ public final class Main {
             }
         });
 
-        String role = config.findString(DiscordConfig.LINKED_ROLE).orElse(null);
-        String gate = config.findString(DiscordConfig.GATE).orElse(null);
+        List<RoleBinding> bindings = DiscordConfig.bindings(config);
 
-        if (role != null && gate != null) {
+        if (!bindings.isEmpty()) {
             RoleEffector effector = new RoleEffector(
-                    client, connector, new IdempotentApplier(), gate, role,
+                    client, connector, new IdempotentApplier(), bindings,
                     DiscordConfig.platformKind(config),
                     (message, cause) -> LOG.warn("{}", message, cause));
 
@@ -143,7 +142,22 @@ public final class Main {
             poller.scheduleWithFixedDelay(
                     effector::drainQuietly, 0, seconds, TimeUnit.SECONDS);
 
-            LOG.info("polling for events every {}s, granting '{}' on '{}'", seconds, role, gate);
+            // Every binding, named, and the direction with it. This line is how
+            // an operator confirms the posture from the running process rather
+            // than from the file they think they edited -- and with several
+            // bindings, "an effector is configured" is no longer enough to know
+            // which.
+            StringBuilder posture = new StringBuilder();
+            for (RoleBinding binding : bindings) {
+                posture.append(posture.isEmpty() ? "" : ", ")
+                        .append(binding.gate())
+                        .append(" -> ")
+                        .append(binding.role())
+                        .append(" (")
+                        .append(binding.mode().name().toLowerCase(java.util.Locale.ROOT))
+                        .append(')');
+            }
+            LOG.info("polling for events every {}s; {}", seconds, posture);
         } else {
             LOG.info("no effector configured; commands only");
         }

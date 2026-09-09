@@ -217,7 +217,7 @@ sudo chown root:soulbind /etc/soulbind/discord.toml /etc/soulbind/discord.env
 sudo chmod 640 /etc/soulbind/discord.toml
 sudo chmod 600 /etc/soulbind/discord.env
 sudo editor /etc/soulbind/discord.env    # bot token and core credential
-sudo editor /etc/soulbind/discord.toml   # guild, role, gate
+sudo editor /etc/soulbind/discord.toml   # guild, and the [[effector.roles]] bindings
 sudo cp /opt/soulbind/connector-discord/packaging/soulbind-discord.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now soulbind-discord
