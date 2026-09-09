@@ -63,6 +63,26 @@ disabled feature — the precise class of bug this loader exists to prevent.
 same redaction, because the dangerous path is the accidental one: a log line, a
 debugger transcript, an exception that interpolates the object.
 
+**Lists of things are lists of tables, not delimited strings.** A `TABLE_ARRAY`
+key carries a schema for its elements, and each element is validated by the same
+code as the top level — types, required fields, unknown-key rejection, "did you
+mean", and redaction:
+
+```toml
+[[effector.roles]]
+gate = "chat.gamelinked"
+role = "GameLinked"
+```
+
+The recursion is the whole point. tomlj reports an array of tables as **one**
+dotted key and never its elements', so without it a misspelt field inside an
+element would be silently ignored — the exact failure this module exists to
+prevent, reintroduced by the feature meant to avoid a hand-parsed string.
+
+Nesting is refused: one level, because nothing needs two and an untested path is
+not a feature. An environment variable cannot set one either, and says so rather
+than being ignored — no single variable can address the third entry of a list.
+
 ## Using it
 
 ```java
@@ -81,6 +101,11 @@ the two cannot disagree about what exists.
 An optional key is read with `find*` and returns `Optional`. Reading one with
 `get*` is a programming error rather than a silent default: absence is a
 decision the caller has to make, not one the loader makes for them.
+
+A `TABLE_ARRAY` is read with `getTables`, which returns a `List<Config>` — one
+configuration per element, over the element schema. Absent and explicitly empty
+both read as an empty list: to every caller they mean the same thing, and making
+them different would be a distinction nobody wants to handle.
 
 ## Building and testing
 

@@ -17,6 +17,7 @@
 package dev.soulbind.config;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -74,6 +75,29 @@ public final class Config {
         return find(key, Boolean.class, ConfigKey.Type.BOOLEAN);
     }
 
+    /**
+     * The elements of an array of tables, each a configuration in its own right.
+     *
+     * <p>Absent reads as empty rather than throwing, because a list nobody
+     * configured and a list configured empty mean the same thing to every caller
+     * — no bindings — and making them different would be a distinction the
+     * caller has to handle without ever wanting to.
+     *
+     * <p>Each element is a {@link Config} over the element schema, so the
+     * accessors, the type checking and the redaction in {@link #describe()} are
+     * the same ones as at the top level rather than a second implementation.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Config> getTables(ConfigKey key) {
+        requireDeclared(key);
+        if (key.type() != ConfigKey.Type.TABLE_ARRAY) {
+            throw new IllegalArgumentException(
+                    "'" + key.path() + "' is declared " + key.type() + ", read as TABLE_ARRAY");
+        }
+        Object value = values.get(key.path());
+        return value == null ? List.of() : (List<Config>) value;
+    }
+
     private <T> T get(ConfigKey key, Class<T> as, ConfigKey.Type expected) {
         return find(key, as, expected).orElseThrow(() -> new IllegalStateException(
                 "no value for '" + key.path() + "'. It is declared optional, so read it with "
@@ -110,6 +134,7 @@ public final class Config {
             case STRING -> "String";
             case INTEGER -> "Int";
             case BOOLEAN -> "Boolean";
+            case TABLE_ARRAY -> "Tables";
         };
     }
 
@@ -129,6 +154,18 @@ public final class Config {
                 out.put(key.path(), "(unset)");
             } else if (key.secret()) {
                 out.put(key.path(), "(redacted)");
+            } else if (key.type() == ConfigKey.Type.TABLE_ARRAY) {
+                // Expanded element by element rather than printed as a list, so
+                // `doctor` shows an operator what was actually loaded -- and so
+                // each element's own describe() does its own redaction, which is
+                // the only place that knows which of its fields are secret.
+                List<Config> tables = getTables(key);
+                out.put(key.path(), tables.size() == 1 ? "1 entry" : tables.size() + " entries");
+                for (int i = 0; i < tables.size(); i++) {
+                    for (Map.Entry<String, String> field : tables.get(i).describe().entrySet()) {
+                        out.put(key.path() + "[" + i + "]." + field.getKey(), field.getValue());
+                    }
+                }
             } else {
                 out.put(key.path(), String.valueOf(value));
             }

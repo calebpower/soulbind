@@ -101,6 +101,26 @@ public final class ConfigSchema {
     }
 
     /**
+     * Two schemas are equal when they declare the same keys.
+     *
+     * <p>Defined because {@link ConfigKey} is a record that may now hold one of
+     * these as a component, so record equality reaches in here. Without this it
+     * would fall back to identity, and {@code Config}'s "declared differently
+     * here than by the schema" check would fire on two schemas that are the
+     * same in every way that matters.
+     */
+    @Override
+    public boolean equals(Object other) {
+        return this == other
+                || (other instanceof ConfigSchema s && byPath.equals(s.byPath));
+    }
+
+    @Override
+    public int hashCode() {
+        return byPath.hashCode();
+    }
+
+    /**
      * A schema containing every key of both, for a component that composes
      * another's configuration.
      */

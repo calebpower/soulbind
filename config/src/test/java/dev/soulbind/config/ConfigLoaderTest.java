@@ -648,4 +648,207 @@ class ConfigLoaderTest {
                             + pair[1] + "): " + thrown.getMessage());
         }
     }
+
+    /**
+     * TABLE_ARRAY — an array of tables, each held to its own schema.
+     *
+     * <p>The unknown-key cases below are the reason this type exists rather than
+     * a hand-parsed delimited string. tomlj reports an array of tables as ONE
+     * dotted key and never its elements', so without the loader's own recursion
+     * a misspelt field inside an element is silently ignored — the exact failure
+     * this module was built to prevent.
+     */
+    @Nested
+    @DisplayName("arrays of tables")
+    class TableArrays {
+
+        private final ConfigKey gate = ConfigKey.required("gate", Type.STRING, "the gate");
+        private final ConfigKey role = ConfigKey.required("role", Type.STRING, "the role");
+        private final ConfigKey mode = ConfigKey.optional("mode", Type.STRING, "grant/revoke");
+        private final ConfigKey enabled = ConfigKey.optional("enabled", Type.BOOLEAN, "on");
+        private final ConfigSchema element = ConfigSchema.of(gate, role, mode, enabled);
+        private final ConfigKey roles = ConfigKey.tables("effector.roles", element, "bindings");
+        private final ConfigSchema schema = ConfigSchema.of(roles);
+
+        private Config load(String toml, Map<String, String> env) {
+            return ConfigLoader.parse(toml, "test", schema, env);
+        }
+
+        private Config load(String toml) {
+            return load(toml, Map.of());
+        }
+
+        @Test
+        @DisplayName("an element schema is required, and meaningless on other types")
+        void declarationInvariants() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new ConfigKey("a.b", Type.TABLE_ARRAY, false, false, "d", null),
+                    "TABLE_ARRAY with no element schema is uncheckable");
+            assertThrows(IllegalArgumentException.class,
+                    () -> new ConfigKey("a.b", Type.STRING, false, false, "d", element),
+                    "an element schema means nothing on a string");
+            assertThrows(IllegalArgumentException.class,
+                    () -> new ConfigKey("a.b", Type.TABLE_ARRAY, false, true, "d", element),
+                    "the sensitive field is secret, not the array around it");
+            assertThrows(IllegalArgumentException.class,
+                    () -> ConfigKey.tables("a.b", ConfigSchema.of(roles), "d"),
+                    "nesting is narrowed out deliberately, so it must be refused loudly");
+        }
+
+        @Test
+        @DisplayName("elements are parsed in order, with optional fields absent")
+        void parsesElements() {
+            List<Config> parsed = load("""
+                    [[effector.roles]]
+                    gate = "chat.gamelinked"
+                    role = "GameLinked"
+
+                    [[effector.roles]]
+                    gate = "activity.meeper.grant"
+                    role = "Meeper"
+                    mode = "grant"
+                    """).getTables(roles);
+
+            assertEquals(2, parsed.size());
+            assertEquals("chat.gamelinked", parsed.get(0).getString(gate));
+            assertEquals("GameLinked", parsed.get(0).getString(role));
+            assertEquals(java.util.Optional.empty(), parsed.get(0).findString(mode));
+            assertEquals("grant", parsed.get(1).getString(mode));
+        }
+
+        @Test
+        @DisplayName("the inline spelling means the same thing")
+        void inlineFormIsEquivalent() {
+            List<Config> parsed = load(
+                    "[effector]\nroles = [ { gate = \"g\", role = \"R\" } ]\n").getTables(roles);
+            assertEquals(1, parsed.size());
+            assertEquals("g", parsed.get(0).getString(gate));
+        }
+
+        @Test
+        @DisplayName("absent and explicitly empty both read as no bindings")
+        void absentAndEmptyAreBothEmpty() {
+            assertEquals(List.of(), load("").getTables(roles));
+            assertEquals(List.of(), load("[effector]\nroles = []\n").getTables(roles));
+        }
+
+        @Test
+        @DisplayName("a misspelt field INSIDE an element is rejected, and suggested")
+        void unknownElementKeyIsRejected() {
+            ConfigException e = assertThrows(ConfigException.class, () -> load("""
+                    [[effector.roles]]
+                    gate = "g"
+                    role = "R"
+                    rol = "typo"
+                    """));
+            assertTrue(e.getMessage().contains("unknown key 'effector.roles[0].rol'"),
+                    () -> "the message must name the element and the field: " + e.getMessage());
+            assertTrue(e.getMessage().contains("did you mean 'role'"),
+                    () -> "expected a suggestion inside the element: " + e.getMessage());
+        }
+
+        @Test
+        @DisplayName("a missing required field names the element it is missing from")
+        void missingRequiredElementField() {
+            ConfigException e = assertThrows(ConfigException.class, () -> load("""
+                    [[effector.roles]]
+                    gate = "one"
+                    role = "R"
+
+                    [[effector.roles]]
+                    gate = "two"
+                    """));
+            assertTrue(e.getMessage().contains("effector.roles[1].role"),
+                    () -> "the index is what makes this actionable: " + e.getMessage());
+        }
+
+        @Test
+        @DisplayName("a wrongly-typed field names the element, the field and both types")
+        void wrongTypeInsideElement() {
+            ConfigException e = assertThrows(ConfigException.class, () -> load("""
+                    [[effector.roles]]
+                    gate = "g"
+                    role = "R"
+                    enabled = "yes"
+                    """));
+            assertTrue(e.getMessage().contains("effector.roles[0].enabled"), e.getMessage());
+            assertTrue(e.getMessage().contains("boolean") && e.getMessage().contains("a string"),
+                    e.getMessage());
+        }
+
+        @Test
+        @DisplayName("a value that is not an array, and an array that is not of tables")
+        void wrongShapeAltogether() {
+            ConfigException notArray = assertThrows(ConfigException.class,
+                    () -> load("[effector]\nroles = \"a=B\"\n"));
+            assertTrue(notArray.getMessage().contains("must be an array of tables"),
+                    notArray.getMessage());
+            assertTrue(notArray.getMessage().contains("found a string"), notArray.getMessage());
+
+            ConfigException notTables = assertThrows(ConfigException.class,
+                    () -> load("[effector]\nroles = [\"a\", \"b\"]\n"));
+            assertTrue(notTables.getMessage().contains("effector.roles[0]' must be a table"),
+                    notTables.getMessage());
+        }
+
+        @Test
+        @DisplayName("an environment variable cannot set a list, and says so")
+        void environmentCannotSupplyATableArray() {
+            ConfigException e = assertThrows(ConfigException.class,
+                    () -> load("", Map.of("SOULBIND_EFFECTOR_ROLES", "anything")));
+            assertTrue(e.getMessage().contains("SOULBIND_EFFECTOR_ROLES"), e.getMessage());
+            assertTrue(e.getMessage().contains("only be written in the file"),
+                    () -> "silently ignoring it is the failure this loader exists to prevent: "
+                            + e.getMessage());
+        }
+
+        @Test
+        @DisplayName("every problem across every element is reported at once")
+        void reportsEveryProblemTogether() {
+            ConfigException e = assertThrows(ConfigException.class, () -> load("""
+                    [[effector.roles]]
+                    gate = "g"
+                    rol = "typo"
+
+                    [[effector.roles]]
+                    role = "R"
+                    nope = 1
+                    """));
+            // element 0: unknown 'rol' + missing 'role'
+            // element 1: unknown 'nope' + missing 'gate'
+            assertEquals(4, e.problems().size(),
+                    () -> "fixing one error per restart teaches an operator to stop reading: "
+                            + e.problems());
+        }
+
+        @Test
+        @DisplayName("describe() expands the elements and redacts inside them")
+        void describeExpandsAndRedacts() {
+            ConfigKey token = ConfigKey.secret("token", false, "per-binding secret");
+            ConfigSchema withSecret = ConfigSchema.of(gate, role, token);
+            ConfigKey key = ConfigKey.tables("effector.roles", withSecret, "bindings");
+            Map<String, String> described = ConfigLoader.parse("""
+                    [[effector.roles]]
+                    gate = "g"
+                    role = "R"
+                    token = "hunter2"
+                    """, "test", ConfigSchema.of(key), Map.of()).describe();
+
+            assertEquals("1 entry", described.get("effector.roles"));
+            assertEquals("g", described.get("effector.roles[0].gate"));
+            assertEquals("(redacted)", described.get("effector.roles[0].token"),
+                    "a secret inside an element must be redacted by the element's own schema");
+            assertFalse(described.toString().contains("hunter2"), described.toString());
+        }
+
+        @Test
+        @DisplayName("reading a table array as a scalar, or a scalar as a table array, is refused")
+        void accessorsAreTypeChecked() {
+            Config config = load("");
+            assertThrows(IllegalArgumentException.class, () -> config.getString(roles));
+            Config other = parse("[server]\nhost = \"h\"\nport = 1\n");
+            assertThrows(IllegalArgumentException.class, () -> other.getTables(HOST));
+        }
+    }
+
 }

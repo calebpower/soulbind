@@ -28,12 +28,29 @@ import java.util.regex.Pattern;
  * loader that accepts whatever it finds cannot tell a typo from a setting.
  */
 public record ConfigKey(
-        String path, Type type, boolean required, boolean secret, String description) {
+        String path,
+        Type type,
+        boolean required,
+        boolean secret,
+        String description,
+        ConfigSchema elements) {
 
     public enum Type {
         STRING,
         INTEGER,
-        BOOLEAN
+        BOOLEAN,
+
+        /**
+         * An array of tables, each validated against {@link #elements()}.
+         *
+         * <p>Exists because some settings are genuinely a list of things with
+         * fields — a role binding is a gate, a role and a direction — and the
+         * alternative was a delimited string parsed by hand. A mini-syntax
+         * inside a string is a second configuration language with no schema, no
+         * unknown-key rejection and no "did you mean", inside the one module
+         * whose whole job is that configuration means what it says.
+         */
+        TABLE_ARRAY
     }
 
     /**
@@ -62,6 +79,32 @@ public record ConfigKey(
                             + "segments separated by dots, with no underscores or hyphens, so "
                             + "that the mapping to an environment variable name is unambiguous");
         }
+        if ((type == Type.TABLE_ARRAY) != (elements != null)) {
+            throw new IllegalArgumentException(
+                    "config key '" + path + "': an element schema is exactly what makes a "
+                            + "TABLE_ARRAY checkable, and means nothing on any other type");
+        }
+        if (type == Type.TABLE_ARRAY && secret) {
+            // A secret is redacted as one value. An array of tables is redacted
+            // element by element, by the nested schema, which is the only place
+            // that knows which of its fields are sensitive.
+            throw new IllegalArgumentException(
+                    "config key '" + path + "': mark the sensitive element field secret, "
+                            + "not the array containing it");
+        }
+        if (elements != null) {
+            for (ConfigKey element : elements.keys()) {
+                if (element.type() == Type.TABLE_ARRAY) {
+                    // Narrowed to one level, and the reason covers exactly that:
+                    // nothing needs two, and an untested path is not a feature.
+                    // The loader's recursion would carry it; its error messages
+                    // and its tests have not been written for it.
+                    throw new IllegalArgumentException(
+                            "config key '" + path + "': element '" + element.path()
+                                    + "' is itself a TABLE_ARRAY, and nesting is not supported");
+                }
+            }
+        }
         if (description.isBlank()) {
             // A key nobody described is a key nobody can be expected to set
             // correctly, and `soulbind doctor` has nothing to print beside it.
@@ -71,12 +114,12 @@ public record ConfigKey(
 
     /** A required key of the given type. */
     public static ConfigKey required(String path, Type type, String description) {
-        return new ConfigKey(path, type, true, false, description);
+        return new ConfigKey(path, type, true, false, description, null);
     }
 
     /** An optional key of the given type. */
     public static ConfigKey optional(String path, Type type, String description) {
-        return new ConfigKey(path, type, false, false, description);
+        return new ConfigKey(path, type, false, false, description, null);
     }
 
     /**
@@ -84,7 +127,28 @@ public record ConfigKey(
      * supplied through the environment rather than written into a file.
      */
     public static ConfigKey secret(String path, boolean required, String description) {
-        return new ConfigKey(path, Type.STRING, required, true, description);
+        return new ConfigKey(path, Type.STRING, required, true, description, null);
+    }
+
+    /**
+     * An array of tables, each element validated against its own schema.
+     *
+     * <p>Optional, and absent means an empty list rather than an error: a
+     * connector with no bindings configured is a connector that changes nothing,
+     * which is a reasonable posture and not a misconfiguration.
+     *
+     * <p>Both TOML spellings work, because tomlj resolves them to the same
+     * value — the array-of-tables header and the inline form:
+     *
+     * <pre>
+     *   [[effector.roles]]              roles = [ { gate = "g", role = "R" } ]
+     *   gate = "g"
+     *   role = "R"
+     * </pre>
+     */
+    public static ConfigKey tables(String path, ConfigSchema elements, String description) {
+        return new ConfigKey(path, Type.TABLE_ARRAY, false, false, description,
+                java.util.Objects.requireNonNull(elements, "elements"));
     }
 
     /**

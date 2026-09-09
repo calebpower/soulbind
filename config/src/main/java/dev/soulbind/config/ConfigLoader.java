@@ -27,7 +27,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 import org.tomlj.Toml;
+import org.tomlj.TomlArray;
 import org.tomlj.TomlParseResult;
+import org.tomlj.TomlTable;
 
 /**
  * The one place soulbind reads a configuration file.
@@ -147,7 +149,90 @@ public final class ConfigLoader {
             case STRING -> raw instanceof String s ? s : typeError(key, raw, problems);
             case INTEGER -> raw instanceof Long l ? l : typeError(key, raw, problems);
             case BOOLEAN -> raw instanceof Boolean b ? b : typeError(key, raw, problems);
+            case TABLE_ARRAY -> tableArray(key, raw, problems);
         };
+    }
+
+    /**
+     * Resolves an array of tables, holding each element to the element schema.
+     *
+     * <p><b>The recursion is the point.</b> tomlj reports an array of tables as
+     * ONE dotted key — {@code effector.roles} — and never its elements' keys, so
+     * the unknown-key rejection in {@link #parse} cannot see inside. A misspelt
+     * field within an element would be silently ignored, which is precisely the
+     * failure this loader exists to prevent, and it would be reintroduced by the
+     * one type added to avoid a hand-parsed string.
+     */
+    private static Object tableArray(ConfigKey key, Object raw, List<String> problems) {
+        if (!(raw instanceof TomlArray array)) {
+            problems.add("'" + key.path() + "' must be an array of tables, found "
+                    + describeType(raw) + "; write [[" + key.path() + "]] sections");
+            return null;
+        }
+
+        // No soundness flag, deliberately. An earlier draft tracked one and
+        // returned null when an element was bad; a mutation removing it survived
+        // the whole suite, because every path that would have set it has already
+        // added a problem and `parse` therefore throws before this value is read.
+        // A flag that cannot change an outcome reads as a safeguard and is not
+        // one.
+        List<Config> elements = new ArrayList<>();
+
+        for (int i = 0; i < array.size(); i++) {
+            String where = key.path() + "[" + i + "]";
+            if (!(array.get(i) instanceof TomlTable table)) {
+                problems.add("'" + where + "' must be a table, found "
+                        + describeType(array.get(i)));
+                continue;
+            }
+
+            for (String present : new TreeSet<>(table.dottedKeySet())) {
+                if (!key.elements().contains(present)) {
+                    problems.add("unknown key '" + where + "." + present + "'"
+                            + suggest(present, key.elements()));
+                }
+            }
+
+            Map<String, Object> values = new LinkedHashMap<>();
+            for (ConfigKey field : key.elements().keys()) {
+                // No environment override inside an element, deliberately: one
+                // variable cannot address the third entry of a list, and a name
+                // that looked like it might would be worse than none.
+                Object value = fromTable(field, table, where, problems);
+                if (value != null) {
+                    values.put(field.path(), value);
+                } else if (field.required() && !table.contains(field.path())) {
+                    problems.add("missing required key '" + where + "." + field.path()
+                            + "' (" + field.description() + ")");
+                }
+            }
+            elements.add(new Config(where, key.elements(), values));
+        }
+
+        return List.copyOf(elements);
+    }
+
+    private static Object fromTable(
+            ConfigKey key, TomlTable table, String where, List<String> problems) {
+        if (!table.contains(key.path())) {
+            return null;
+        }
+        Object raw = table.get(key.path());
+        return switch (key.type()) {
+            case STRING -> raw instanceof String s ? s : elementTypeError(key, raw, where, problems);
+            case INTEGER -> raw instanceof Long l ? l : elementTypeError(key, raw, where, problems);
+            case BOOLEAN -> raw instanceof Boolean b ? b : elementTypeError(key, raw, where, problems);
+            case TABLE_ARRAY -> throw new IllegalStateException(
+                    "nested table arrays are refused by ConfigKey");
+        };
+    }
+
+    private static Object elementTypeError(
+            ConfigKey key, Object raw, String where, List<String> problems) {
+        problems.add("'" + where + "." + key.path() + "' must be " + article(key.type()) + " "
+                + key.type().name().toLowerCase(java.util.Locale.ROOT)
+                + ", found " + describeType(raw));
+        return null;
     }
 
     private static Object typeError(ConfigKey key, Object raw, List<String> problems) {
@@ -176,6 +261,13 @@ public final class ConfigLoader {
                     problems.add(key.envName() + "='" + raw + "' is not an integer");
                     return null;
                 }
+            case TABLE_ARRAY:
+                // One environment variable cannot express a list of tables, and
+                // quietly ignoring it would be exactly the "appears to be set
+                // and does nothing" failure this loader exists to prevent.
+                problems.add(key.envName() + " is set, but '" + key.path()
+                        + "' is a list of tables and can only be written in the file");
+                return null;
             case BOOLEAN:
                 String v = raw.strip().toLowerCase(java.util.Locale.ROOT);
                 if (v.equals("true")) {
@@ -257,6 +349,15 @@ public final class ConfigLoader {
         }
         if (raw instanceof Double) {
             return "a float";
+        }
+        // Named before the fallback, which would otherwise print tomlj's
+        // implementation class -- "MutableTomlArray" tells an operator nothing
+        // about their own file.
+        if (raw instanceof TomlArray) {
+            return "an array";
+        }
+        if (raw instanceof TomlTable) {
+            return "a table";
         }
         return raw == null ? "nothing" : raw.getClass().getSimpleName();
     }
