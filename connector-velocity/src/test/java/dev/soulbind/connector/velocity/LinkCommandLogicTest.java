@@ -88,8 +88,16 @@ class LinkCommandLogicTest {
                         + "\"expiresAtEpochSeconds\":" + expires + "}}"))
                 .issue(PLAYER, "Alex");
 
+        // EXACT, not contains(), and that is not pedantry -- it is a flake this
+        // test carried for its whole life. The surviving mutant turns
+        // `expires - now` into `expires + now`, which renders a number derived
+        // from the wall clock. Whether `contains("1 minutes")` then matched
+        // depended on the LAST DIGIT of the current epoch second: about one run
+        // in ten it ended in 1, both assertions passed, and the mutant lived.
+        // It survived on a loaded reaper guest and was killed on the run before
+        // it, with no code change in between.
+        assertEquals("1 minutes", reply.values().get("expires"), reply::message);
         assertTrue(reply.message().contains("1 minutes"), reply.message());
-        assertFalse(reply.message().contains("0 minutes"), reply.message());
     }
 
     @Test
