@@ -559,14 +559,42 @@ four components — core, `connector-velocity`, `connector-discord`,
 `connector-flarum` — run on the first estate, each version read back from the
 running process rather than from what was installed.
 
-**Enforcement is off everywhere.** No rules exist, so every gate answers `allow`
-/ `no-rule`; `gate.join` and `effector.group` are unset on the proxy, and
-`[effector] role` and `gate` are empty on Discord. One real cross-platform link
-exists in the identity graph and has survived five upgrades. The estate's MariaDB
-is untouched — soulbind runs on SQLite and has never opened it.
+**Enforcement is ON, and this document said otherwise for longer than it was
+true.** It claimed "no rules exist, so every gate answers `allow` / `no-rule`"
+and that one cross-platform link existed. Both were stale before the 0.2.x work
+began: a `post` rule requiring a verified chat identity was written on
+2026-08-25 and has been refusing real people ever since, and the graph holds six
+subjects across thirteen identities. Corrected 2026-09-10, from the deployment
+rather than from memory.
 
-So the next piece of work is **not** more coverage. It is the first rule, which
-is the first moment soulbind can refuse a real person entry.
+As of 0.2.1 the estate runs five rules: `post`, the two link gates, and the
+hysteresis pair behind an activity role. Three roles are granted by soulbind.
+The proxy's join gate remains unset — `gate.join` and `effector.group` are still
+empty, so nothing gates a login. The estate's MariaDB is untouched: soulbind
+runs on SQLite and has never opened it, and the playtime reporter reads the
+dashboard's schema over the dashboard's own pooled connection.
+
+The first rule is long past; what 0.2.x added was the first rule that depends on
+something other than identity.
+
+**Two defects reached the estate and were found by deploying, not by testing.**
+`measure.identity_ref` was `VARCHAR(191)` where a legal reference reaches 256 —
+invisible on SQLite, error 1406 on MariaDB — caught by reading before the axis
+ran. And `measure.report` emitted its gate transitions for only the identity it
+measured, where the override operations beside it expand to every identity the
+subject holds; since effectors route on the reference and each acts on its own
+platform's kind, a measurement on one platform could never move a role on
+another. Sixty measurements landed, three above the threshold, and the chat
+effector correctly discarded every one. Fixed in 0.2.1.
+
+**A property worth writing down, because it surprised the deployment.** A rule
+change revokes but does not grant (narrowing 14), and a re-reported measure that
+does not cross a threshold emits nothing. So enabling a rule grants nobody
+anything: every subject who already qualified stays ungranted until something
+about them changes. Backfilling meant driving each gate DOWN and back up — a
+deny override, then removing it — which emits the transition the effector needs
+and leaves no override behind. It is a legitimate one-off and a bad standing
+mechanism, and the bounded sweep that would replace it is still deferred.
 
 ### Next, in the order I would do it
 
