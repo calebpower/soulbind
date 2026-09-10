@@ -26,7 +26,7 @@ import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import dev.soulbind.connector.plan.playtime.HostQueries;
-import dev.soulbind.connector.plan.playtime.PlanQueryPlaytimeSource;
+import dev.soulbind.connector.plan.playtime.PlanActivitySource;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -206,7 +206,7 @@ public final class SoulbindPlanPlugin {
             return;
         }
 
-        PlanQueryPlaytimeSource.Queries queries;
+        PlanActivitySource.Queries queries;
         try {
             // The adapter lives in the playtime package, not here, so the
             // storage seam's exemption covers exactly one package.
@@ -235,7 +235,7 @@ public final class SoulbindPlanPlugin {
 
         MeasureReporter reporter = new MeasureReporter(
                 reporting,
-                new PlanQueryPlaytimeSource(
+                new PlanActivitySource(
                         queries, (message, cause) -> logger.warn("{}", message, cause)),
                 PlanConfig.platformKind(config),
                 PlanConfig.measureName(config),

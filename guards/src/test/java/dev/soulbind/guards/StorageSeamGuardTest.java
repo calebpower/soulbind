@@ -68,12 +68,20 @@ class StorageSeamGuardTest {
      * soulbind still opens no database of its own, and its state is still a file
      * on disk.
      *
-     * <p>What this package does is read the analytics dashboard's schema, over a
-     * connection the dashboard owns and pools, because the dashboard's public
-     * API has no idle-aware playtime total and the difference between connected
-     * time and active time is six-fold for some players. The alternative was a
-     * second connection with a second copy of that system's credentials in a
-     * soulbind config file — strictly worse, and it would trip this same guard.
+     * <p>What this package does is read ONE column of the analytics dashboard's
+     * schema, over a connection the dashboard owns and pools: the list of players
+     * seen recently. It needs that because the dashboard's public API can say how
+     * active a given player is but has no enumeration of any kind — no way to ask
+     * which players exist.
+     *
+     * <p>This exemption used to cover more. An earlier version summed session
+     * lengths minus idle time over a window and compared the total to a
+     * threshold; that arithmetic is gone, replaced by the dashboard's own
+     * activity index, which is both better calibrated and not ours to
+     * reimplement. What remains is a roster query with no arithmetic in it at
+     * all. The alternative was a second connection with a second copy of that
+     * system's credentials in a soulbind config file — strictly worse, and it
+     * would trip this same guard.
      *
      * <p><b>Exactly one package, and the fixture below proves it is one.</b> The
      * adapter over the host's query API lives inside it for that reason alone:

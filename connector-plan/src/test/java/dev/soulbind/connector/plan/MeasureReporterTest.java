@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.soulbind.connector.plan.playtime.PlaytimeSource;
+import dev.soulbind.connector.plan.playtime.ActivitySource;
 import dev.soulbind.sdk.DecisionCache;
 import dev.soulbind.sdk.SoulbindClient;
 import dev.soulbind.sdk.transport.InMemoryTransport;
@@ -58,25 +58,26 @@ class MeasureReporterTest {
 
     private static final Clock CLOCK =
             Clock.fixed(Instant.ofEpochSecond(1_700_000_000L), ZoneOffset.UTC);
-    private static final Duration WEEK = Duration.ofDays(7);
+    /** What the host's index covers, not a window this connector picks. */
+    private static final Duration WINDOW = Duration.ofDays(21);
 
     private static final UUID ALEX = UUID.fromString("00000000-0000-0000-0000-0000000a1e00");
     private static final UUID SAM = UUID.fromString("00000000-0000-0000-0000-00000000005a");
 
     /** A source whose answers the test states outright, including "I cannot say". */
-    private static class FakeSource implements PlaytimeSource {
+    private static class FakeSource implements ActivitySource {
         private Optional<Set<UUID>> population = Optional.of(Set.of());
-        private final Map<UUID, Optional<Duration>> answers = new LinkedHashMap<>();
+        private final Map<UUID, java.util.OptionalDouble> answers = new LinkedHashMap<>();
         private final List<UUID> asked = new ArrayList<>();
 
         @Override
-        public Optional<Duration> activeSince(UUID player, Instant since) {
+        public java.util.OptionalDouble indexOf(UUID player, Instant at) {
             asked.add(player);
-            return answers.getOrDefault(player, Optional.of(Duration.ZERO));
+            return answers.getOrDefault(player, java.util.OptionalDouble.of(0.0));
         }
 
         @Override
-        public Optional<Set<UUID>> playersActiveSince(Instant since) {
+        public Optional<Set<UUID>> playersSeenSince(Instant since) {
             return population;
         }
     }
@@ -101,7 +102,7 @@ class MeasureReporterTest {
                 new SoulbindClient(transport, "cred", CLOCK, new DecisionCache());
 
         return new Fixture(
-                new MeasureReporter(client, source, "game", "playtime", WEEK, CLOCK,
+                new MeasureReporter(client, source, "game", "playtime", WINDOW, CLOCK,
                         (message, cause) -> logged.add(message)),
                 source, sent, logged);
     }
@@ -115,16 +116,17 @@ class MeasureReporterTest {
     void reportsTheActive() {
         Fixture f = fixture(true);
         f.source().population = Optional.of(Set.of(ALEX, SAM));
-        f.source().answers.put(ALEX, Optional.of(Duration.ofHours(9)));
-        f.source().answers.put(SAM, Optional.of(Duration.ofHours(1)));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.of(9.0));
+        f.source().answers.put(SAM, java.util.OptionalDouble.of(1.0));
 
         MeasureReporter.Swept swept = f.reporter().sweep();
 
         assertTrue(swept.ran());
         assertEquals(2, swept.reported());
         assertEquals(1, reportsFor(f.sent(), ALEX));
-        assertTrue(f.sent().stream().anyMatch(r -> r.contains("32400")),
-                () -> "nine hours was not reported as seconds: " + f.sent());
+        assertTrue(f.sent().stream().anyMatch(r -> r.contains("9000")),
+                () -> "an index of 9.0 was not reported scaled by " + MeasureReporter.SCALE
+                        + ": " + f.sent());
     }
 
     @Test
@@ -132,14 +134,14 @@ class MeasureReporterTest {
     void populationDrains() {
         Fixture f = fixture(true);
         f.source().population = Optional.of(Set.of(ALEX));
-        f.source().answers.put(ALEX, Optional.of(Duration.ofHours(9)));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.of(9.0));
         f.reporter().sweep();
 
         // They stop. They are no longer "active", but they were reported
         // non-zero, so the sweep must still cover them -- otherwise their old
         // measurement stands and the role never comes off.
         f.source().population = Optional.of(Set.of());
-        f.source().answers.put(ALEX, Optional.of(Duration.ZERO));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.of(0.0));
         f.sent().clear();
 
         MeasureReporter.Swept second = f.reporter().sweep();
@@ -162,7 +164,7 @@ class MeasureReporterTest {
     void unreadablePopulationSkipsEverything() {
         Fixture f = fixture(true);
         f.source().population = Optional.of(Set.of(ALEX));
-        f.source().answers.put(ALEX, Optional.of(Duration.ofHours(9)));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.of(9.0));
         f.reporter().sweep();
         f.sent().clear();
 
@@ -185,8 +187,8 @@ class MeasureReporterTest {
     void unreadablePlayerIsSkipped() {
         Fixture f = fixture(true);
         f.source().population = Optional.of(Set.of(ALEX, SAM));
-        f.source().answers.put(ALEX, Optional.empty());
-        f.source().answers.put(SAM, Optional.of(Duration.ofHours(3)));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.empty());
+        f.source().answers.put(SAM, java.util.OptionalDouble.of(3.0));
 
         MeasureReporter.Swept swept = f.reporter().sweep();
 
@@ -220,8 +222,8 @@ class MeasureReporterTest {
     void refusalIsPerPlayer() {
         Fixture f = fixture(false);
         f.source().population = Optional.of(Set.of(ALEX, SAM));
-        f.source().answers.put(ALEX, Optional.of(Duration.ofHours(9)));
-        f.source().answers.put(SAM, Optional.of(Duration.ofHours(3)));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.of(9.0));
+        f.source().answers.put(SAM, java.util.OptionalDouble.of(3.0));
 
         MeasureReporter.Swept swept = f.reporter().sweep();
 
@@ -238,7 +240,7 @@ class MeasureReporterTest {
         // reporting nothing, and the reporter's own memory becomes the leak.
         Fixture f = fixture(false);
         f.source().population = Optional.of(Set.of(ALEX));
-        f.source().answers.put(ALEX, Optional.of(Duration.ofHours(9)));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.of(9.0));
         f.reporter().sweep();
 
         f.source().population = Optional.of(Set.of());
@@ -254,12 +256,13 @@ class MeasureReporterTest {
         // nobody ever gets with nothing in any log.
         Fixture f = fixture(true);
         f.source().population = Optional.of(Set.of(ALEX));
-        f.source().answers.put(ALEX, Optional.of(Duration.ofHours(9)));
+        f.source().answers.put(ALEX, java.util.OptionalDouble.of(9.0));
 
         f.reporter().sweep();
 
-        assertTrue(f.sent().stream().anyMatch(r -> r.contains("604800")),
-                () -> "the seven-day window was not what got reported: " + f.sent());
+        assertTrue(f.sent().stream().anyMatch(r -> r.contains("1814400")),
+                () -> "the three-week window the index covers was not what got reported: "
+                        + f.sent());
     }
 
     @Test
@@ -284,7 +287,7 @@ class MeasureReporterTest {
         // stopped. Catching Throwable rather than RuntimeException is the point.
         FakeSource exploding = new FakeSource() {
             @Override
-            public Optional<Set<UUID>> playersActiveSince(Instant since) {
+            public Optional<Set<UUID>> playersSeenSince(Instant since) {
                 throw new NoClassDefFoundError("com/djrapitops/plan/query/QueryService");
             }
         };
@@ -292,7 +295,7 @@ class MeasureReporterTest {
         MeasureReporter reporter = new MeasureReporter(
                 new SoulbindClient(InMemoryTransport.always("{}"), "cred", CLOCK,
                         new DecisionCache()),
-                exploding, "game", "playtime", WEEK, CLOCK,
+                exploding, "game", "playtime", WINDOW, CLOCK,
                 (message, cause) -> logged.add(message));
 
         reporter.sweepQuietly();

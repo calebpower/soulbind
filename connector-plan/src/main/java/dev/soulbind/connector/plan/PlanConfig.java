@@ -167,13 +167,21 @@ public final class PlanConfig {
     }
 
     public static String measureName(Config config) {
-        return config.findString(MEASURE_NAME).filter(s -> !s.isBlank()).orElse("playtime");
+        return config.findString(MEASURE_NAME).filter(s -> !s.isBlank()).orElse("activityindex");
     }
 
-    /** The trailing window. Seven days by default, matching the rule it is written for. */
+    /**
+     * The span the reported value covers.
+     *
+     * <p>Three weeks by default, because that is what the host's activity index
+     * considers -- it is NOT the sweep interval, and it is not a window this
+     * connector chooses. A rule matches it exactly, so a wrong value here
+     * refuses everybody rather than admitting them: the safe direction, and
+     * still a misconfiguration.
+     */
     public static Duration measureWindow(Config config) {
         return Duration.ofSeconds(
-                config.findInt(MEASURE_WINDOW_SECONDS).map(Integer::longValue).orElse(604_800L));
+                config.findInt(MEASURE_WINDOW_SECONDS).map(Integer::longValue).orElse(1_814_400L));
     }
 
     /** How often to re-measure. Fifteen minutes by default. */

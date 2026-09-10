@@ -154,7 +154,7 @@ def a_case():
         op = "measure.report"
         payload = {"platformKind": "game",
                    "platformId": hostile,
-                   "name": hostile.strip() or "playtime",
+                   "name": hostile.strip() or "activityindex",
                    "value": rng.choice(NUMERIC_HOSTILE),
                    "windowSeconds": 604800}
     body = json.dumps({"schema": 1, "op": op, "id": str(uuid.uuid4()),

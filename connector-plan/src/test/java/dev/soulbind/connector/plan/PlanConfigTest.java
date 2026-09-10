@@ -167,8 +167,9 @@ class PlanConfigTest {
                 credential = "c"
                 """);
         assertTrue(PlanConfig.measureEnabled(on));
-        assertEquals("playtime", PlanConfig.measureName(on));
-        assertEquals(Duration.ofDays(7), PlanConfig.measureWindow(on));
+        assertEquals("activityindex", PlanConfig.measureName(on));
+        assertEquals(Duration.ofDays(21), PlanConfig.measureWindow(on),
+                "the window is what the host's index covers, not a span this connector picks");
         assertEquals(Duration.ofMinutes(15), PlanConfig.measureSweep(on));
         assertTrue(PlanConfig.validate(on).isEmpty(), () -> PlanConfig.validate(on).toString());
     }
@@ -266,7 +267,7 @@ class PlanConfigTest {
     @Test
     @DisplayName("a blank measure name falls back to the default rather than being sent blank")
     void blankNameFallsBack() {
-        assertEquals("playtime", PlanConfig.measureName(load(MINIMAL + """
+        assertEquals("activityindex", PlanConfig.measureName(load(MINIMAL + """
                 [measure]
                 name = "  "
                 """)), "a blank name would be reported to core as a measure called nothing");

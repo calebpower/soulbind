@@ -709,8 +709,9 @@ enabled = true
 # runs ONE connector, and giving it a second credential here would describe a
 # separation the harness does not have.
 credential = "$PLAN_CRED"
-name = "playtime"
-windowseconds = 604800
+name = "activityindex"
+# What the host index covers -- three weeks -- not the sweep interval.
+windowseconds = 1814400
 # Seconds, not the fifteen minutes a deployment uses. A stage waits for a
 # measurement to ARRIVE rather than sleeping a guessed interval, so this only
 # bounds how long that wait can be.

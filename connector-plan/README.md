@@ -172,38 +172,59 @@ The panels are deliberately few. Anything richer — per-platform breakdowns,
 history, linking trends — is a question about whether the dashboard is the right
 place to answer it, not a matter of adding another provider.
 
-## Reporting playtime
+## Reporting activity
 
 Off unless an operator turns it on. When on, this connector also **reports** how
-much each player has played over a trailing window, so a rule can require it:
+active each player is, so a rule can require it:
 
 ```toml
 [measure]
 enabled = true
 credential = ""          # holds measure-source; prefer SOULBIND_MEASURE_CREDENTIAL
-name = "playtime"        # a rule's threshold names the same string
-windowseconds = 604800   # a rule must ask for exactly this
+name = "activityindex"   # a rule's threshold names the same string
+windowseconds = 1814400  # what the index covers: three weeks
 sweepseconds = 900
 ```
+
+**The number is the dashboard's own activity index, not ours.** It considers
+three separate weeks, curves each so returns diminish, and averages them — so
+consistency outscores bingeing, and somebody who stops slides down over three
+weeks instead of falling off a cliff when a window rolls past. It is also the
+number the dashboard's own pages already show, so a role granted on it agrees
+with what a player can see about themselves.
+
+It is **scaled by 1000** on the way out, because a measure is an integer and the
+index is a double from 0 to 5. A rule threshold therefore reads `2000` where a
+person would say "Regular", which is opaque enough that the scale belongs in the
+gate's description too.
+
+The bands the dashboard uses, for reference when writing a rule:
+
+| Index | Scaled | Band |
+|---|---|---|
+| ≥ 3.75 | 3750 | Very Active |
+| ≥ 3.00 | 3000 | Active |
+| ≥ 2.00 | 2000 | Regular |
+| ≥ 1.00 | 1000 | Irregular |
+| < 1.00 | — | Inactive |
 
 **Two credentials, and they are not interchangeable.** `core.credential` holds
 `link-state-reader` and can mutate nothing. `measure.credential` holds
 `measure-source` and can do nothing but report. Merging them would let the
 dashboard — the most-installed and least-audited surface in the system — either
-read everybody's measurements or manufacture entitlement, depending on which way
+read everybody's measurements or manufacture entitlement, depending which way
 the merge went.
 
-**The cadence must be well inside the window**, and the loader refuses a
-configuration where it is not. A stale observation refuses without emitting
-anything, so a reporter that refreshes no more often than the window it measures
-leaves every observation stale and every role standing on evidence that has
-expired.
+**The cadence must be well inside `maxAgeSeconds`**, and the loader refuses a
+configuration where the sweep is not well inside the window. A stale observation
+refuses without emitting anything, so a reporter that refreshes too rarely leaves
+every role standing on evidence that has expired.
 
-**Nothing is ever reported as zero because it could not be read.** Both halves of
-the source answer with `Optional`; an empty answer means this connector says
-nothing at all about that player that cycle. The failure being avoided is not a
-missing grant, it is every holder dropping to zero at once on the sweep after
-somebody renames a column.
+**Nothing is ever reported as a floor because it could not be read.** Both halves
+of the source answer with an empty optional on failure; an empty answer means
+this connector says nothing at all about that player that cycle. The failure
+being avoided is not a missing grant, it is every holder dropping to the floor at
+once on the sweep after somebody renames a column.
 
 ### Where the SQL is, and why there is any
 
@@ -212,10 +233,10 @@ somebody renames a column.
 seam guard exempts exactly it — with a must-fail fixture proving the exemption is
 one package and not the module around it.
 
-The dashboard's public API has a windowed playtime total but **no idle-aware
-one**, and the difference is six-fold for some players: a role meaning "active"
-must not be earnable by leaving a client connected overnight. So the sum is
-spelled out, and run over the dashboard's *own* pooled connection. soulbind opens
-no database of its own and holds no database credential, which is what keeps its
-own state a file on disk.
-
+It is one query with no arithmetic: the list of players seen recently. The
+dashboard's public API can say how active a given player is but cannot enumerate
+players at all, so the roster has to come from its tables. Everything else — the
+window, the idle-time handling, the curve — is the dashboard's, computed by the
+dashboard, over its own pooled connection. soulbind opens no database of its own
+and holds no database credential, which is what keeps its own state a file on
+disk.

@@ -77,19 +77,19 @@ rpc() {
 log "declaring $GATE, satisfied by any reported observation"
 rpc rule.set "{\"gate\":\"$GATE\",\"requireLinked\":false,\"requiredKinds\":[],
     \"graceSeconds\":0,\"defaultEffect\":\"deny\",
-    \"measure\":{\"name\":\"playtime\",\"atLeast\":0,
+    \"measure\":{\"name\":\"activityindex\",\"atLeast\":0,
                  \"windowSeconds\":$WINDOW,\"maxAgeSeconds\":3600}}" > "$EVIDENCE/measures-rule.json"
 
 # The reporter sweeps on its own schedule; the harness sets it short. Waiting for
 # the measurement to ARRIVE rather than sleeping a guessed interval, so a slow
 # stack fails as "no measurement in 90s" and not as a mystery.
-log "waiting for the reporter to report playtime for $PLAYER"
+log "waiting for the reporter to report an activity index for $PLAYER"
 found=0
 i=0
 while [ "$i" -lt 45 ]; do
     if rpc measure.get "{\"platformKind\":\"game\",\"platformId\":\"$PLAYER\"}" \
             > "$EVIDENCE/measures-get.json" 2>/dev/null \
-            && grep -q '"playtime"' "$EVIDENCE/measures-get.json"; then
+            && grep -q '"activityindex"' "$EVIDENCE/measures-get.json"; then
         found=1
         break
     fi
@@ -98,11 +98,11 @@ while [ "$i" -lt 45 ]; do
 done
 
 if [ "$found" -ne 1 ]; then
-    log "no playtime measurement reached core in 90s"
+    log "no activity measurement reached core in 90s"
     log "the reporter is configured in stack.sh under [measure]; check the proxy log"
     exit 1
 fi
-log "core holds a playtime observation for the measured game identity"
+log "core holds an activity observation for the measured game identity"
 
 # The whole point. Read what core emitted and ask which KINDS it named.
 rpc event.subscribe '{"limit":200}' > "$EVIDENCE/measures-events.json"

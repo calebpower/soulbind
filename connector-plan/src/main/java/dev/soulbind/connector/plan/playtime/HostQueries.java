@@ -17,9 +17,10 @@
 package dev.soulbind.connector.plan.playtime;
 
 import com.djrapitops.plan.query.QueryService;
+import java.util.UUID;
 
 /**
- * Adapts the host dashboard's query API to {@link PlanQueryPlaytimeSource.Queries}.
+ * Adapts the host dashboard's query API to {@link PlanActivitySource.Queries}.
  *
  * <p>Here rather than in the plugin that calls it, and the reason is the storage
  * seam guard: the adapter necessarily names a JDBC type, and putting it beside
@@ -41,12 +42,17 @@ public final class HostQueries {
      * @throws IllegalStateException if the dashboard is not far enough along to
      *     answer queries, which the caller reports rather than retrying
      */
-    public static PlanQueryPlaytimeSource.Queries live() {
+    public static PlanActivitySource.Queries live() {
         QueryService service = QueryService.getInstance();
-        return new PlanQueryPlaytimeSource.Queries() {
+        return new PlanActivitySource.Queries() {
+            @Override
+            public double activityIndex(UUID player, long epochMillis) {
+                return service.getCommonQueries().fetchActivityIndexOf(player, epochMillis);
+            }
+
             @Override
             public <T> T query(
-                    String sql, PlanQueryPlaytimeSource.ThrowingFunction<
+                    String sql, PlanActivitySource.ThrowingFunction<
                             java.sql.PreparedStatement, T> body) {
                 return service.query(sql, body::apply);
             }
