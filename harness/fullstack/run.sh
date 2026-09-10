@@ -534,7 +534,9 @@ stage_measures() {
         result_pass measures "a measurement moves every identity of the subject"
     else
         result_fail measures "a measurement moves every identity of the subject" \
-            "see $OUT/evidence/measures-events.json for which identity kinds core named"
+            "see $OUT/evidence/: measures-get.json is what core held, \
+measures-events.json which identity kinds it named -- the latter exists only if \
+a measurement arrived at all"
         return 1
     fi
 }
