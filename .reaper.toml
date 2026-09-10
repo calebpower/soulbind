@@ -519,6 +519,14 @@ SOULBIND_DB=sqlite sh harness/fullstack/run.sh up migrate journeys sim groups t1
 echo "run: migrate-check control and mutants"
 sh harness/fullstack/mutation/migrate-selftest.sh
 
+# The measures verdict, against the shapes it must refuse -- including the exact
+# event stream the deployed 0.2.0 produced. Needs no stack, no database and no
+# proxy: it reads fixtures. Here rather than nowhere, because a verdict written
+# in response to a tier that stayed green against a real defect is worth
+# watching fail before it is trusted.
+echo "run: measures verdict control and mutants"
+sh harness/fullstack/measures-selftest.sh
+
 podman exec -i soulbind-mariadb \
   mariadb -h 127.0.0.1 -uroot -psoulbind-test <<'SQL'
 -- No CHARACTER SET clause, deliberately: this database inherits the server's
@@ -551,7 +559,7 @@ SOULBIND_DB=mariadb \
   SOULBIND_PLAN_DB_USER=root \
   SOULBIND_PLAN_DB_PASSWORD=soulbind-test \
   SOULBIND_PLAN_DB_NAME=plan \
-  sh harness/fullstack/run.sh up migrate journeys sim plan groups t10 fuzz down
+  sh harness/fullstack/run.sh up migrate journeys sim plan measures groups t10 fuzz down
 
 podman rm -f soulbind-mariadb >/dev/null 2>&1 || true
 """

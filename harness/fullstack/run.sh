@@ -222,7 +222,7 @@ XML
 # below, and FullstackStagesGuardTest asserts this list matches both the
 # functions defined and the stages documented in the README. A stage that is
 # listed but does no work is the exact shape this file exists to prevent.
-STAGES="up migrate journeys sim plan groups t10 fuzz down"
+STAGES="up migrate journeys sim plan measures groups t10 fuzz down"
 
 # The post-condition, checked rather than assumed.
 #
@@ -513,6 +513,28 @@ stage_plan() {
     else
         result_fail plan "Plan renders link data for a player linked through the real flow" \
             "see $OUT/evidence/plan-player.json for exactly what Plan returned"
+        return 1
+    fi
+}
+
+stage_measures() {
+    resolve_toolchain
+    result_open measures
+    log "does a measurement on one platform move the subject's other identities?"
+    creds="$RUN/core/creds.env"
+    if [ ! -s "$creds" ]; then
+        result_fail measures "a measurement moves every identity of the subject" \
+            "no credentials at $creds; the up stage did not complete"
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    . "$creds"
+    if "$HERE/measures-check.sh" "http://127.0.0.1:$CORE_PORT" "$HARNESS_CRED" \
+            "$RUN" "$OUT/evidence"; then
+        result_pass measures "a measurement moves every identity of the subject"
+    else
+        result_fail measures "a measurement moves every identity of the subject" \
+            "see $OUT/evidence/measures-events.json for which identity kinds core named"
         return 1
     fi
 }

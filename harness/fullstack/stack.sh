@@ -696,6 +696,25 @@ platformkind = "game"
 # refresh cadence tuned for humans.
 cachettlseconds = 5
 showsubjectid = true
+
+[measure]
+# ON here, and it was not before -- which is why the battery could not have found
+# the 0.2.0 defect where a measurement moved only the identity it was measured
+# on. Reverting that fix left this whole tier green and turned one unit test red:
+# the reporter-to-effector chain, which is the feature, had no live coverage.
+enabled = true
+# The same credential the dashboard already holds. A deployment splits these --
+# reporting and reading everybody's measurements are different powers, and
+# docs/install.md tells an operator to register them separately -- but this tier
+# runs ONE connector, and giving it a second credential here would describe a
+# separation the harness does not have.
+credential = "$PLAN_CRED"
+name = "playtime"
+windowseconds = 604800
+# Seconds, not the fifteen minutes a deployment uses. A stage waits for a
+# measurement to ARRIVE rather than sleeping a guessed interval, so this only
+# bounds how long that wait can be.
+sweepseconds = 5
 TOML
 fi
 
