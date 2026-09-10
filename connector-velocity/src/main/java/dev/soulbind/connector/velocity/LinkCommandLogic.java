@@ -16,6 +16,7 @@
 package dev.soulbind.connector.velocity;
 
 import dev.soulbind.sdk.SoulbindClient;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -34,8 +35,31 @@ import java.util.UUID;
  */
 public final class LinkCommandLogic {
 
-    /** What to say to the player, and whether it worked. */
-    public record Reply(boolean success, String message) {}
+    /**
+     * What to say to the player, and whether it worked.
+     *
+     * <p>Carries BOTH a plain sentence and the parts it was made of. The
+     * sentence is what this class decided and is what a test asserts on; the
+     * parts are what an operator's template needs, because a template cannot
+     * re-derive a code out of a finished sentence.
+     *
+     * <p>The two-argument form is kept so that every caller and every existing
+     * assertion goes on working, and so anything with no template of its own
+     * still has a sentence to fall back to.
+     */
+    public record Reply(boolean success, String message, Kind kind, Map<String, String> values) {
+
+        /** Which template renders this, if any. */
+        public enum Kind { CODE, LINKED, USAGE, FAILED, PLAIN }
+
+        public Reply {
+            values = values == null ? Map.of() : Map.copyOf(values);
+        }
+
+        public Reply(boolean success, String message) {
+            this(success, message, success ? Kind.PLAIN : Kind.FAILED, Map.of());
+        }
+    }
 
     private final SoulbindClient client;
     private final String platformKind;
@@ -53,11 +77,13 @@ public final class LinkCommandLogic {
         if (outcome instanceof SoulbindClient.Outcome.Ok ok) {
             String code = ok.payload().text("code");
             long expires = ok.payload().number("expiresAtEpochSeconds");
+            String expiresIn = minutesUntil(expires) + " minutes";
             return new Reply(
                     true,
                     "Your link code is " + code + ". Enter it on the other platform to "
-                            + "finish linking. It expires in "
-                            + minutesUntil(expires) + " minutes.");
+                            + "finish linking. It expires in " + expiresIn + ".",
+                    Reply.Kind.CODE,
+                    Map.of("code", code, "expires", expiresIn));
         }
         return new Reply(false, explain(outcome, "get you a code"));
     }
@@ -65,7 +91,8 @@ public final class LinkCommandLogic {
     /** {@code /link CODE}: redeem one issued elsewhere. */
     public Reply redeem(UUID playerId, String playerName, String typedCode) {
         if (typedCode == null || typedCode.isBlank()) {
-            return new Reply(false, "Usage: /link            (or /link CODE to finish linking)");
+            return new Reply(false, "Usage: /link            (or /link CODE to finish linking)",
+                    Reply.Kind.USAGE, Map.of());
         }
 
         SoulbindClient.Outcome outcome = client.call(
@@ -74,10 +101,13 @@ public final class LinkCommandLogic {
 
         if (outcome instanceof SoulbindClient.Outcome.Ok ok) {
             int linked = ok.payload().size("identities");
+            int others = linked - 1;
             return new Reply(
                     true,
-                    "Linked. Your account is now connected to " + (linked - 1)
-                            + " other " + (linked == 2 ? "account" : "accounts") + ".");
+                    "Linked. Your account is now connected to " + others
+                            + " other " + (linked == 2 ? "account" : "accounts") + ".",
+                    Reply.Kind.LINKED,
+                    Map.of("count", Integer.toString(others)));
         }
 
         if (outcome instanceof SoulbindClient.Outcome.Refused refused) {

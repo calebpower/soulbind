@@ -67,6 +67,14 @@ class LinkCommandLogicTest {
         assertTrue(reply.success());
         assertTrue(reply.message().contains("BCDFGHJK"), reply.message());
         assertTrue(reply.message().contains("minutes"), reply.message());
+
+        // The parts, not only the sentence. An operator's template is rendered
+        // from these, so a reply that reads correctly here and carries the
+        // wrong kind sends a player their code formatted as a red error.
+        assertEquals(LinkCommandLogic.Reply.Kind.CODE, reply.kind());
+        assertEquals("BCDFGHJK", reply.values().get("code"));
+        assertTrue(reply.values().get("expires").contains("minutes"),
+                reply.values()::toString);
     }
 
     @Test
@@ -98,6 +106,11 @@ class LinkCommandLogicTest {
         // "1 other accounts", so the assertion that stood here passed whichever
         // branch ran.
         assertTrue(reply.message().contains("1 other account."), reply.message());
+        assertEquals(LinkCommandLogic.Reply.Kind.LINKED, reply.kind());
+        // ONE, not two: the sentence counts the OTHER accounts, and a template
+        // that says "connected to <count> other accounts" must not be handed
+        // the total.
+        assertEquals("1", reply.values().get("count"));
     }
 
     @Test
@@ -113,6 +126,21 @@ class LinkCommandLogicTest {
 
     @Test
     @DisplayName("a refusal with no message at all still says something useful")
+    void refusalsCarryTheFailureKind() {
+        // The default the compatibility constructor picks. Every refusal path
+        // in this class uses the two-argument form, so this one case covers the
+        // choice they all inherit -- and it is the choice that decides whether
+        // a refusal is rendered in the failure template or as flat text.
+        LinkCommandLogic.Reply reply = logic(InMemoryTransport.always(refusal("expired: no")))
+                .redeem(PLAYER, "Alex", "BCDFGHJK");
+
+        assertFalse(reply.success());
+        assertEquals(LinkCommandLogic.Reply.Kind.FAILED, reply.kind());
+        assertTrue(reply.values().isEmpty(), reply.values()::toString);
+    }
+
+    @Test
+    @DisplayName("a refusal with no message still says something")
     void refusalWithNoMessage() {
         // Core can refuse with an empty message -- an older build, a proxy that
         // ate the body. Passing that through leaves the player staring at a
@@ -159,6 +187,8 @@ class LinkCommandLogicTest {
 
         assertFalse(reply.success());
         assertTrue(reply.message().contains("Usage"), reply.message());
+        assertEquals(LinkCommandLogic.Reply.Kind.USAGE, reply.kind(),
+                "usage rendered as a failure tells a player they did something wrong");
         assertEquals(0, transport.sendCount(), "an empty command should not reach core");
     }
 

@@ -8,6 +8,42 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
+## Unreleased
+
+### Changed
+
+- **The activity a role is granted on is now the dashboard's own index, not a
+  playtime sum of ours.** `connector-plan` used to add up session lengths minus
+  idle time over a trailing week and compare that to a threshold in hours. It
+  measured the wrong thing: one long weekend outscored somebody who turned up
+  every evening, and everybody's number fell off a cliff when the window rolled
+  past their last session. The dashboard already computes something better —
+  three separate weeks, each curved so returns diminish, then averaged — and it
+  is the number its own pages show, so a role granted on it agrees with what a
+  player can already see about themselves.
+
+  **This changes the rules you configure.** The measure is now named
+  `activityindex`, and its value is the index scaled by 1000 (an index of 3.25
+  reports as `3250`), because a measure is an integer. Existing rules naming
+  `playtime` with a threshold in seconds will never be satisfied again — they
+  are not migrated, because a seconds threshold has no meaning on this scale.
+
+- **What this connector says in game is now yours to write.** Every
+  player-facing string is a MiniMessage template under `[messages]` in the
+  proxy's config, so a server whose every other message is formatted no longer
+  gets this one plugin's output in flat white, and changing the wording is an
+  edit rather than a rebuild. All keys are optional; unset means the built-in
+  default, which is now coloured.
+
+  `gate.kickmessage` is parsed the same way. Text with no tags in it renders as
+  itself, so **an existing config is unaffected** — this is not a breaking
+  change and nothing needs editing.
+
+  Values (`<code>`, `<count>`, `<plural>`, `<expires>`, `<reason>`) are inserted
+  as literal text and never as markup. `<reason>` is quoted from core's refusal
+  and can name an account somebody typed; parsing it would let a player choose
+  what another player's screen says.
+
 ## 0.2.1 — 2026-09-10
 
 ### Fixed

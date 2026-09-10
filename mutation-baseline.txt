@@ -94,6 +94,23 @@
 #                      additions are the measure repository's insert-race probe,
 #                      the same shape as the runtime-config one beside it.
 #
+# `connector-velocity` MOVED 2026-09-10, for the message templates: total
+# 214 -> 235, killed 164 -> 183, no-coverage 47 -> 49. Survivors held at 3,
+# which is the number that matters -- twenty-one new mutants arrived and
+# nineteen are killed.
+#
+# The two additions are ONE branch: the catch in `Messages.render`. MiniMessage
+# is lenient, and that was probed rather than assumed -- eighteen malformed
+# templates, none of which threw, and the test `typoIsShownNotSwallowed` pins
+# that behaviour so the day a version starts throwing is a red test and not a
+# surprise. So no template reaches the catch. It stays because render runs on a
+# command thread and on the join event thread, where an escaping exception costs
+# a player their message or their connection.
+#
+# TWO OTHERS were caught by this guard and are NOT recorded here: `playersOnly`
+# and `unavailable` had no test at all, because the only caller is the plugin
+# class no test constructs. They are killed rather than baselined.
+
 # `core` survivors read 44 on two consecutive runs while TIMED_OUT moved 9 -> 8,
 # which is the noise this file's header describes; the survivor set was stable
 # across both, so 44 is measured rather than sampled once.
@@ -103,7 +120,7 @@ config                 138    132    3     3    0
 connector-discord      303    231    1    71    0
 connector-plan         159    145    1    13    0
 connector-sdk          104     94    2     8    0
-connector-velocity     214    164    3    47    0
+connector-velocity     235    183    3    49    0
 core                  1079    908   44   119    8
 policy                 112    110    2     0    0
 protocol               101     99    1     0    1

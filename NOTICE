@@ -35,6 +35,12 @@ below with their licences.
   com.velocitypowered:velocity-api ........... MIT
       compileOnly. Not distributed: the proxy supplies it at runtime. The proxy
       itself is GPLv3 and is never distributed by this project.
+  net.kyori:adventure-text-minimessage ....... MIT
+      compileOnly. Not distributed: Velocity supplies Adventure at runtime and
+      MiniMessage with it -- verified against the running proxy rather than
+      assumed, because the proxy's API jar does not carry it at compile time.
+      Used to render this connector's player-facing messages from the
+      operator's own templates.
   com.djrapitops:Plan ........................ LGPL-3.0
       compileOnly. Not distributed: the analytics plugin is the host and
       supplies it at runtime.

@@ -22,6 +22,9 @@ logback = "1.5.15"
 junit = "5.11.4"
 toml = "1.1.1"
 velocity = "3.5.1"
+# Adventure, for MiniMessage. Pinned to what velocity-api resolves so the proxy
+# and this module cannot disagree about the format they are both parsing.
+adventure = "4.26.1"
 jda = "5.6.1"
 luckperms = "5.5"
 
@@ -63,6 +66,13 @@ luckperms-api = { module = "net.luckperms:api", version.ref = "luckperms" }
 # runtime, and bundling it would ship a second copy for the classloader to
 # disagree about.
 velocity-api = { module = "com.velocitypowered:velocity-api", version.ref = "velocity" }
+
+# MiniMessage: MIT, and compileOnly for exactly the reason velocity-api is. The
+# proxy SHIPS it -- 128 classes in velocity.jar -- so bundling a second copy
+# would give the classloader two Adventure versions to disagree about, which is
+# the failure that makes a plugin work everywhere except the one server that
+# already had it.
+adventure-minimessage = { module = "net.kyori:adventure-text-minimessage", version.ref = "adventure" }
 
 # --- Chat platform client (Apache-2.0) ---
 # JDA. Used only by connector-discord, and only behind the ChatSurface seam --

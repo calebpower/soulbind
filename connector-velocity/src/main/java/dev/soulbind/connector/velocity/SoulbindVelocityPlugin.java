@@ -40,7 +40,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import net.kyori.adventure.text.Component;
 import org.slf4j.Logger;
 
 /**
@@ -95,6 +94,7 @@ public final class SoulbindVelocityPlugin {
     private Config config;
     private SoulbindClient client;
     private JoinGate joinGate;
+    private Messages messages;
     private LinkCommandLogic linkCommand;
     private GroupEffector effector;
     private GroupSync groupSync;
@@ -153,6 +153,8 @@ public final class SoulbindVelocityPlugin {
                 config.findString(VelocityConfig.CREDENTIAL).orElse(""),
                 Clock.systemUTC(),
                 new DecisionCache(VelocityConfig.failMode(config)));
+
+        messages = new Messages(config, (message, cause) -> logger.warn(message, cause));
 
         joinGate = new JoinGate(
                 client,
@@ -270,7 +272,7 @@ public final class SoulbindVelocityPlugin {
         if (!verdict.allowed()) {
             event.setResult(
                     com.velocitypowered.api.event.ResultedEvent.ComponentResult.denied(
-                            Component.text(verdict.message())));
+                            messages.kick(verdict.message())));
         }
     }
 
@@ -291,12 +293,11 @@ public final class SoulbindVelocityPlugin {
         public void execute(Invocation invocation) {
             CommandSource source = invocation.source();
             if (!(source instanceof Player player)) {
-                source.sendMessage(Component.text("/link is for players."));
+                source.sendMessage(messages.playersOnly());
                 return;
             }
             if (linkCommand == null) {
-                source.sendMessage(
-                        Component.text("Linking is not configured on this proxy."));
+                source.sendMessage(messages.unavailable());
                 return;
             }
 
@@ -313,7 +314,7 @@ public final class SoulbindVelocityPlugin {
                 LinkCommandLogic.Reply reply = args.length == 0
                         ? linkCommand.issue(id, display)
                         : linkCommand.redeem(id, display, args[0]);
-                player.sendMessage(Component.text(reply.message()));
+                player.sendMessage(messages.render(reply));
             });
         }
     }

@@ -65,6 +65,38 @@ public final class VelocityConfig {
             "gate.kickmessage", Type.STRING, "shown to a player the join gate denies");
 
     /**
+     * What this connector says to a player, as MiniMessage templates.
+     *
+     * <p>Templates rather than strings built in Java, so a deployment whose
+     * every other message is formatted does not get this one plugin's output in
+     * flat white -- and so changing the wording is an edit rather than a
+     * rebuild. Values are inserted unparsed; see {@link Messages}.
+     */
+    public static final ConfigKey MESSAGE_PREFIX = ConfigKey.optional(
+            "messages.prefix", Type.STRING,
+            "shown before every message, so a deployment can brand them all at once");
+
+    public static final ConfigKey MESSAGE_CODE = ConfigKey.optional(
+            "messages.code", Type.STRING,
+            "the code a player was just issued; <code> and <expires>");
+
+    public static final ConfigKey MESSAGE_LINKED = ConfigKey.optional(
+            "messages.linked", Type.STRING,
+            "a link that completed; <count> and <plural>");
+
+    public static final ConfigKey MESSAGE_FAILURE = ConfigKey.optional(
+            "messages.failure", Type.STRING, "anything that did not work; <reason>");
+
+    public static final ConfigKey MESSAGE_USAGE = ConfigKey.optional(
+            "messages.usage", Type.STRING, "how to use /link");
+
+    public static final ConfigKey MESSAGE_PLAYERS_ONLY = ConfigKey.optional(
+            "messages.playersonly", Type.STRING, "when the console runs /link");
+
+    public static final ConfigKey MESSAGE_UNAVAILABLE = ConfigKey.optional(
+            "messages.unavailable", Type.STRING, "when linking is not configured");
+
+    /**
      * What to do when core cannot be reached.
      *
      * <p>Defaults to closed, and only the exact word {@code open} changes it.
@@ -110,6 +142,13 @@ public final class VelocityConfig {
             CREDENTIAL,
             JOIN_GATE,
             KICK_MESSAGE,
+            MESSAGE_PREFIX,
+            MESSAGE_CODE,
+            MESSAGE_LINKED,
+            MESSAGE_FAILURE,
+            MESSAGE_USAGE,
+            MESSAGE_PLAYERS_ONLY,
+            MESSAGE_UNAVAILABLE,
             FAIL_MODE,
             DECISION_TIMEOUT_MILLIS,
             PLATFORM_KIND,

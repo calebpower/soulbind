@@ -13,6 +13,11 @@ dependencies {
     // keeps this module distributable under Apache-2.0 (§16).
     compileOnly(libs.velocity.api)
 
+    // MiniMessage, for the player-facing text. compileOnly for the same reason
+    // as the line above: the proxy ships it, and shipping a second copy gives
+    // the classloader two Adventure versions to disagree about.
+    compileOnly(libs.adventure.minimessage)
+
     // compileOnly for the same reason: the proxy's LuckPerms supplies this at
     // runtime. MIT, and nothing here ships it -- an operator without LuckPerms
     // still gets linking and the join gate, just no group.
@@ -22,6 +27,11 @@ dependencies {
     // types. Still never shipped.
     testCompileOnly(libs.velocity.api)
     testRuntimeOnly(libs.velocity.api)
+
+    // Tests render real components, so MiniMessage has to be present for them
+    // in both scopes. Still never shipped.
+    testCompileOnly(libs.adventure.minimessage)
+    testRuntimeOnly(libs.adventure.minimessage)
 
     // And LuckPerms on the TEST runtime, for a reason that only shows up under
     // mutation coverage. No test constructs a LuckPerms type -- LuckPermsGroups
