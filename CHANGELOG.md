@@ -8,6 +8,24 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
+## 0.2.1 — 2026-09-10
+
+### Fixed
+
+- **A reported measure only ever moved the identity it was measured on.** The
+  handler emitted its gate transitions for the reported identity alone, where
+  the override operations beside it expand to every identity the subject holds.
+
+  Because a subject's value for a measure is the strongest observation across
+  *all* its identities, a measurement recorded against one of them changes the
+  answer for all of them — and effectors route on the identity reference, each
+  acting only on its own platform's kind. So a measurement taken on one platform
+  could never move a role on another, which is the whole purpose of the feature.
+
+  In practice: playtime measured against a game account emitted only game-kind
+  events, and the chat effector discarded every one of them, correctly. The role
+  was never granted to anybody and nothing reported a problem.
+
 ## 0.2.0 — 2026-09-09
 
 ### Added
