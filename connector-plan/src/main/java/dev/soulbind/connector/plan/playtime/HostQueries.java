@@ -43,7 +43,21 @@ public final class HostQueries {
      *     answer queries, which the caller reports rather than retrying
      */
     public static PlanActivitySource.Queries live() {
-        QueryService service = QueryService.getInstance();
+        return of(QueryService.getInstance());
+    }
+
+    /**
+     * The same adapter over a service the caller supplies.
+     *
+     * <p>Split out from {@link #live()} so the delegation can be tested. It is
+     * three lines of forwarding, which is exactly the kind of code that looks
+     * too small to get wrong -- and the kind where a transposed argument or a
+     * call to the wrong query method produces a plausible number nobody
+     * questions. The singleton lookup is what cannot be tested without a
+     * running dashboard; the forwarding is not, and folding them together made
+     * the untestable half an excuse for the testable half.
+     */
+    static PlanActivitySource.Queries of(QueryService service) {
         return new PlanActivitySource.Queries() {
             @Override
             public double activityIndex(UUID player, long epochMillis) {

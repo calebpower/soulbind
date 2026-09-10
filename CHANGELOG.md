@@ -28,6 +28,11 @@ for the other.
   `playtime` with a threshold in seconds will never be satisfied again — they
   are not migrated, because a seconds threshold has no meaning on this scale.
 
+- **The adapter over the analytics dashboard's query API is now tested.** Three
+  lines of forwarding that had been treated as untestable because the singleton
+  lookup beside them is. One of the mutants this uncovered returns zero from the
+  activity index, which is every player below every threshold.
+
 - **What this connector says in game is now yours to write.** Every
   player-facing string is a MiniMessage template under `[messages]` in the
   proxy's config, so a server whose every other message is formatted no longer

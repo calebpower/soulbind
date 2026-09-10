@@ -94,6 +94,24 @@
 #                      additions are the measure repository's insert-race probe,
 #                      the same shape as the runtime-config one beside it.
 #
+# `connector-plan` TIGHTENED 2026-09-10: no-coverage 13 -> 12, BELOW where it
+# stood before the activity-index change. It got there the wrong way round.
+#
+# 3b491fa shipped without re-measuring this module -- hand-checking five mutants
+# is not the same as running the ratchet -- and it took no-coverage to 14. The
+# battery caught it, which is what the battery is for.
+#
+# The addition was `HostQueries.activityIndex`: the old adapter computed
+# playtime in SQL and needed only `query`, where the new one calls the host's
+# index as a second method. Raising the row would have been easy and wrong. The
+# reasoning behind the original 13 -- "this needs a running dashboard" -- was
+# only half true: the `QueryService.getInstance()` lookup needs one, the three
+# lines of forwarding around it do not, and the host's API is two interfaces
+# that a proxy can stand in for. Splitting `live()` from `of(service)` made the
+# forwarding testable and killed two mutants that had been sitting in this
+# column since the row was written, including one that returns zero from the
+# activity index -- which is every player below every threshold.
+
 # `connector-velocity` MOVED 2026-09-10, for the message templates: total
 # 214 -> 235, killed 164 -> 183, no-coverage 47 -> 49. Survivors held at 3,
 # which is the number that matters -- twenty-one new mutants arrived and
@@ -118,7 +136,7 @@
 # module              total killed surv nocov  t/o
 config                 138    132    3     3    0
 connector-discord      303    231    1    71    0
-connector-plan         159    145    1    13    0
+connector-plan         160    147    1    12    0
 connector-sdk          104     94    2     8    0
 connector-velocity     235    183    3    49    0
 core                  1079    908   44   119    8
