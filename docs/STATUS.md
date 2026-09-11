@@ -1329,10 +1329,33 @@ active in the window ∪ everyone last reported non-zero*, which is what makes
 revocation work with no core sweep and which **drains**: once somebody is
 reported at zero they are dropped, because zero is below every threshold.
 
-**Outstanding for the gate:** a reaper session. V8 is a schema change, so the
-full-stack battery on both backends is mandatory rather than optional, and the
-reporter has never run against a real dashboard. `connector-plan` is also not
-deployed anywhere yet, so deploying it is a new install rather than an upgrade.
+**Outstanding for the gate, as it stood before run 37:** a reaper session. V8 is
+a schema change, so the full-stack battery on both backends was mandatory rather
+than optional, and the reporter had never run against a real dashboard.
+`connector-plan` was also not deployed anywhere, so deploying it was a new
+install rather than an upgrade. **All three are now done — see below.**
+
+**LIVE ON THE ESTATE, verified 2026-09-11.** The whole chain runs: `core` and
+`connector-discord` at `0.2.2`, `connector-plan-0.2.2.jar` installed on the
+Velocity proxy, and `plan` and `plan-measures` both registered and ACTIVE. The
+measure table held 167 rows — 104 `activityindex`, 63 `playtime` — with the
+freshest observation four minutes old and the oldest from 2026-09-10 02:30Z.
+
+**The shipped gates use the dashboard's `activityindex`, not raw playtime**, and
+the numbers in this section's design notes are the earlier framing. As deployed:
+`activity.meeper.grant` requires an index of **2.0** and `activity.meeper.keep`
+**1.0**, both over a **three-week** window, with the value scaled by 1000 in the
+wire and the table (CHANGELOG 0.2.0; `PlanConfig` carries the defaults). At the
+time of checking, 7 accounts sat above the grant threshold and 33 above keep.
+All four role bindings are present in the estate's `discord.toml`, including the
+Meeper grant/revoke pair that makes the hysteresis band.
+
+**Reading this section cost a wrong answer once.** Its "not deployed anywhere
+yet" survived the deployment, and a reader — me, on 2026-09-11 — reported to cal
+three times that the activity feature was not running. The estate disagreed. A
+status document that describes a plan in the present tense after the plan has
+shipped is worse than one that says nothing, because it is consulted *instead*
+of the estate.
 
 **Green in a session, on both backends** — run 37, every stage passing on the
 SQLite and MariaDB axes, the forum tier 5 of 5 on each, the install gate, the
