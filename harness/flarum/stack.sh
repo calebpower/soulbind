@@ -69,7 +69,7 @@ CORE_C=soulbind-forum-core-$SUFFIX
 
 log() { echo "[forum] $*"; }
 
-# On failure, keep what the page looked like.
+# On failure, keep what the page looked like; on every run, leave a stamp.
 #
 # Playwright writes a trace and screenshot into test-results/, inside the suite
 # mount, and the five run reports land in $RUN. Both live only on the guest --
@@ -79,67 +79,22 @@ log() { echo "[forum] $*"; }
 #
 # That is the failure this exists to prevent, stated in reaper's own pull
 # documentation: a failure trace must never exist only on a machine scheduled
-# for destruction. The previous version of this function wrote into $RUN and was
-# never called from anywhere -- so it neither ran nor would have helped.
+# for destruction.
 #
-# Defined above cleanup deliberately: the EXIT trap can fire before this point
+# Sourced rather than defined here so the order these two functions run in can
+# be tested without podman, a forum and a browser -- see the header of
+# evidence.sh, and harness/flarum/evidence-test.sh, which exists because getting
+# that order wrong silently deleted this tier's own deliverable.
+#
+# Sourced above cleanup deliberately: the EXIT trap can fire before this point
 # in the script is ever reached, and a trap calling an undefined function
 # replaces the real failure with "command not found".
-keep_browser_evidence() {
-    # cleanup is trapped on EXIT INT TERM, so on a signal it runs and then the
-    # EXIT trap runs it again. Copying twice is harmless but the log line reads
-    # like two separate failures.
-    [ -n "${EVIDENCE_KEPT:-}" ] && return 0
-    EVIDENCE_KEPT=1
+. "$REPO/harness/flarum/evidence.sh"
 
-    dest="$REPO/out/browser-evidence/${CORE_BACKEND:-sqlite}"
-    # Emptied first: $RUN is not cleared between runs on a warm guest, and
-    # reaper's backward sync never deletes, so without this a green run's
-    # evidence directory would keep an older run's reports and read as current.
-    rm -rf "$dest"
-    mkdir -p "$dest" || return 0
-
-    if [ "${EVIDENCE_STATUS:-unknown}" != "passed" ]; then
-        if [ -d "$REPO/harness/flarum/browser/test-results" ]; then
-            cp -r "$REPO/harness/flarum/browser/test-results/." "$dest/" 2>/dev/null || true
-        fi
-        cp "$RUN"/playwright-*.json "$dest/" 2>/dev/null || true
-    fi
-
-    # A stamp, on EVERY run including a green one.
-    #
-    # Two problems it solves, both found by a QA pass over a session that had
-    # just gone green. First, a passing run kept nothing at all, so "N of M
-    # specs ran" existed only as a line in a log nobody keeps -- the claim with
-    # the least corroboration in the tier was the one it makes most often.
-    # Second, reaper's backward sync never deletes, so a directory left by an
-    # EARLIER FAILED run sat in out/ reporting itself as passed; the artifact
-    # from run 3, which failed, read as current after run 4 succeeded.
-    #
-    # Recording the outcome and the spec count unconditionally fixes both: a
-    # green run leaves proof it ran, and there is no way for last time's verdict
-    # to be mistaken for this one's.
-    printf '{"backend":"%s","status":"%s","specsRan":%s,"specsExpected":%s}\n' \
-        "${CORE_BACKEND:-sqlite}" \
-        "${EVIDENCE_STATUS:-unknown}" \
-        "${ACTUAL_SPECS:-0}" \
-        "${EXPECTED_SPECS:-0}" \
-        > "$dest/run.json"
-
-    if [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
-        log "browser evidence kept in out/browser-evidence/${CORE_BACKEND:-sqlite}"
-    fi
-
-    # Loud, where it used to be silent. A FAILING run that captured no report is
-    # the case where evidence matters most, and rmdir-ing the empty directory
-    # made it indistinguishable from a run that was never asked for one.
-    if [ "${EVIDENCE_STATUS:-unknown}" != "passed" ] \
-        && [ ! -f "$dest/results.json" ] \
-        && [ -z "$(ls "$dest"/playwright-*.json 2>/dev/null)" ]; then
-        log "WARNING: the browser tier failed and produced no playwright report."
-        log "Nothing here explains the failure; look at the tier's own log output."
-    fi
-}
+# Before anything writes into out/browser-evidence/, and exactly once. Clearing
+# is a question about the PREVIOUS run, so it is answered here and not in the
+# teardown, which by then would be deleting this run's own transcript.
+reset_browser_evidence
 
 cleanup() {
     status=$?

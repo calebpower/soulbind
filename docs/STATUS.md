@@ -334,7 +334,9 @@ seed line, which names its backend because that task alone sets
 `showStandardStreams`. Removing `@Tag("fuzz")` from the dispatcher fuzz test
 would take that away and leave the battery green with nothing showing the second
 backend ever ran. Symmetric with the browser-evidence gap that
-`keep_browser_evidence` now closes; the storage half is outstanding.
+`keep_browser_evidence` now closes — though from Phase 7 until 11.2 it closed
+it only in form: the trap deleted the Tier 11 transcript it was preserving, and
+the stamp read green throughout. The storage half is outstanding.
 
 These three are the whole list. Four further bullets stood here from Phase 0
 until 2026-09-07 — no protocol implementation, an empty `vectors/`, an empty

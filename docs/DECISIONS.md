@@ -8975,3 +8975,68 @@ refuses, but nothing emits `requirements-lost`, so an effector holding a standin
 role keeps it until the reporter returns and reports a low value. Closing it
 properly needs the swept operation this design rejects. Mitigated by requiring a
 reporter's cadence to be materially shorter than `maxAgeSeconds`.
+
+### 11.2 — The evidence trap deleted the evidence
+
+`keep_browser_evidence` cleared `out/browser-evidence/<backend>/` and then wrote
+what it had, from the EXIT trap. The `rm -rf` was there for a real defect:
+reaper's backward sync never deletes, so a directory left by an earlier failed
+run sat in `out/` reporting itself as current, and run 3's artifact read as
+run 4's after run 4 went green.
+
+By the time an EXIT trap runs, the run has finished writing. `stack.sh` emits
+the Tier 11 `forum-first-user` transcript into that same directory about 150
+lines before the end — so the `rm` aimed at last run's artifacts destroyed this
+run's, on every run, green or red. What survived was `run.json` alone, saying
+`"status":"passed","specsRan":12,"specsExpected":12`: a stamp asserting a
+successful run whose required §11 deliverable it had just deleted.
+`journeys.sh` documents that the transcript "lands in
+`out/browser-evidence/<backend>/`", which it did, for about a second.
+
+Both halves were individually correct and each carried a comment explaining why
+it belonged where it was. Neither comment mentions the other, because when each
+was written the other was not there — the transcript arrived in Phase 7, the
+`rm` in the QA pass that found the staleness bug. **Nothing in the tier failed.**
+The suite was green, the stamp was green, and the deleted file was one nobody
+opens until they need it, which is after a run they can no longer repeat.
+
+**Clearing is not a teardown concern.** Staleness is a question about what was
+there *before* this run, so `reset_browser_evidence` answers it before the run
+writes anything, and the EXIT path only ever adds. Both properties survive. A
+run that dies before reaching the reset still clears, guarded by
+`EVIDENCE_RESET` — without that the old bug returns for exactly the runs that
+fail earliest.
+
+**This is not a new convention, it is the sibling tier's.** `harness/fullstack/
+run.sh` clears `$OUT` once, before the stage loop, and its comment there refuses
+a caller-set `RUN` inside `$OUT` because "the clear below destroys the running
+stack's state" — naming the forum tier in the same breath as the place that
+keeps its run directory under `out/`. The full-stack tier had already learned
+this; the forum tier had not, and nothing carried the lesson across. Checked for
+further siblings: every other `rm -rf` in a harness trap targets a `$WORK`
+temporary directory, which is the shape that is safe by construction.
+
+**`specsRan` and `specsExpected` are now `null` when unmeasured.** They are
+taken in the last twenty lines of `stack.sh`, so nearly every failure reached
+the stamp with neither set and `${ACTUAL_SPECS:-0}` wrote `0/0`. That is
+self-consistent, reads as a measurement, and collides with a real and serious
+result: a suite whose specs all fail to match their `--grep` tags measures
+exactly zero of twelve. "Not measured" and "measured, and it was zero" must not
+share bytes.
+
+**The lifecycle moved to `harness/flarum/evidence.sh`**, sourced — the seam
+8.31 established for `transcript.sh`, for a second reason. These functions are
+the only code in the tier whose correctness is a question of *order*, and order
+is the one thing testable without podman, a forum and a browser.
+`harness/flarum/evidence-test.sh` runs them against a throwaway `REPO` in about
+a second and is wired into `.reaper.toml` beside `credential-smoke`.
+
+**A guard over the text of `stack.sh` could not have caught this** — which is
+why the test executes rather than scans. Each of its ten checks was run against
+a build carrying the defect it is for: the shipped code fails four, and four
+further mutants (drop the fallback `rm`, always report `null`, reset without
+clearing, drop the idempotence guard) account for the other six. The first
+attempt at that verification reported all four mutants passing, because the
+mutation had not applied; the mutator now refuses to write a file it did not
+change. A mutant that was never introduced always survives, and reads as a test
+suite that is doing its job.

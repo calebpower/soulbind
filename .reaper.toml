@@ -331,6 +331,20 @@ echo "run: operator tools"
 sh harness/credential-smoke.sh
 sh harness/tools/audit-export-smoke.sh
 
+# The forum tier's evidence lifecycle, with no forum.
+#
+# Here rather than inside the forum tier because it needs none of that tier's
+# stack -- no podman, no browser, a second of wall clock -- and because the bug
+# it was written for was invisible from inside a green run. The clearing and the
+# keeping used to be one function in the EXIT trap, so the rm aimed at LAST
+# run's artifacts deleted THIS run's Tier 11 transcript, on every run, leaving a
+# run.json saying "passed, N of N specs" as the only evidence of a run whose
+# deliverable it had just destroyed. The tier was green throughout.
+#
+# It runs before the tiers that produce evidence, so a broken lifecycle is known
+# before twenty minutes of battery writes into it.
+sh harness/flarum/evidence-test.sh
+
 # ---------------------------------------------------------------------------
 # The Phase 10 gate: a clean install following only docs/install.md.
 #
