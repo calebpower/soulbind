@@ -8,6 +8,24 @@ This file records what a person installing or upgrading needs to know.
 detail; `docs/STATUS.md` records where the work stands. Neither is a substitute
 for the other.
 
+## Unreleased
+
+### Fixed
+
+- **The coupling between a guard that cannot run and the stage that replaces it
+  is now checked rather than described.** `PlanCheckWalkerGuardTest` executes
+  probes that need `python3`, which the pinned toolchain image does not have,
+  so all six of its tests skip on every build. That is deliberate — the
+  property is asserted harder by the shell mutation battery on the session
+  guest, thirteen mutants against the guard's single read.
+
+  But the two were tied together only by prose, in a comment and a javadoc.
+  Deleting the stage from `.reaper.toml` while tidying would have left the
+  guard skipping, the build green, and thirteen mutants silently not running.
+  The new guard fails if the manifest stops invoking the runner, if the mutant
+  catalogue empties, or if the skip it compensates for disappears — the last
+  because a rule whose reason has expired should be re-read, not inherited.
+
 ## 0.2.2 — 2026-09-10
 
 ### Changed
