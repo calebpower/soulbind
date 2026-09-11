@@ -8978,6 +8978,13 @@ reporter's cadence to be materially shorter than `maxAgeSeconds`.
 
 ### 11.2 — The evidence trap deleted the evidence
 
+> **11.2's central claim is WRONG. See 11.3.** The transcript was not being
+> deleted: `stack.sh`'s pre-flight `cleanup` had already set `EVIDENCE_KEPT`,
+> so the end-of-run `rm` never ran. The reproduction below omitted that call.
+> The restructuring 11.2 describes was made for a reason that did not hold;
+> what it actually fixed is recorded in 11.3.
+
+
 `keep_browser_evidence` cleared `out/browser-evidence/<backend>/` and then wrote
 what it had, from the EXIT trap. The `rm -rf` was there for a real defect:
 reaper's backward sync never deletes, so a directory left by an earlier failed
@@ -9040,3 +9047,55 @@ attempt at that verification reported all four mutants passing, because the
 mutation had not applied; the mutator now refuses to write a file it did not
 change. A mutant that was never introduced always survives, and reads as a test
 suite that is doing its job.
+
+### 11.3 — The stamp described the pre-flight, and 11.2 was wrong about why
+
+`0e3a479` says the EXIT trap deleted the Tier 11 transcript on every run. **It
+did not**, and the commit is pushed, so this entry is the correction rather than
+an edit.
+
+`stack.sh` tears down anything a previous run left behind before it starts, and
+that line called `cleanup`. `cleanup` calls `keep_browser_evidence`, which
+**sets `EVIDENCE_KEPT`** — so the end-of-run call returned at its idempotence
+guard and the `rm` never ran. The transcript, written later, survived. Verified
+by extracting the parent commit's own functions and driving them with the
+pre-flight call included: the transcript is present at the end.
+
+**11.2's reproduction omitted the pre-flight call.** It modelled the tier as
+reset → body → EXIT trap, which is not the tier. The model was reproduced
+faithfully and the model was wrong — the same shape as every other defect in
+this file, one level up: testing the commands, or here the flow, rather than the
+thing.
+
+**What was actually broken is worse, and is what this entry fixes.** Because the
+pre-flight stamped `run.json` before anything ran:
+
+- the stamp recorded the PRE-FLIGHT, not the run: `specsRan` unmeasured, and
+  `status: "passed"` because the pre-flight succeeded — **whatever the tier
+  went on to do.** A red tier could not produce a red stamp;
+- the branch that copies the playwright reports and `test-results/` on failure
+  was dead code, so a failing run kept nothing explaining the failure;
+- the "failed and produced no playwright report" warning could never fire.
+
+The fix is a split: `teardown_containers()` holds the podman removal, the
+pre-flight calls only that, and `cleanup` remains the single caller of
+`keep_browser_evidence`. Measured on the faithful flow: real counts land in the
+stamp, `browser evidence kept in …` logs for the first time, and a failing tier
+stamps `failed`.
+
+**11.2's `null` change is what exposed it.** Unmeasured counts printed as `0/0`,
+which reads like a measurement; reporting `null` made the first green battery
+say `status: passed, specsRan: null` beside its own log line "browser tier
+green: 5 of 5 specs ran". That contradiction is what prompted the search. The
+one part of 11.2 that was right about a real defect is the part that found this
+one.
+
+`harness/flarum/evidence-test.sh` gains the case it never modelled — a
+pre-flight teardown that must not consume the stamp — and one for a red tier
+being stamped red. Both verified against a build whose pre-flight calls
+`cleanup`, which is what the tier really did.
+
+**Found by the QA agent that ran the battery**, reading the evidence directory
+it was asked to check, against the commit message of the change it was
+validating. It stated the inference and said plainly it had not executed the
+parent. Executing the parent is what settled it.

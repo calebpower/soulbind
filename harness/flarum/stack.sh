@@ -96,6 +96,16 @@ log() { echo "[forum] $*"; }
 # teardown, which by then would be deleting this run's own transcript.
 reset_browser_evidence
 
+# Containers and network only. Split out of cleanup() because the pre-flight
+# teardown below needs exactly this and must NOT touch the evidence -- see the
+# comment there.
+teardown_containers() {
+    for c in "$WEB_C" "$CORE_C" "$DB_C"; do
+        podman rm -f "$c" >/dev/null 2>&1 || true
+    done
+    podman network rm -f "$NET" >/dev/null 2>&1 || true
+}
+
 cleanup() {
     status=$?
     # Before the containers go, and only when something went wrong -- a green
@@ -111,10 +121,7 @@ cleanup() {
     # evidence because nothing ran".
     keep_browser_evidence
     log "tearing down"
-    for c in "$WEB_C" "$CORE_C" "$DB_C"; do
-        podman rm -f "$c" >/dev/null 2>&1 || true
-    done
-    podman network rm -f "$NET" >/dev/null 2>&1 || true
+    teardown_containers
     return $status
 }
 trap cleanup EXIT INT TERM
@@ -187,7 +194,20 @@ wait_for_url() {
 # A run must not inherit anything a previous run left behind: it would be
 # serving the previous run's schema and settings, and a green result would be
 # about state nobody in this session created.
-cleanup >/dev/null 2>&1 || true
+#
+# teardown_containers, NOT cleanup. This line used to call cleanup, which calls
+# keep_browser_evidence, which STAMPS run.json and sets EVIDENCE_KEPT -- here,
+# a thousand lines before the spec counts exist. The stamp was therefore
+# written with no counts, and the real one at EXIT returned early on the
+# idempotence guard and never corrected it. Every run.json this tier has ever
+# produced described the pre-flight rather than the run, and said "passed"
+# because the pre-flight succeeded.
+#
+# It was invisible while the unmeasured counts printed as 0/0, which reads like
+# a measurement. Reporting them as null -- "not measured" -- is what exposed
+# it, on the first green battery after that change: status passed, specsRan
+# null, on a run whose own log said "browser tier green: 5 of 5 specs ran".
+teardown_containers >/dev/null 2>&1 || true
 rm -rf "$RUN"
 mkdir -p "$RUN/core" "$RUN/forum"
 

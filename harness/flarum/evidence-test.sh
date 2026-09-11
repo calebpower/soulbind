@@ -161,6 +161,53 @@ check "and the stamp is this run's" \
     '{"backend":"sqlite","status":"failed","specsRan":null,"specsExpected":null}' \
     "$(stamp)"
 
+echo "[evidence] a pre-flight teardown does not consume the stamp"
+# THE CASE THIS FILE DID NOT MODEL, and the one that mattered.
+#
+# stack.sh tears down anything a previous run left behind before it starts. That
+# line used to call cleanup(), which calls keep_browser_evidence -- so the stamp
+# was written a thousand lines before the spec counts existed, and EVIDENCE_KEPT
+# was set, so the real stamp at EXIT returned at the guard and never corrected
+# it. Every run.json this tier produced described the PRE-FLIGHT: counts
+# unmeasured, and "passed" because the pre-flight succeeded, whatever the tier
+# went on to do.
+#
+# It survived the first version of this file because that version modelled the
+# tier as reset -> body -> EXIT trap and never as reset -> PRE-FLIGHT -> body ->
+# EXIT trap. The checks were right about a flow that was not the tier's.
+( REPO="$WORK/preflight"; RUN="$REPO/run"; mkdir -p "$RUN"; log() { : ; }
+  . "$HERE/evidence.sh"
+  cleanup() { status=$?
+    if [ "$status" -ne 0 ]; then EVIDENCE_STATUS=failed; else EVIDENCE_STATUS=passed; fi
+    keep_browser_evidence; return $status; }
+  reset_browser_evidence
+  trap cleanup EXIT INT TERM
+  # the pre-flight: it must NOT stamp, and must NOT set EVIDENCE_KEPT
+  teardown_containers() { return 0; }
+  teardown_containers >/dev/null 2>&1 || true
+  EXPECTED_SPECS=12; ACTUAL_SPECS=12
+  exit 0 ) || true
+check "the stamp carries the counts the tier measured" \
+    '{"backend":"sqlite","status":"passed","specsRan":12,"specsExpected":12}' \
+    "$(cat "$WORK/preflight/out/browser-evidence/sqlite/run.json" 2>/dev/null || echo '<none>')"
+
+echo "[evidence] a failing tier stamps failed, not passed"
+# Before the split this was impossible: the pre-flight's own exit status of 0
+# decided EVIDENCE_STATUS, so a red tier stamped "passed" and the branch that
+# copies the playwright reports on failure was dead code.
+( REPO="$WORK/redrun"; RUN="$REPO/run"; mkdir -p "$RUN"; log() { : ; }
+  . "$HERE/evidence.sh"
+  cleanup() { status=$?
+    if [ "$status" -ne 0 ]; then EVIDENCE_STATUS=failed; else EVIDENCE_STATUS=passed; fi
+    keep_browser_evidence; return $status; }
+  reset_browser_evidence
+  trap cleanup EXIT INT TERM
+  EXPECTED_SPECS=12; ACTUAL_SPECS=3
+  exit 1 ) || true
+check "a red tier is stamped red" \
+    '{"backend":"sqlite","status":"failed","specsRan":3,"specsExpected":12}' \
+    "$(cat "$WORK/redrun/out/browser-evidence/sqlite/run.json" 2>/dev/null || echo '<none>')"
+
 echo "[evidence] a signal does not make the stamp run twice"
 # cleanup is trapped on EXIT INT TERM, so on a signal it runs and then EXIT runs
 # it again.
