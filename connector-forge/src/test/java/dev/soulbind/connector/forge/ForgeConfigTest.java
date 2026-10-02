@@ -241,6 +241,60 @@ class ForgeConfigTest {
     }
 
     @Test
+    @DisplayName("the listener defaults are the documented ones")
+    void listenerDefaults() {
+        Config config = load(MINIMAL);
+
+        assertEquals("127.0.0.1", ForgeConfig.signupBind(config),
+                "the signup form defaulted to a public interface, which is a second listener to"
+                        + " get right when the proxy already terminates TLS");
+        assertEquals(7190, ForgeConfig.signupPort(config));
+        assertEquals("/soulbind/signup", ForgeConfig.signupPath(config));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1, 65_536, 999_999})
+    @DisplayName("a signup port outside the range is refused")
+    void signupPortIsBounded(int port) {
+        List<String> problems = ForgeConfig.validate(
+                load(MINIMAL + "\n[signup]\nport = " + port + "\n"));
+
+        assertTrue(problems.stream().anyMatch(p -> p.contains("signup.port")),
+                () -> "a port of " + port + " was accepted: " + problems);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 65_535})
+    @DisplayName("the ends of the port range are inside it")
+    void signupPortBoundsAreAllowed(int port) {
+        assertTrue(ForgeConfig.validate(
+                load(MINIMAL + "\n[signup]\nport = " + port + "\n")).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a blank bind address is refused, because blank reads as configured")
+    void blankBindIsRefused() {
+        List<String> problems = ForgeConfig.validate(
+                load(MINIMAL + "\n[signup]\nbind = \"  \"\n"));
+
+        assertTrue(problems.stream().anyMatch(p -> p.startsWith("signup.bind")),
+                problems::toString);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"soulbind/signup", "", "signup"})
+    @DisplayName("a path the proxy cannot match is refused")
+    void signupPathMustBeAbsolute(String path) {
+        // A relative path is a form whose submit button 404s, and the proxy
+        // will not say why.
+        List<String> problems = ForgeConfig.validate(
+                load(MINIMAL + "\n[signup]\npath = \"" + path + "\"\n"));
+
+        assertTrue(problems.stream().anyMatch(p -> p.startsWith("signup.path")),
+                problems::toString);
+    }
+
+    @Test
     @DisplayName("problems are returned together, not one at a time")
     void problemsAccumulate() {
         // An operator fixing configuration one error per run is an operator who

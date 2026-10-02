@@ -12,4 +12,12 @@ plugins {
 
 dependencies {
     implementation(project(":connector-sdk"))
+
+    // The listener for the signup form. An IMPLEMENTATION detail, never api:
+    // only the transport package names it, and the seam guard would catch it if
+    // anything else did. Already in the catalogue for core, with its licence
+    // and Jetty's recorded there.
+    implementation(libs.javalin)
+
+    runtimeOnly(libs.logback.classic)
 }

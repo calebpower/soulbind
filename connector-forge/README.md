@@ -50,6 +50,35 @@ authority the capability model exists to divide up.
 the same one `forum` and `flarum` already draw, and it is why the vocabulary
 guard forbids the product name and not the kind.
 
+## Where the signup form lives
+
+A listener on **loopback**, served at a **path on the forge's own hostname**
+(`/soulbind/signup` by default), which the reverse proxy in front of the forge
+routes here ahead of its rule for the forge itself.
+
+Loopback because that proxy already terminates TLS for the name people type, and
+a second public listener would be a second thing to get right. A path on the
+existing hostname rather than a hostname of its own because a new name costs a
+DNS record and a certificate to serve one form, and the path is one proxy rule.
+
+Both the path and the port are configuration, because the path has to match the
+proxy's rule and a mismatch between them is a form whose submit button 404s with
+nothing anywhere saying why.
+
+## The transport package, and why it is exempt
+
+`transport/` is the third package admitted to `TransportSeamGuardTest`'s
+exemption, after core's and the SDK's. A git forge cannot be entered — it is one
+compiled binary with no extension surface — so this connector needs an inbound
+listener and outbound calls to the host's admin interface, and neither can be
+written without naming a transport type.
+
+The exemption buys as little as it can. The form's checks, the mapping from an
+outcome to a status, and the page's escaping are all pure, live outside that
+package, and are tested as plain assertions. What is inside it is request
+decoding and routing. If connector logic starts appearing in there, the
+exemption has stopped being a seam and become a hole.
+
 ## What this module may not become
 
 An authentication provider. It establishes *that* a person holds a verified

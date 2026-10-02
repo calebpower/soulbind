@@ -86,9 +86,34 @@ public final class ForgeConfig {
     public static final ConfigKey HOST_TIMEOUT_MS = ConfigKey.optional(
             "host.timeoutms", Type.INTEGER, "how long to wait on the forge before giving up");
 
+    /**
+     * Where the signup form listens.
+     *
+     * <p>Loopback by default, because the reverse proxy in front of the forge
+     * already terminates TLS for the name people type and a second listener on
+     * a public interface would be a second thing to get right. An operator who
+     * genuinely wants it exposed can say so.
+     */
+    public static final ConfigKey SIGNUP_BIND = ConfigKey.optional(
+            "signup.bind", Type.STRING, "the interface the signup form listens on");
+
+    public static final ConfigKey SIGNUP_PORT = ConfigKey.optional(
+            "signup.port", Type.INTEGER, "the port the signup form listens on");
+
+    /**
+     * The path the proxy routes to this connector.
+     *
+     * <p>Configurable because it has to match the proxy's rule, and a mismatch
+     * between the two is the kind of thing that produces a form whose submit
+     * button 404s.
+     */
+    public static final ConfigKey SIGNUP_PATH = ConfigKey.optional(
+            "signup.path", Type.STRING, "the path the signup form is served at");
+
     public static final ConfigSchema SCHEMA = ConfigSchema.of(
             CORE_URL, CREDENTIAL, PLATFORM_KIND, GATE, FAIL_MODE,
-            POLL_SECONDS, HOST_URL, HOST_TOKEN, HOST_TIMEOUT_MS);
+            POLL_SECONDS, HOST_URL, HOST_TOKEN, HOST_TIMEOUT_MS,
+            SIGNUP_BIND, SIGNUP_PORT, SIGNUP_PATH);
 
     public static Config load(Path file) {
         return ConfigLoader.load(file, SCHEMA);
@@ -112,6 +137,18 @@ public final class ForgeConfig {
 
     public static int timeoutMs(Config config) {
         return config.findInt(HOST_TIMEOUT_MS).orElse(5_000);
+    }
+
+    public static String signupBind(Config config) {
+        return config.findString(SIGNUP_BIND).orElse("127.0.0.1");
+    }
+
+    public static int signupPort(Config config) {
+        return config.findInt(SIGNUP_PORT).orElse(7190);
+    }
+
+    public static String signupPath(Config config) {
+        return config.findString(SIGNUP_PATH).orElse("/soulbind/signup");
     }
 
     /** Checks the schema cannot express, returned together. */
@@ -140,6 +177,19 @@ public final class ForgeConfig {
         blankCheck(problems, "host.url", config.getString(HOST_URL));
         blankCheck(problems, "platform.kind", platformKind(config));
         blankCheck(problems, "gate.name", gate(config));
+        blankCheck(problems, "signup.bind", signupBind(config));
+
+        int port = signupPort(config);
+        if (port < 1 || port > 65_535) {
+            problems.add("signup.port must be between 1 and 65535, was " + port + ".");
+        }
+
+        String path = signupPath(config);
+        if (!path.startsWith("/")) {
+            // A path the proxy cannot match is a form whose submit button 404s,
+            // and the proxy will not tell anybody why.
+            problems.add("signup.path must begin with '/', was '" + path + "'.");
+        }
 
         return problems;
     }

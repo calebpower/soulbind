@@ -56,7 +56,20 @@ class TransportSeamGuardTest {
      */
     private static final List<String> TRANSPORT_PACKAGES = List.of(
             "dev/soulbind/core/transport",
-            "dev/soulbind/sdk/transport");
+            "dev/soulbind/sdk/transport",
+            // The forge connector's host cannot be entered: a git forge is one
+            // compiled binary with no extension surface, so this connector
+            // stands beside it and needs BOTH an inbound listener for the
+            // signup form and outbound calls to the host's admin interface.
+            // Neither can be expressed without naming a transport type.
+            //
+            // The exemption covers exactly this package and the connector's
+            // logic stays outside it: the form, the outcome-to-status mapping
+            // and the page rendering are all pure and tested as such, so what
+            // lives in here is request decoding and routing. That is the same
+            // bargain the two entries above make, and it is why this is a third
+            // entry rather than a wider pattern.
+            "dev/soulbind/connector/forge/transport");
 
     private static final Pattern TRANSPORT_TYPE = Pattern.compile(
             "\\bio\\.javalin\\b|\\bJavalin\\b|\\bWsContext\\b|\\bWsMessageContext\\b"
