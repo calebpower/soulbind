@@ -78,6 +78,38 @@ public final class ForgejoAdminSurface implements ForgeSurface {
     }
 
     @Override
+    public Role role(String username) {
+        HttpResponse<String> response = send(
+                request("/users/" + encode(username)).GET(),
+                "ask whether '" + username + "' administers the forge");
+        if (response == null || response.statusCode() != 200) {
+            // Not knowing is not "ordinary". The caller treats UNKNOWN as "do
+            // not deactivate", which is the safe direction: the event comes
+            // round again and the next pass decides it properly.
+            return Role.UNKNOWN;
+        }
+        return administratorFlagIsSet(response.body()) ? Role.ADMINISTRATOR : Role.ORDINARY;
+    }
+
+    /**
+     * Whether the host said this account is an administrator.
+     *
+     * <p>Read by matching rather than by parsing, which is a narrowing and is
+     * stated as one: this package holds no JSON reader, and adding one for a
+     * single boolean would put a parser on a seam whose whole job is three
+     * requests. Whitespace is removed first, so a pretty-printed body reads the
+     * same as a compact one, and BOTH are asserted.
+     *
+     * <p>What it cannot do is tell this field from a different field whose name
+     * ends the same way. No such field exists in the host's schema today; if one
+     * appears, this becomes a parser rather than a cleverer pattern.
+     */
+    static boolean administratorFlagIsSet(String body) {
+        String compact = body.replaceAll("\\s+", "");
+        return compact.contains("\"is_admin\":true");
+    }
+
+    @Override
     public Creation create(Account account) {
         String body = json(
                 "username", account.username(),

@@ -106,6 +106,9 @@ class AccountEffectorTest {
 
         assertFalse(forge.isActive("ada"));
         assertEquals(new AccountEffector.Drained(1, 1, true), drained);
+        assertEquals(1, forge.roleCalls(),
+                "the role was not asked about before deactivating, so the administrator guard "
+                        + "was not consulted at all");
     }
 
     @Test
@@ -359,6 +362,85 @@ class AccountEffectorTest {
                 () -> "a fault below the event loop was swallowed without a word: " + logged);
     }
 
+    // --- the operator cannot be locked out ------------------------------------
+
+    @Test
+    @DisplayName("an administrator is NOT deactivated, however the rule reads")
+    void administratorIsNeverDeactivated() {
+        // A gate that can deactivate the last administrator can lock everybody
+        // out of the forge, including the person who would go and fix it -- and
+        // for an ordinary reason, like a measure going stale.
+        ScriptedSurface forge = new ScriptedSurface().withAdministrator("ada");
+
+        effector(core(lost(80, "ada")), forge).drain();
+
+        assertTrue(forge.isActive("ada"), "the last administrator was deactivated by a rule");
+        assertEquals(0, forge.setActiveCalls());
+        assertTrue(logged.get(0).contains("administers"), logged::toString);
+        assertTrue(logged.get(0).contains("NOT"), logged::toString);
+    }
+
+    @Test
+    @DisplayName("and the event is still acknowledged, so nothing stalls behind it")
+    void skippingAnAdministratorStillAdvancesTheCursor() {
+        // The reason this is a skip rather than a refusal. Refusing would leave
+        // the event unacknowledged forever, so ONE administrator whose
+        // requirements lapsed would halt account management for everybody.
+        ScriptedSurface forge = new ScriptedSurface().withAdministrator("ada");
+        InMemoryTransport transport = core(lost(81, "ada"));
+
+        AccountEffector.Drained drained = effector(transport, forge).drain();
+
+        assertTrue(drained.acknowledged(),
+                "an administrator's event stalled the cursor, which blocks every event after it");
+        assertTrue(transport.sent().stream().anyMatch(r -> r.contains("\"through\":81")),
+                () -> transport.sent().toString());
+    }
+
+    @Test
+    @DisplayName("an administrator IS still activated, because only deactivation is the risk")
+    void administratorMayStillBeActivated() {
+        ScriptedSurface forge = new ScriptedSurface().withAdministrator("ada");
+        forge.setActive("ada", false);
+
+        effector(core(met(82, "ada")), forge).drain();
+
+        assertTrue(forge.isActive("ada"),
+                "activation was blocked too, which is not the hazard and leaves an "
+                        + "administrator locked out by the very guard meant to protect them");
+    }
+
+    @Test
+    @DisplayName("not knowing whether somebody is an administrator means leaving them alone")
+    void unknownRoleLeavesTheAccountAlone() {
+        // Collapsing UNKNOWN into ORDINARY is the reading that locks the
+        // operator out. It throws, so the event is not acknowledged and the
+        // next pass decides it properly once the forge answers.
+        ScriptedSurface forge = new ScriptedSurface().withAccount("ada").goDown();
+        InMemoryTransport transport = core(lost(83, "ada"));
+
+        AccountEffector.Drained drained = effector(transport, forge).drain();
+
+        assertEquals(0, forge.setActiveCalls());
+        assertFalse(drained.acknowledged(),
+                "the event was acknowledged without being decided, so it will never return");
+        assertTrue(thrown.stream().anyMatch(t -> t.getMessage().contains("administers")),
+                () -> logged.toString());
+    }
+
+    @Test
+    @DisplayName("the role is only asked about when deactivating")
+    void roleIsNotAskedWhenActivating() {
+        // One request per event, not two. Activation cannot lock anybody out,
+        // so asking would be a round trip bought for nothing.
+        ScriptedSurface forge = new ScriptedSurface().withAccount("ada");
+        forge.setActive("ada", false);
+
+        effector(core(met(84, "ada")), forge).drain();
+
+        assertEquals(0, forge.roleCalls());
+    }
+
     // --- the known gap, said out loud -----------------------------------------
 
     @Test
@@ -401,6 +483,11 @@ class AccountEffectorTest {
         // A scheduled task that throws is a scheduled task that stops running,
         // in some executors silently.
         ForgeSurface explodes = new ForgeSurface() {
+            @Override
+            public Role role(String username) {
+                return Role.ORDINARY;
+            }
+
             @Override
             public Presence presence(String username) {
                 throw new IllegalStateException("boom");

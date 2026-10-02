@@ -36,11 +36,13 @@ import java.util.Map;
 public final class ScriptedSurface implements ForgeSurface {
 
     private final Map<String, Boolean> accounts = new LinkedHashMap<>();
+    private final java.util.Set<String> administrators = new java.util.LinkedHashSet<>();
     private final List<String> created = new ArrayList<>();
     private boolean reachable = true;
     private int presenceCalls;
     private int createCalls;
     private int setActiveCalls;
+    private int roleCalls;
 
     /** Pretends the forge is unreachable from now on. */
     public ScriptedSurface goDown() {
@@ -59,6 +61,13 @@ public final class ScriptedSurface implements ForgeSurface {
         return this;
     }
 
+    /** Seeds an account that administers the forge. */
+    public ScriptedSurface withAdministrator(String username) {
+        accounts.put(username, true);
+        administrators.add(username);
+        return this;
+    }
+
     @Override
     public Presence presence(String username) {
         presenceCalls++;
@@ -66,6 +75,15 @@ public final class ScriptedSurface implements ForgeSurface {
             return Presence.UNKNOWN;
         }
         return accounts.containsKey(username) ? Presence.PRESENT : Presence.ABSENT;
+    }
+
+    @Override
+    public Role role(String username) {
+        roleCalls++;
+        if (!reachable) {
+            return Role.UNKNOWN;
+        }
+        return administrators.contains(username) ? Role.ADMINISTRATOR : Role.ORDINARY;
     }
 
     @Override
@@ -115,5 +133,9 @@ public final class ScriptedSurface implements ForgeSurface {
 
     public int setActiveCalls() {
         return setActiveCalls;
+    }
+
+    public int roleCalls() {
+        return roleCalls;
     }
 }

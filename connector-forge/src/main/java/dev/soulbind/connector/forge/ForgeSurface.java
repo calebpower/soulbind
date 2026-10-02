@@ -103,6 +103,23 @@ public interface ForgeSurface {
     Creation create(Account account);
 
     /**
+     * Whether an account administers the forge.
+     *
+     * <p>Three answers again, and for a sharper reason than {@link Presence}'s.
+     * This one decides whether an account may be deactivated, so "I could not
+     * find out" must not collapse into "ordinary" — that is the reading that
+     * locks the operator out of the forge they would use to repair it.
+     */
+    enum Role {
+        ADMINISTRATOR,
+        ORDINARY,
+        /** The forge could not be reached, or answered something unreadable. */
+        UNKNOWN
+    }
+
+    Role role(String username);
+
+    /**
      * Activates or deactivates an account.
      *
      * <p><b>Returns whether the account is in that state afterwards</b>, not

@@ -79,6 +79,24 @@ package, and are tested as plain assertions. What is inside it is request
 decoding and routing. If connector logic starts appearing in there, the
 exemption has stopped being a seam and become a hole.
 
+## What no rule can do
+
+**Deactivate an administrator.** A gate that can deactivate the last
+administrator can lock everybody out of the forge, including the person who
+would go and fix it — and it would do so for an entirely ordinary reason, such
+as a measure going stale. No rule an operator can write reaches that: the
+effector asks the host whether an account administers it, and skips the
+deactivation if so, saying as much in the log.
+
+It is a skip rather than a refusal on purpose. Refusing would leave the event
+unacknowledged forever and stall the cursor behind it, so one administrator
+whose requirements lapsed would halt account management for everybody.
+
+Activation is not blocked, because it is not the hazard — and blocking it would
+leave an administrator locked out by the very guard meant to protect them. Not
+knowing counts as "may not", which is the safe direction: the event comes round
+again and the next pass decides it once the forge answers.
+
 ## What this module may not become
 
 An authentication provider. It establishes *that* a person holds a verified

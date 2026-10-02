@@ -213,6 +213,11 @@ class RegistrationTest {
         // right to create while keeping the right to read.
         ForgeSurface halfBroken = new ForgeSurface() {
             @Override
+            public Role role(String username) {
+                return Role.ORDINARY;
+            }
+
+            @Override
             public Presence presence(String username) {
                 return Presence.ABSENT;
             }

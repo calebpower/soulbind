@@ -182,6 +182,9 @@ public final class AccountEffector {
     }
 
     private void setActive(String username, boolean active) {
+        if (!active && !mayDeactivate(username)) {
+            return;
+        }
         if (!forge.setActive(username, active)) {
             // Thrown, not logged and swallowed. drain() turns this into "stop
             // here and do not acknowledge", so the event is seen again on the
@@ -191,6 +194,42 @@ public final class AccountEffector {
                     "the forge would not " + (active ? "activate" : "deactivate") + " '"
                             + username + "'");
         }
+    }
+
+    /**
+     * Whether this account may be deactivated at all.
+     *
+     * <p><b>An administrator never may.</b> A gate that can deactivate the last
+     * administrator can lock everybody out of the forge, including the person
+     * who would go and fix it — and it would do so for an ordinary reason, like
+     * a measure going stale. No rule an operator can write should be able to
+     * reach that, so this is held here rather than left as something to
+     * remember not to configure.
+     *
+     * <p>Skipped and acknowledged rather than thrown: refusing would leave the
+     * event unacknowledged forever and stall the cursor behind it, so one
+     * administrator whose requirements lapsed would halt account management for
+     * everybody.
+     *
+     * <p>Not knowing counts as "may not", and that one DOES throw — the forge
+     * is unreachable, the event comes round again, and the next pass decides it
+     * properly.
+     */
+    private boolean mayDeactivate(String username) {
+        return switch (forge.role(username)) {
+            case ORDINARY -> true;
+            case ADMINISTRATOR -> {
+                log.accept("'" + username + "' administers the forge, so it will NOT be"
+                        + " deactivated even though its requirements for '" + gate
+                        + "' have lapsed. Review it by hand: a gate that could lock out the"
+                        + " last administrator could lock out the person who would fix it.",
+                        null);
+                yield false;
+            }
+            case UNKNOWN -> throw new IllegalStateException(
+                    "could not establish whether '" + username + "' administers the forge, so"
+                            + " it was left alone");
+        };
     }
 
     /**

@@ -227,6 +227,11 @@ class SignupServerTest {
         // page somebody is standing in front of.
         ForgeSurface explodes = new ForgeSurface() {
             @Override
+            public Role role(String username) {
+                return Role.ORDINARY;
+            }
+
+            @Override
             public Presence presence(String username) {
                 throw new IllegalStateException("a secret-bearing message");
             }
@@ -281,6 +286,11 @@ class SignupServerTest {
         // The person gets a calm page; somebody still has to be able to find
         // out what happened, and a swallowed exception leaves nothing to find.
         ForgeSurface explodes = new ForgeSurface() {
+            @Override
+            public Role role(String username) {
+                return Role.ORDINARY;
+            }
+
             @Override
             public Presence presence(String username) {
                 throw new IllegalStateException("the detail that matters");

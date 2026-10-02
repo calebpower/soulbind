@@ -255,6 +255,47 @@ class ForgejoAdminSurfaceTest {
     }
 
     @Test
+    @DisplayName("the administrator flag is read from the host's answer, both ways round")
+    void roleReadsTheFlag() {
+        stub = Javalin.create(c -> c.showJavalinBanner = false);
+        stub.get("/api/v1/users/boss",
+                ctx -> ctx.status(200).result("{\"login\":\"boss\",\"is_admin\":true}"));
+        stub.get("/api/v1/users/ada",
+                ctx -> ctx.status(200).result("{\"login\":\"ada\",\"is_admin\":false}"));
+        stub.start("127.0.0.1", 0);
+        ForgejoAdminSurface forge = surface("http://127.0.0.1:" + stub.port());
+
+        assertEquals(ForgeSurface.Role.ADMINISTRATOR, forge.role("boss"));
+        assertEquals(ForgeSurface.Role.ORDINARY, forge.role("ada"));
+    }
+
+    @Test
+    @DisplayName("an unreadable or absent answer is UNKNOWN, never ORDINARY")
+    void roleIsUnknownRatherThanOrdinary() {
+        // ORDINARY is the reading that deactivates the last administrator.
+        assertEquals(ForgeSurface.Role.UNKNOWN, surfaceAnswering(500).role("ada"));
+        stop();
+        stub = null;
+        assertEquals(ForgeSurface.Role.UNKNOWN, surfaceAnswering(404).role("ada"));
+        stop();
+        stub = null;
+        assertEquals(ForgeSurface.Role.UNKNOWN, surface("http://127.0.0.1:1").role("ada"));
+    }
+
+    @Test
+    @DisplayName("a pretty-printed body reads the same as a compact one")
+    void theFlagSurvivesPrettyPrinting() {
+        // The narrowing this class states: matched rather than parsed, so
+        // whitespace is removed first. Both forms are asserted because only one
+        // of them is what any given host version happens to emit.
+        assertTrue(ForgejoAdminSurface.administratorFlagIsSet("{\"is_admin\":true}"));
+        assertTrue(ForgejoAdminSurface.administratorFlagIsSet(
+                "{\n  \"login\": \"boss\",\n  \"is_admin\": true\n}"));
+        assertFalse(ForgejoAdminSurface.administratorFlagIsSet("{\"is_admin\": false}"));
+        assertFalse(ForgejoAdminSurface.administratorFlagIsSet("{\"login\":\"ada\"}"));
+    }
+
+    @Test
     @DisplayName("the JSON is exactly right, not merely containing the right pieces")
     void jsonIsExact() {
         // Asserted by equality rather than by `contains`: a misplaced comma

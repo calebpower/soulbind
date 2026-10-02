@@ -126,15 +126,32 @@ class ScriptedSurfaceTest {
         assertEquals(0, forge.presenceCalls());
         assertEquals(0, forge.createCalls());
         assertEquals(0, forge.setActiveCalls());
+        assertEquals(0, forge.roleCalls());
 
         forge.presence("ada");
         forge.presence("grace");
         forge.create(account("grace"));
         forge.setActive("ada", false);
+        forge.role("ada");
 
         assertEquals(2, forge.presenceCalls());
         assertEquals(1, forge.createCalls());
         assertEquals(1, forge.setActiveCalls());
+        assertEquals(1, forge.roleCalls());
+    }
+
+    @Test
+    @DisplayName("role tells an administrator from an ordinary account, and from not knowing")
+    void roleHasThreeAnswers() {
+        ScriptedSurface forge = new ScriptedSurface().withAccount("ada").withAdministrator("boss");
+
+        assertEquals(ForgeSurface.Role.ORDINARY, forge.role("ada"));
+        assertEquals(ForgeSurface.Role.ADMINISTRATOR, forge.role("boss"));
+        assertEquals(ForgeSurface.Role.ORDINARY, forge.role("nobody"));
+
+        forge.goDown();
+        assertEquals(ForgeSurface.Role.UNKNOWN, forge.role("boss"),
+                "an unreachable forge answered about a role it could not have looked up");
     }
 
     @Test

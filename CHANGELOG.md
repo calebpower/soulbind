@@ -34,6 +34,13 @@ for the other.
   proxy at the signup path. `docs/install.md` has the whole procedure, including
   the three things that live outside it.
 
+  **No rule can deactivate an administrator.** The effector asks the host
+  whether an account administers it and skips the deactivation if so, because a
+  gate that could deactivate the last administrator could lock out the person
+  who would repair it — for a reason as ordinary as a measure going stale. It is
+  a skip rather than a refusal so one administrator cannot stall the event
+  cursor for everybody, and activation is deliberately not blocked.
+
   Two limitations worth knowing before you deploy it. A rule that gets
   **stricter** does not reconcile existing accounts — this surface cannot
   enumerate them, so accounts move when a subject's requirements next change,
