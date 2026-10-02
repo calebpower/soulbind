@@ -51,7 +51,8 @@ public final class SignupPage {
         }
 
         out.append("<form method=\"post\" action=\"").append(escape(action)).append("\">")
-                .append(field("Link code", SignupForm.CODE, "text", prefill))
+                .append(field("Link code (only the first time)", SignupForm.CODE, "text",
+                        prefill))
                 .append(field("Username", SignupForm.USERNAME, "text", prefill))
                 .append(field("Email", SignupForm.EMAIL, "email", prefill))
                 // Never prefilled, even on a redisplay. Putting a password back

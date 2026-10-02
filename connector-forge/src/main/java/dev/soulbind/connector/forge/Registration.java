@@ -84,6 +84,48 @@ public final class Registration {
         record Unavailable(String message) implements Outcome {}
     }
 
+    /** Whether a forge name is already attached to a subject. */
+    public sealed interface Link {
+
+        /** Attached, and to this subject. */
+        record Bound(String subjectId) implements Link {}
+
+        /** Not attached to anything, so a code is needed. */
+        record Unbound() implements Link {}
+
+        /** Could not be established, which is this system's fault. */
+        record Unknown(String message) implements Link {}
+    }
+
+    /**
+     * Asks core whether this forge name is already linked.
+     *
+     * <p>This is what lets somebody return. Core spends a code at redemption,
+     * so a person refused for want of a second identity holds a link and no
+     * code; without this they would be asked for one they cannot get, and the
+     * retry {@link #register} supports would exist only in a test.
+     */
+    public Link linkState(String username) {
+        SoulbindClient.Outcome outcome =
+                client.call("identity.describe", new DescribeBody(platformKind, username));
+
+        if (outcome instanceof SoulbindClient.Outcome.Ok ok) {
+            return ok.payload().flag("linked")
+                    ? new Link.Bound(ok.payload().text("subjectId"))
+                    : new Link.Unbound();
+        }
+        if (outcome instanceof SoulbindClient.Outcome.Refused refused) {
+            // Core answered, and the answer is almost always that this
+            // connector lacks link-state-reader. Reported as unknown rather
+            // than unbound: treating a permissions problem as "not linked"
+            // would ask everybody for a code forever and look like it worked.
+            return new Link.Unknown(
+                    "This page cannot check your account just now (" + refused.code().wireName()
+                            + "). This is a problem on our side, not yours.");
+        }
+        return new Link.Unknown(DecisionCache.FAIL_CLOSED_MESSAGE);
+    }
+
     /**
      * Redeems a code, binding this forge name to the subject that holds it.
      *
@@ -176,4 +218,6 @@ public final class Registration {
     }
 
     private record RedeemBody(String code, String platformKind, String platformId) {}
+
+    private record DescribeBody(String platformKind, String platformId) {}
 }

@@ -70,9 +70,10 @@ public record SignupForm(String code, ForgeSurface.Account account) {
         String password = raw(fields, PASSWORD);
         String confirm = raw(fields, CONFIRM);
 
-        if (code.isBlank()) {
-            problems.add("Enter the code you were given.");
-        }
+        // No check on the code: it is needed the FIRST time and not
+        // afterwards, and only core knows which this is. Demanding one here
+        // would turn "you are already linked" into "enter a code you cannot
+        // get", which is the dead end this field being optional avoids.
         if (username.isBlank()) {
             problems.add("Choose a username.");
         } else if (hasSpaceOrControl(username)) {

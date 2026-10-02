@@ -60,19 +60,24 @@ class SignupFormTest {
     @Test
     @DisplayName("an empty submission reports every missing field at once")
     void everythingMissingAtOnce() {
-        // Four problems, not the first one. Somebody told one thing at a time
-        // submits four times, and the fourth is where they give up.
+        // Three problems, not the first one. Somebody told one thing at a time
+        // submits three times, and the third is where they give up.
+        //
+        // The CODE is deliberately absent from this list: it is needed the
+        // first time and not afterwards, and only core knows which this is.
         List<String> problems = problems(Map.of());
 
-        assertEquals(4, problems.size(), problems::toString);
-        assertTrue(problems.stream().anyMatch(p -> p.contains("code")), problems::toString);
+        assertEquals(3, problems.size(), problems::toString);
+        assertTrue(problems.stream().noneMatch(p -> p.contains("code")),
+                () -> "a missing code was treated as a form error, which dead-ends anybody "
+                        + "returning after a refusal: " + problems);
         assertTrue(problems.stream().anyMatch(p -> p.contains("username")), problems::toString);
         assertTrue(problems.stream().anyMatch(p -> p.contains("email")), problems::toString);
         assertTrue(problems.stream().anyMatch(p -> p.contains("password")), problems::toString);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {SignupForm.CODE, SignupForm.USERNAME, SignupForm.EMAIL})
+    @ValueSource(strings = {SignupForm.USERNAME, SignupForm.EMAIL})
     @DisplayName("a field present but blank is as absent as one that never arrived")
     void blankIsAbsent(String field) {
         Map<String, String> fields = complete();
@@ -139,7 +144,16 @@ class SignupFormTest {
         fields.put(SignupForm.PASSWORD, null);
         fields.put(SignupForm.CONFIRM, null);
 
-        assertEquals(4, problems(fields).size(), () -> problems(fields).toString());
+        assertEquals(3, problems(fields).size(), () -> problems(fields).toString());
+    }
+
+    @Test
+    @DisplayName("a blank code is accepted, because returning needs no code")
+    void blankCodeIsAccepted() {
+        Map<String, String> fields = complete();
+        fields.put(SignupForm.CODE, "");
+
+        assertInstanceOf(SignupForm.Parsed.Ready.class, SignupForm.parse(fields));
     }
 
     @Test

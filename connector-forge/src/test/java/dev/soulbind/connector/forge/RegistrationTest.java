@@ -49,6 +49,7 @@ class RegistrationTest {
 
     private static final Clock CLOCK =
             Clock.fixed(Instant.ofEpochSecond(1_700_000_000L), ZoneOffset.UTC);
+    private static final char Q = '"';
     private static final String KIND = "forge";
     private static final String GATE = "forge.register";
 
@@ -347,6 +348,73 @@ class RegistrationTest {
 
         assertInstanceOf(Registration.Outcome.Unavailable.class, outcome);
         assertEquals(0, transport.sendCount());
+    }
+
+    // --- coming back without a code -------------------------------------------
+
+    @Test
+    @DisplayName("a name already linked reports which subject it belongs to")
+    void linkStateBound() {
+        String described = "{" + Q + "schema" + Q + ":1," + Q + "ok" + Q + ":true," + Q
+                + "payload" + Q + ":{" + Q + "linked" + Q + ":true," + Q + "subjectId" + Q + ":"
+                + Q + "s-1" + Q + "}}";
+
+        Registration.Link link = registration(InMemoryTransport.always(described),
+                new ScriptedSurface()).linkState("ada");
+
+        assertEquals(new Registration.Link.Bound("s-1"), link);
+    }
+
+    @Test
+    @DisplayName("a name linked to nothing reports exactly that")
+    void linkStateUnbound() {
+        String described = "{" + Q + "schema" + Q + ":1," + Q + "ok" + Q + ":true," + Q
+                + "payload" + Q + ":{" + Q + "linked" + Q + ":false}}";
+
+        assertEquals(new Registration.Link.Unbound(),
+                registration(InMemoryTransport.always(described), new ScriptedSurface())
+                        .linkState("ada"));
+    }
+
+    @Test
+    @DisplayName("being refused the question is UNKNOWN, never unbound")
+    void linkStateRefusalIsUnknown() {
+        // Almost always a missing link-state-reader. Treating a permissions
+        // problem as "not linked" would ask everybody for a code forever and
+        // look from the outside like it was working.
+        Registration.Link link = registration(
+                InMemoryTransport.always(refusal("missing-capability")), new ScriptedSurface())
+                .linkState("ada");
+
+        Registration.Link.Unknown unknown =
+                assertInstanceOf(Registration.Link.Unknown.class, link);
+        assertTrue(unknown.message().toLowerCase().contains("our side"), unknown::message);
+        assertTrue(unknown.message().contains("missing-capability"), unknown::message);
+    }
+
+    @Test
+    @DisplayName("an unreachable core is UNKNOWN too, with the shared wording")
+    void linkStateOutageIsUnknown() {
+        Registration.Link link = registration(
+                InMemoryTransport.always(redeemed()).goDown(), new ScriptedSurface())
+                .linkState("ada");
+
+        assertEquals(new Registration.Link.Unknown(DecisionCache.FAIL_CLOSED_MESSAGE), link);
+    }
+
+    @Test
+    @DisplayName("the question names this connector's own platform kind")
+    void linkStateAsksAboutOurKind() {
+        InMemoryTransport transport = InMemoryTransport.always(
+                "{" + Q + "schema" + Q + ":1," + Q + "ok" + Q + ":true," + Q + "payload" + Q
+                        + ":{" + Q + "linked" + Q + ":false}}");
+
+        registration(transport, new ScriptedSurface()).linkState("ada");
+
+        assertTrue(transport.sent().get(0).contains(Q + "platformKind" + Q + ":" + Q + "forge"),
+                () -> transport.sent().toString());
+        assertTrue(transport.sent().get(0).contains("identity.describe"),
+                () -> transport.sent().toString());
     }
 
     // --- retry -----------------------------------------------------------------

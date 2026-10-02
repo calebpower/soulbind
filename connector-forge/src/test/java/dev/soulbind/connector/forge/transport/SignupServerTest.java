@@ -59,6 +59,7 @@ class SignupServerTest {
             Clock.fixed(Instant.ofEpochSecond(1_700_000_000L), ZoneOffset.UTC);
     private static final String PATH = "/soulbind/signup";
     private static final HttpClient HTTP = HttpClient.newHttpClient();
+    private static final char Q = '"';
 
     private final java.util.List<String> logged = new java.util.ArrayList<>();
 
@@ -322,6 +323,68 @@ class SignupServerTest {
                                 .GET().build(),
                         HttpResponse.BodyHandlers.ofString()),
                 "the port still answered after close(), so nothing was released");
+    }
+
+    @Test
+    @DisplayName("returning with no code works when the name is already linked")
+    void returningWithoutACodeSucceeds() throws Exception {
+        // The whole reason linkState exists: core spends a code at redemption,
+        // so somebody refused for want of a second identity holds a link and no
+        // code. Asking them for one would be a dead end.
+        String linked = "{" + Q + "schema" + Q + ":1," + Q + "ok" + Q + ":true," + Q + "payload"
+                + Q + ":{" + Q + "linked" + Q + ":true," + Q + "subjectId" + Q + ":" + Q + "s-1"
+                + Q + "}}";
+        InMemoryTransport transport = new InMemoryTransport(request ->
+                request.contains("identity.describe") ? linked : allow());
+        ScriptedSurface forge = new ScriptedSurface();
+
+        try (SignupServer server = serve(transport, forge)) {
+            Map<String, String> fields = complete();
+            fields.remove("code");
+
+            HttpResponse<String> response = post(server, fields);
+
+            assertEquals(200, response.statusCode(), response::body);
+            assertTrue(forge.exists("ada"));
+            assertTrue(transport.sent().stream().noneMatch(r -> r.contains("code.redeem")),
+                    "a redemption was attempted with no code to redeem");
+        }
+    }
+
+    @Test
+    @DisplayName("no code and no link tells somebody to go and get one")
+    void noCodeAndNoLinkAsksForOne() throws Exception {
+        String unlinked = "{" + Q + "schema" + Q + ":1," + Q + "ok" + Q + ":true," + Q
+                + "payload" + Q + ":{" + Q + "linked" + Q + ":false}}";
+        ScriptedSurface forge = new ScriptedSurface();
+
+        try (SignupServer server = serve(InMemoryTransport.always(unlinked), forge)) {
+            Map<String, String> fields = complete();
+            fields.remove("code");
+
+            HttpResponse<String> response = post(server, fields);
+
+            assertEquals(403, response.statusCode());
+            assertTrue(response.body().contains("link"), response::body);
+            assertFalse(forge.exists("ada"));
+        }
+    }
+
+    @Test
+    @DisplayName("no code and an unreachable core is 503, not a demand for a code")
+    void noCodeAndAnOutageIsRetryable() throws Exception {
+        // Answering "you need a code" during an outage sends somebody to spend
+        // one they did not need, and core will refuse it when it comes back.
+        ScriptedSurface forge = new ScriptedSurface();
+
+        try (SignupServer server = serve(core(allow()).goDown(), forge)) {
+            Map<String, String> fields = complete();
+            fields.remove("code");
+
+            HttpResponse<String> response = post(server, fields);
+
+            assertEquals(503, response.statusCode(), response::body);
+        }
     }
 
     @Test

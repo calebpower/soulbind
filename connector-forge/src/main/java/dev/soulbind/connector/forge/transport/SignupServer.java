@@ -120,8 +120,30 @@ public final class SignupServer implements AutoCloseable {
      * bound to nothing, and the denial would name every identity as missing.
      */
     private SignupResponse attempt(SignupForm form) {
-        Registration.Outcome linked = registration.link(form.code(), form.account().username());
+        String username = form.account().username();
+
+        // No code means "I have been here before". Only core knows whether that
+        // is true, so it is asked rather than guessed at -- and a person who
+        // linked and was then refused holds a link and no code, which is
+        // exactly this path.
+        if (form.code().isBlank()) {
+            return switch (registration.linkState(username)) {
+                case Registration.Link.Bound bound ->
+                        SignupResponse.of(registration.register(form.account()));
+                case Registration.Link.Unbound unbound -> new SignupResponse(
+                        403,
+                        "That name is not linked to anything yet, so this first time you need"
+                                + " the code from `/link` in game. Enter it above.");
+                case Registration.Link.Unknown unknown ->
+                        new SignupResponse(503, unknown.message());
+            };
+        }
+
+        Registration.Outcome linked = registration.link(form.code(), username);
         if (!(linked instanceof Registration.Outcome.Linked)) {
+            // Returned as it is rather than pressed on from: registering after
+            // a failed link would ask the gate about a name bound to nothing,
+            // and the denial would name every identity as missing.
             return SignupResponse.of(linked);
         }
         return SignupResponse.of(registration.register(form.account()));
