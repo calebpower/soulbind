@@ -50,7 +50,7 @@ final class PlatformVocabulary {
      * varies with the data it is guarding is not a guard.
      */
     static final List<String> FORBIDDEN = List.of(
-            "discord", "flarum", "minecraft", "velocity", "plan",
+            "discord", "flarum", "forgejo", "minecraft", "velocity", "plan",
             "geyser", "floodgate", "luckperms", "mojang", "bukkit",
             "paper", "spigot", "bedrock", "java edition");
 

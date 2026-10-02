@@ -61,6 +61,7 @@ include(
     "connector-discord",
     "connector-velocity",
     "connector-plan",
+    "connector-forge",
     "guards",
     // The simulated-user tier. Named `sim` rather than `harness:sim` so the
     // Gradle path stays flat and the guards that enumerate modules do not have

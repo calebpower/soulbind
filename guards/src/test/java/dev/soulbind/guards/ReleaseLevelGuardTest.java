@@ -62,6 +62,7 @@ class ReleaseLevelGuardTest {
         put("connector-plan", 21);     // loads inside a server JVM
         put("core", 25);               // standalone service
         put("connector-discord", 25);  // standalone daemon
+        put("connector-forge", 25);     // standalone daemon; its host loads nothing
     }};
 
     /**
