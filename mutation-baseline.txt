@@ -133,10 +133,17 @@
 # which is the noise this file's header describes; the survivor set was stable
 # across both, so 44 is measured rather than sampled once.
 
+# `connector-forge` holds ONE survivor, and it is an equivalent mutant rather
+# than a gap: widening `colon < 0` to `colon <= 0` in AccountEffector.usernameOf
+# changes nothing observable, because a reference beginning with a colon has an
+# empty kind, ForgeConfig refuses a blank configured kind, and both paths
+# therefore return null two lines apart. The chat connector carries the same
+# note on the same expression. Recorded 2026-10-02.
+
 # module              total killed surv nocov  t/o
 config                 138    132    3     3    0
 connector-discord      303    231    1    71    0
-connector-forge         72     72    0     0    0
+connector-forge        107    106    1     0    0
 connector-plan         160    147    1    12    0
 connector-sdk          104     94    2     8    0
 connector-velocity     235    183    3    49    0
