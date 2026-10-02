@@ -1,0 +1,59 @@
+# The soulbind forge connector. Install to /etc/soulbind/forge.toml,
+# mode 0640, owned root:soulbind.
+#
+# Copyright (c) 2026 Caleb L. Power. Apache-2.0; see LICENSE.
+#
+# Secrets belong in forge.env, not here. Every key below can also be supplied
+# through the environment as SOULBIND_<PATH_WITH_DOTS_AS_UNDERSCORES>, and the
+# environment wins.
+
+[core]
+# Where this connector reaches core. Loopback when they share a host.
+url = "http://127.0.0.1:7180"
+# credential -- set SOULBIND_CORE_CREDENTIAL in forge.env instead.
+
+[host]
+# The forge's own base URL, WITHOUT /api/v1 -- this connector appends it.
+url = "http://127.0.0.1:3000"
+# token -- set SOULBIND_HOST_TOKEN in forge.env instead.
+#
+# How long to wait on the forge before treating it as unreachable. Below 250ms a
+# healthy forge under load reads as an outage and the fail mode denies people
+# for no reason; above a minute somebody waits out a dead host instead of being
+# told.
+timeoutms = 5000
+
+[platform]
+# The platform kind this connector speaks for. An operator may rename it; a
+# request never can.
+kind = "forge"
+
+[gate]
+# The gate asked before an account is created. It deliberately does NOT default
+# to `register`, which belongs to the forum connector -- a rule written against
+# that one governs forum signup too.
+name = "forge.register"
+
+# closed (the default) or open, when core is unreachable. Only the exact word
+# `open` opens it. On THIS connector fail-open means an unreachable core creates
+# accounts, so leaving it closed is the posture to want.
+failmode = "closed"
+
+[events]
+# How often to poll core. Core pushes nothing, so this interval IS the delay
+# between somebody's requirements lapsing and their account being deactivated.
+pollseconds = 15
+
+[signup]
+# Where the form listens. Loopback, with the proxy in front of the forge routing
+# `path` here ahead of its rule for the forge itself: that proxy already
+# terminates TLS for the name people type.
+#
+# NOTE: the shipped systemd unit has an empty CapabilityBoundingSet, so a port
+# below 1024 will not bind.
+bind = "127.0.0.1"
+port = 7190
+
+# Must match the proxy's rule. A mismatch is a form whose submit button 404s,
+# and the proxy will not say why.
+path = "/soulbind/signup"

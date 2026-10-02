@@ -1,14 +1,13 @@
 plugins {
     id("soulbind.licence-inventory")
+    id("soulbind.service-dist")
     id("soulbind.java-25")
+    application
 }
 
-// No `application` or `soulbind.service-dist` yet: both exist to produce a
-// start script around a main class, and this module has no entry point until
-// the daemon arrives. Declaring a distribution around a mainClass that does not
-// exist would build a start script that fails at run time, and
-// DistributionArchiveGuardTest would be asserting the shape of something
-// nothing can execute.
+application {
+    mainClass.set("dev.soulbind.connector.forge.Main")
+}
 
 dependencies {
     implementation(project(":connector-sdk"))
@@ -18,6 +17,11 @@ dependencies {
     // anything else did. Already in the catalogue for core, with its licence
     // and Jetty's recorded there.
     implementation(libs.javalin)
+
+    // Declared rather than taken from javalin's transitive graph: Main logs
+    // through it, and a connector whose logging breaks when its HTTP library is
+    // swapped has a dependency nobody declared.
+    implementation(libs.slf4j.api)
 
     runtimeOnly(libs.logback.classic)
 }

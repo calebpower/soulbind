@@ -140,10 +140,26 @@
 # therefore return null two lines apart. The chat connector carries the same
 # note on the same expression. Recorded 2026-10-02.
 
+# `connector-forge` takes a NO-COVERAGE count of 15 with this commit, and the
+# shape of it matters more than the number. THIRTEEN are `Main`: argument
+# handling, the refusals that call System.exit, and the thread factory and
+# shutdown hook around the poller. That is the same exemption connector-discord's
+# own Main has and for the same reason -- a test that drove it would have to
+# survive System.exit -- and it is bounded by Main containing no decision: every
+# branch worth asserting is in a class with no host type, and the daemon itself
+# is covered instead by a smoke test that starts the built distribution and
+# checks it refuses a missing config, refuses a bad one, and still serves the
+# form with core and the forge both dead.
+#
+# The remaining TWO are ForgejoAdminSurface's InterruptedException arm. Reaching
+# it means interrupting a thread mid-request, which is a timing-dependent test
+# for a two-line branch that restores the interrupt flag and logs. Recorded
+# 2026-10-02.
+
 # module              total killed surv nocov  t/o
 config                 138    132    3     3    0
 connector-discord      303    231    1    71    0
-connector-forge        171    170    1     0    0
+connector-forge        228    212    1    15    0
 connector-plan         160    147    1    12    0
 connector-sdk          104     94    2     8    0
 connector-velocity     235    183    3    49    0

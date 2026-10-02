@@ -1,0 +1,86 @@
+# The soulbind forge connector, as a systemd service.
+#
+# Copyright (c) 2026 Caleb L. Power. Apache-2.0; see LICENSE.
+#
+# Install:
+#   /opt/soulbind/connector-forge/   the unpacked distribution
+#   /etc/soulbind/forge.toml         configuration, mode 0640, root:soulbind
+#   /etc/soulbind/forge.env          secrets, mode 0600, root:soulbind
+#
+# See docs/install.md.
+
+[Unit]
+Description=soulbind forge connector
+Documentation=https://github.com/calebpower/soulbind
+After=network-online.target soulbind-core.service
+Wants=network-online.target
+# NOT Requires=: this connector is designed to survive core being down. Making
+# it Requires= would take it down with core and turn a brief core restart into a
+# signup page that is not there at all -- which, unlike a page that says "try
+# again shortly", tells the person nothing.
+
+[Service]
+Type=simple
+User=soulbind
+Group=soulbind
+
+# The config path is POSITIONAL, not a --config flag: the entry point takes
+# argv[0] and defaults to soulbind-forge.toml in the working directory, which
+# under systemd is not where the file is.
+ExecStart=/opt/soulbind/connector-forge/bin/connector-forge /etc/soulbind/forge.toml
+
+# The forge's admin token and the core credential both live here rather than in
+# the config file. That token can create and deactivate any account on the
+# forge, which is more than this connector needs and far more than a file
+# somebody pastes into an issue should carry.
+EnvironmentFile=-/etc/soulbind/forge.env
+
+# A JVM killed by SIGTERM exits 143 (128+15), which systemd's default success
+# set does not include -- so a NORMAL stop books as "Failed with result
+# 'exit-code'" and every restart leaves a red line that means nothing. The cost
+# of a signal that cries wolf is that the day it means something, nobody looks.
+# Carried over from the Discord connector, DECISIONS 10.55.
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5s
+
+# --- Hardening ------------------------------------------------------------
+# It holds an admin token and a core credential, it listens on a socket, and it
+# has no state of its own: nothing here needs to be writable.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+# ^ NOT yes: the JVM JIT writes executable pages.
+
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+# Empty, which also means this service CANNOT bind a privileged port. That is
+# deliberate rather than an oversight: the signup listener is meant to sit on
+# loopback behind the proxy that already terminates TLS. A signup.port below
+# 1024 will fail to bind, and granting CAP_NET_BIND_SERVICE to work around it
+# would be solving the wrong problem.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
