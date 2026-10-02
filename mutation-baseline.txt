@@ -136,6 +136,7 @@
 # module              total killed surv nocov  t/o
 config                 138    132    3     3    0
 connector-discord      303    231    1    71    0
+connector-forge         20     20    0     0    0
 connector-plan         160    147    1    12    0
 connector-sdk          104     94    2     8    0
 connector-velocity     235    183    3    49    0
