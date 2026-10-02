@@ -52,7 +52,7 @@ pollseconds = 15
 # NOTE: the shipped systemd unit has an empty CapabilityBoundingSet, so a port
 # below 1024 will not bind.
 bind = "127.0.0.1"
-port = 7190
+port = 7191
 
 # Must match the proxy's rule. A mismatch is a form whose submit button 404s,
 # and the proxy will not say why.

@@ -51,6 +51,16 @@ discord      | code-display,code-entry,effector,link-state-reader,enforcement-po
 # the document says to; the harness does not need to, and pretending otherwise
 # in this table would be describing an intent nothing implements.
 plan-measures | measure-source                                                      | measure.report
+# The forge connector's grant, for the same reason as the two above: it is what
+# docs/install.md tells an operator to type, and this file exists so the smoke
+# attempts every grant a real deployment is told to create.
+#
+# `effector` appears in the capabilities and in no operation, which is correct
+# rather than an omission: it grants no request operation at all. It describes a
+# connector that CONSUMES events, and event.subscribe and event.ack are
+# unprivileged -- the cursor is keyed off the credential, so a connector can only
+# ever move its own.
+forge        | code-entry,effector,enforcement-point,link-state-reader             | code.redeem identity.describe decide
 
 # --- the simulated-user tier ------------------------------------------------
 sim-actor    | code-display,code-entry,enforcement-point,link-state-reader          | code.issue identity.describe decide

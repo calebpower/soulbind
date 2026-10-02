@@ -10,6 +10,39 @@ for the other.
 
 ## Unreleased
 
+### Added
+
+- **A connector for a git forge, and with it the first connector whose host
+  cannot be entered.** A forge is one compiled binary with no extension
+  surface, so this one runs beside it as its own service and reaches it over the
+  host's administrative API. It adds no protocol operation: it is built entirely
+  from `code.redeem`, `decide`, `identity.describe`, `event.subscribe` and
+  `event.ack`.
+
+  What it does, for somebody creating an account: they take a link code from
+  `/link` in game, paste it into a form this connector serves, and get an
+  account only if core's gate allows it. Coming back needs no second code — if
+  they were refused for want of an identity they had not linked yet, the same
+  form finishes the job once they have.
+
+  What it does afterwards: an account whose subject's requirements lapse is
+  deactivated, and reactivated if they return. Core pushes nothing, so that
+  follows one poll interval behind rather than instantly.
+
+  Register it with `code-entry,effector,enforcement-point,link-state-reader`, set
+  a rule on its gate, close the forge's own registration, and point the reverse
+  proxy at the signup path. `docs/install.md` has the whole procedure, including
+  the three things that live outside it.
+
+  Two limitations worth knowing before you deploy it. A rule that gets
+  **stricter** does not reconcile existing accounts — this surface cannot
+  enumerate them, so accounts move when a subject's requirements next change,
+  and the connector says so in its log rather than leaving it silent. And
+  `signup.port` cannot be below 1024: the shipped unit has an empty
+  `CapabilityBoundingSet`, which is deliberate, because the form is meant to sit
+  on loopback behind the proxy.
+
+
 ### Fixed
 
 - **The coupling between a guard that cannot run and the stage that replaces it

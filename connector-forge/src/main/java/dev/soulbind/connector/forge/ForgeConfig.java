@@ -144,7 +144,7 @@ public final class ForgeConfig {
     }
 
     public static int signupPort(Config config) {
-        return config.findInt(SIGNUP_PORT).orElse(7190);
+        return config.findInt(SIGNUP_PORT).orElse(7191);
     }
 
     public static String signupPath(Config config) {

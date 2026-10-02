@@ -301,6 +301,77 @@ Then set the core URL and credential in the admin panel.
 
 ---
 
+### Forge
+
+A git forge cannot load an extension, so this connector runs beside it as its
+own service and reaches it over the host's administrative API.
+
+```sh
+sudo tar -xzf connector-forge-*.tar.gz -C /opt/soulbind
+sudo mv /opt/soulbind/connector-forge-* /opt/soulbind/connector-forge
+sudo cp /opt/soulbind/connector-forge/packaging/forge.toml.sample /etc/soulbind/forge.toml
+sudo cp /opt/soulbind/connector-forge/packaging/forge.env.sample /etc/soulbind/forge.env
+sudo chown root:soulbind /etc/soulbind/forge.toml /etc/soulbind/forge.env
+sudo chmod 640 /etc/soulbind/forge.toml
+sudo chmod 600 /etc/soulbind/forge.env
+sudo editor /etc/soulbind/forge.env     # the forge's admin token, and the core credential
+sudo editor /etc/soulbind/forge.toml    # the forge URL, and where the signup form listens
+sudo cp /opt/soulbind/connector-forge/packaging/soulbind-forge.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now soulbind-forge
+```
+
+Register it with:
+
+```sh
+sudo -u soulbind /opt/soulbind/core/bin/core register \
+    --name forge \
+    --capabilities code-entry,effector,enforcement-point,link-state-reader \
+    --config /etc/soulbind/soulbind.toml
+```
+
+`code-entry` accepts the code somebody pastes into the signup form.
+`enforcement-point` asks the gate before an account is created.
+`link-state-reader` is what lets somebody come back **without** a code: core
+spends one at redemption, so a person who linked and was then refused for want
+of a second identity holds a link and no code. Leaving it out gives a connector
+that works for everybody who passes first time and dead-ends everybody who does
+not.
+
+`effector` is what deactivates an account when its subject's requirements lapse.
+Without it the gate is a turnstile somebody passes once — unlinking a game
+account would leave the forge account standing.
+
+#### Three things to set outside this document
+
+**The forge's own registration must be closed.** This connector is the only door;
+leaving the forge's built-in signup open leaves a second one wide. On Forgejo
+that is `DISABLE_REGISTRATION = true`.
+
+**The reverse proxy must route the signup path here**, ahead of its rule for the
+forge itself — the form is served on loopback at `signup.path`, and the proxy in
+front already terminates TLS for the name people type.
+
+**The gate needs a rule.** Until one exists the gate admits everybody, because
+an unconfigured gate in core is an open one:
+
+```sh
+harness/../tools/rpc.sh rule.set '{"gate":"forge.register",
+  "requiredKinds":["game","forum"],"requireLinked":true,
+  "graceSeconds":0,"defaultEffect":"deny",
+  "description":"who may create a forge account"}'
+```
+
+Send **all five** of `gate`, `requiredKinds`, `requireLinked`, `graceSeconds` and
+`defaultEffect`. An omitted boolean binds to `false` and an omitted number to
+`0`, and the call succeeds — storing a rule that requires nothing.
+
+Check what you stored, rather than assuming the write did what you meant:
+
+```sh
+tools/rpc.sh rule.get '{"gate":"forge.register"}'
+```
+
 ## Verify
 
 The only verification that means anything is a real link.

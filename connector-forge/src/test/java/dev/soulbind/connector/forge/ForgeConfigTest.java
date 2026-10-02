@@ -248,7 +248,7 @@ class ForgeConfigTest {
         assertEquals("127.0.0.1", ForgeConfig.signupBind(config),
                 "the signup form defaulted to a public interface, which is a second listener to"
                         + " get right when the proxy already terminates TLS");
-        assertEquals(7190, ForgeConfig.signupPort(config));
+        assertEquals(7191, ForgeConfig.signupPort(config));
         assertEquals("/soulbind/signup", ForgeConfig.signupPath(config));
     }
 
